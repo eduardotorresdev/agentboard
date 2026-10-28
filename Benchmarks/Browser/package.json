@@ -1,0 +1,6 @@
+{
+  "name": "agentboard-browser-bench",
+  "private": true,
+  "type": "module",
+  "dependencies": { "playwright-core": "1.64.1" }
+}

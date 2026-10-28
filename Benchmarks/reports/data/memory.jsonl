@@ -1,0 +1,5 @@
+{"bench":"memory","corpus":"claude","emptyMBPerTerminal":0.12500228881835937,"engine":"legacy","fullMBPerTerminal":0.17656478881835938,"scrollback":5000,"terminals":10}
+{"bench":"memory","corpus":"ascii","emptyMBPerTerminal":0.20469207763671876,"engine":"legacy","fullMBPerTerminal":0.73750915527343752,"scrollback":5000,"terminals":10}
+{"bench":"memory","corpus":"claude","emptyMBPerTerminal":0.0031250000000000002,"engine":"core","fullMBPerTerminal":0.0046874999999999998,"scrollback":5000,"terminals":10}
+{"bench":"memory","corpus":"ascii","emptyMBPerTerminal":0.067187499999999997,"engine":"core","fullMBPerTerminal":0.42499999999999999,"scrollback":5000,"terminals":10}
+{"bench":"memory","corpus":"claude","emptyMBPerTerminal":0.0031250000000000002,"engine":"core","fullMBPerTerminal":0.0031250000000000002,"scrollback":5000,"terminals":10}

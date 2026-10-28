@@ -1,0 +1,53 @@
+#!/bin/bash
+# Builds and launches the app, then shows CPU/memory/disk/network in the terminal.
+# --watch (-w): rebuilds and relaunches whenever a file in Sources/ or Package.swift changes.
+# Ctrl+C stops everything.
+cd "$(dirname "$0")"
+
+WATCH=false
+[[ "$1" == "--watch" || "$1" == "-w" ]] && WATCH=true
+
+mkdir -p .build/tools
+[ .build/tools/monitor -nt scripts/monitor.swift ] || swiftc -O scripts/monitor.swift -o .build/tools/monitor || exit 1
+
+APP= MONITOR=
+stop() {
+    [ -n "$MONITOR" ] && kill "$MONITOR" 2>/dev/null
+    [ -n "$APP" ] && kill "$APP" 2>/dev/null
+    wait 2>/dev/null
+    APP= MONITOR=
+}
+trap 'stop; exit 0' INT TERM
+trap stop EXIT
+
+start() {
+    swift build || { echo "Build failed, waiting for changes..."; return 1; }
+    .build/debug/AgentBoard &
+    APP=$!
+    sleep 1
+    .build/tools/monitor "$APP" &
+    MONITOR=$!
+}
+
+snapshot() {
+    find Sources Package.swift -type f -exec stat -f '%m %N' {} + 2>/dev/null | /sbin/md5
+}
+
+if ! $WATCH; then
+    start || exit 1
+    wait "$MONITOR"
+    exit 0
+fi
+
+start
+LAST=$(snapshot)
+while true; do
+    sleep 1
+    CURRENT=$(snapshot)
+    if [ "$CURRENT" != "$LAST" ]; then
+        LAST=$CURRENT
+        echo "Change detected, rebuilding..."
+        stop
+        start
+    fi
+done

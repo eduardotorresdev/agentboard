@@ -1,0 +1,10 @@
+{"bench":"parse","corpus":"ascii","engine":"legacy","MBps":600.99098957520971,"nsPerByte":1.5868362969639904}
+{"bench":"parse","corpus":"sgr","engine":"legacy","MBps":160.40467597838455,"nsPerByte":5.9454271553452918}
+{"bench":"parse","corpus":"unicode","engine":"legacy","MBps":149.22733508722126,"nsPerByte":6.3907481551475858}
+{"bench":"parse","corpus":"claude","engine":"legacy","MBps":224.49205218225291,"nsPerByte":4.2481428947516306}
+{"bench":"parse","corpus":"claude-real","engine":"legacy","MBps":133.86020036145317,"nsPerByte":7.1244052663234569}
+{"bench":"parse","corpus":"ascii","engine":"core","MBps":417.55765787854511,"nsPerByte":2.2839344421355219}
+{"bench":"parse","corpus":"sgr","engine":"core","MBps":231.86761417650305,"nsPerByte":4.1130121590861357}
+{"bench":"parse","corpus":"unicode","engine":"core","MBps":214.73956844759454,"nsPerByte":4.4410740102562256}
+{"bench":"parse","corpus":"claude","engine":"core","MBps":386.26779339308735,"nsPerByte":2.4689459818249424}
+{"bench":"parse","corpus":"claude-real","engine":"core","MBps":298.54125620941386,"nsPerByte":3.1944473220052654}

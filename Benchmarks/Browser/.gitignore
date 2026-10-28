@@ -1,0 +1,8 @@
+node_modules/
+frames/
+.decode
+cost.json
+embedder
+host
+red
+contexts.txt

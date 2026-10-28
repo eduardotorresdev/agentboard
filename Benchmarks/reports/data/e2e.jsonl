@@ -1,0 +1,15 @@
+{"agents":10,"bench":"e2e","cpuPercent":11.176458878729644,"engine":"legacy","footprintMB":154.90691375732422,"framesPerSecond":35.19615452681446,"mode":"mixed","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":14.633959894482782,"engine":"legacy","footprintMB":154.18816375732422,"framesPerSecond":37.596685538856697,"mode":"stream","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":3.3114623306671214,"engine":"legacy","footprintMB":142.26628875732422,"framesPerSecond":38.041066372570818,"mode":"stream","visible":false}
+{"agents":10,"bench":"e2e","cpuPercent":2.4109655974122064,"engine":"core","footprintMB":139.67251586914062,"framesPerSecond":35.29839826162641,"mode":"mixed","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":2.9233225097185933,"engine":"core","footprintMB":139.59439086914062,"framesPerSecond":38.14239988842467,"mode":"stream","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":0.72648337178028322,"engine":"core","footprintMB":70.625640869140625,"framesPerSecond":0,"mode":"stream","visible":false}
+{"agents":10,"bench":"e2e","cpuPercent":2.3487066161517167,"engine":"core","footprintMB":103.78189086914062,"framesPerSecond":31.292693677590869,"mode":"mixed","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":3.1343574437733634,"engine":"core","footprintMB":103.43814086914062,"framesPerSecond":35.049691854783759,"mode":"stream","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":0.69539462469547253,"engine":"core","footprintMB":48.235015869140625,"framesPerSecond":0,"mode":"stream","visible":false}
+{"agents":10,"bench":"e2e","cpuPercent":2.5136028058333606,"engine":"core","footprintMB":104.07874298095703,"framesPerSecond":34.199970146264398,"mode":"mixed","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":3.2453993004237742,"engine":"core","footprintMB":103.89124298095703,"framesPerSecond":41.592109370298353,"mode":"stream","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":0.66090814101922524,"engine":"core","footprintMB":48.250617980957031,"framesPerSecond":0,"mode":"stream","visible":false}
+{"agents":10,"bench":"e2e","cpuPercent":2.6658527892108994,"engine":"core","footprintMB":176.10999298095703,"framesPerSecond":41.995396779566661,"mode":"mixed","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":3.5468897938908395,"engine":"core","footprintMB":176.57874298095703,"framesPerSecond":53.596143645819097,"mode":"stream","visible":true}
+{"agents":10,"bench":"e2e","cpuPercent":0.706015371945652,"engine":"core","footprintMB":48.594367980957031,"framesPerSecond":0,"mode":"stream","visible":false}

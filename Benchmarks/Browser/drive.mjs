@@ -1,0 +1,20 @@
+import { webkit, devices } from 'playwright-core';
+import fs from 'node:fs';
+const W = process.env.HOME + '/Library/Caches/ms-playwright/webkit-2370';
+const ctxFile = process.cwd() + '/contexts.txt'; fs.rmSync(ctxFile, { force: true });
+const t = performance.now();
+const browser = await webkit.launch({ executablePath: process.cwd() + '/embedder', headless: true,
+  env: { ...process.env, DYLD_FRAMEWORK_PATH: W, DYLD_LIBRARY_PATH: W, AB_CONTEXT_FILE: ctxFile, AB_EXPORT: process.env.AB_EXPORT ?? 'webview' } });
+console.log('launched in', Math.round(performance.now() - t), 'ms, version', browser.version());
+const ctx = await browser.newContext({ ...devices['Desktop Safari'] });
+const page = await ctx.newPage();
+await page.goto('https://en.wikipedia.org/wiki/WebKit');
+const snap = await page.ariaSnapshot({ mode: 'ai' });
+console.log('snapshot ok:', snap.split('\n').length, 'lines;', 'title:', await page.title());
+await page.getByRole('link', { name: 'WebKit', exact: false }).first().hover();
+const shot = await page.screenshot(); console.log('screenshot', shot.length, 'bytes');
+console.log('contexts:', fs.readFileSync(ctxFile, 'utf8').trim());
+console.log('READY');
+await page.goto(process.env.AB_URL ?? 'https://en.wikipedia.org/wiki/WebKit');
+await new Promise(r => process.stdin.once('data', r));
+await browser.close();

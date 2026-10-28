@@ -1,0 +1,181 @@
+[
+ {
+  "scenario": "browser launched, no context",
+  "cpuPct": 0,
+  "rssMB": 167,
+  "procs": 3
+ },
+ {
+  "scenario": "Desktop Safari · static page · no screencast",
+  "cpuPct": 0.2,
+  "rssMB": 344,
+  "procs": 6,
+  "fps": 0,
+  "kbPerFrame": 0,
+  "MBps": 0
+ },
+ {
+  "scenario": "Desktop Safari · static page · screencast 1280x720 q70",
+  "cpuPct": 10.6,
+  "rssMB": 334,
+  "procs": 6,
+  "fps": 0,
+  "kbPerFrame": 0,
+  "MBps": 0
+ },
+ {
+  "scenario": "Desktop Safari · user scrolling 60Hz · no screencast",
+  "cpuPct": 37.1,
+  "rssMB": 366,
+  "procs": 6,
+  "fps": 0,
+  "kbPerFrame": 0,
+  "MBps": 0
+ },
+ {
+  "scenario": "Desktop Safari · user scrolling 60Hz · screencast 1280x720 q70",
+  "cpuPct": 20.2,
+  "rssMB": 356,
+  "procs": 6,
+  "fps": 7.5,
+  "kbPerFrame": 137.8,
+  "MBps": 1.01,
+  "inputToFrameP50": 48,
+  "inputToFrameP95": 512
+ },
+ {
+  "scenario": "Desktop Safari · user scrolling 60Hz · screencast 1280x720 q50",
+  "cpuPct": 34.7,
+  "rssMB": 364,
+  "procs": 6,
+  "fps": 13.1,
+  "kbPerFrame": 137.4,
+  "MBps": 1.76,
+  "inputToFrameP50": 40,
+  "inputToFrameP95": 56
+ },
+ {
+  "scenario": "Desktop Safari · user scrolling 60Hz · screencast 640x360 q70",
+  "cpuPct": 36.9,
+  "rssMB": 349,
+  "procs": 6,
+  "fps": 16,
+  "kbPerFrame": 47,
+  "MBps": 0.73,
+  "inputToFrameP50": 42,
+  "inputToFrameP95": 62
+ },
+ {
+  "scenario": "Desktop Safari · user scrolling 60Hz · screencast 1280x720 q70 fps30",
+  "cpuPct": 37.7,
+  "rssMB": 370,
+  "procs": 6,
+  "fps": 16.8,
+  "kbPerFrame": 137.9,
+  "MBps": 2.26,
+  "inputToFrameP50": 54,
+  "inputToFrameP95": 93
+ },
+ {
+  "scenario": "Desktop Safari · real site, scrolling · screencast 1280x720 q70",
+  "cpuPct": 41.7,
+  "rssMB": 402,
+  "procs": 6,
+  "fps": 16.4,
+  "kbPerFrame": 229.3,
+  "MBps": 3.67,
+  "inputToFrameP50": 41,
+  "inputToFrameP95": 65
+ },
+ {
+  "scenario": "Desktop Safari · css spinner · no screencast",
+  "cpuPct": 1.5,
+  "rssMB": 259,
+  "procs": 6,
+  "fps": 0,
+  "kbPerFrame": 0,
+  "MBps": 0
+ },
+ {
+  "scenario": "Desktop Safari · css spinner · screencast 1280x720 q70",
+  "cpuPct": 11.6,
+  "rssMB": 270,
+  "procs": 6,
+  "fps": 18.8,
+  "kbPerFrame": 21.3,
+  "MBps": 0.39
+ },
+ {
+  "scenario": "Desktop Safari · canvas 60fps · no screencast",
+  "cpuPct": 21.7,
+  "rssMB": 317,
+  "procs": 6,
+  "fps": 0,
+  "kbPerFrame": 0,
+  "MBps": 0
+ },
+ {
+  "scenario": "Desktop Safari · canvas 60fps · screencast 1280x720 q70",
+  "cpuPct": 40.7,
+  "rssMB": 320,
+  "procs": 6,
+  "fps": 17.4,
+  "kbPerFrame": 64.7,
+  "MBps": 1.1
+ },
+ {
+  "scenario": "Desktop Safari · canvas 60fps · screencast 1280x720 q70 fps15",
+  "cpuPct": 36.7,
+  "rssMB": 331,
+  "procs": 6,
+  "fps": 17.8,
+  "kbPerFrame": 64.5,
+  "MBps": 1.12
+ },
+ {
+  "scenario": "iPhone 15 · user scrolling 60Hz · screencast 393x659 q70",
+  "cpuPct": 38.7,
+  "rssMB": 319,
+  "procs": 6,
+  "fps": 18.3,
+  "kbPerFrame": 28.1,
+  "MBps": 0.5,
+  "inputToFrameP50": 14,
+  "inputToFrameP95": 45
+ },
+ {
+  "scenario": "iPhone 15 · user scrolling 60Hz · screencast 786x1318 q70",
+  "cpuPct": 35.9,
+  "rssMB": 314,
+  "procs": 6,
+  "fps": 19.6,
+  "kbPerFrame": 33.2,
+  "MBps": 0.64,
+  "inputToFrameP50": 20,
+  "inputToFrameP95": 46
+ },
+ {
+  "scenario": "1 idle contexts with heavy page",
+  "cpuPct": 0.3,
+  "rssMB": 297,
+  "procs": 6
+ },
+ {
+  "scenario": "3 idle contexts with heavy page",
+  "cpuPct": 0.7,
+  "rssMB": 425,
+  "procs": 8
+ },
+ {
+  "scenario": "6 idle contexts with heavy page",
+  "cpuPct": 0.7,
+  "rssMB": 678,
+  "procs": 11
+ },
+ {
+  "scenario": "after closing all contexts",
+  "cpuPct": 0,
+  "rssMB": 136,
+  "procs": 4
+ }
+]
