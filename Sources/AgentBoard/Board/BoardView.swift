@@ -89,6 +89,8 @@ final class BoardController {
     var leadingInset: CGFloat = 0
     /// Only the canvas and the Needs you button show: no sidebar, bars or zoom controls.
     var isZen = false
+    /// The Needs you screen covers the board: its elements and tools step away.
+    var isCovered = false
 }
 
 struct DeviceRequest: Identifiable {
@@ -185,6 +187,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// The address field shown over a browser card's title bar while its address is edited.
     private var addressField: NSTextField?
     private var editingAddress: UUID?
+    private var nameField: NSTextField?
+    /// The agent card whose name is being edited.
+    private var renamingCard: UUID?
     fileprivate var postItCards: [UUID: PostItCardLayer] = [:]
     /// How far each post-it's text is scrolled.
     fileprivate var postItScroll: [UUID: CGFloat] = [:]
@@ -596,6 +601,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             card.updateHandles(visible: showsHandles, hovered: lit, linkTarget: linkDrag?.target == record.id)
         }
         placeAddressField()
+        placeNameField()
     }
 
     /// Every card of this worktree, agents, post-its then browsers: bottom to top.
@@ -1032,6 +1038,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return
         }
         endAddressEditing()
+        endCardRename()
         if let postIt = postIt(at: location) {
             postItMouseDown(postIt, at: location, event: event)
             syncLayers()
@@ -1065,6 +1072,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             focusedID = nil
         } else if location.x > frame.maxX - handle && location.y > frame.maxY - handle {
             interaction = Interaction(id: record.id, kind: .resize, start: point, frame: record.frame)
+        } else if event.clickCount == 2, location.y < frame.minY + CardMetrics.titleHeight {
+            // Double-clicking the title renames the card.
+            beginCardRename(record.id)
         } else if location.y < CardMetrics.terminal(of: record).minY {
             // The title bar, and a runner's strip, move the card.
             interaction = Interaction(id: record.id, kind: .move, start: point, frame: record.frame)
@@ -1733,7 +1743,58 @@ extension BoardView {
         syncLayers()
     }
 
+    // MARK: Card name
+
+    fileprivate func beginCardRename(_ id: UUID) {
+        guard let record = record(id) else { return }
+        let field = nameField ?? {
+            let field = NSTextField()
+            field.font = .systemFont(ofSize: 13, weight: .semibold)
+            field.focusRingType = .none
+            field.bezelStyle = .roundedBezel
+            field.delegate = self
+            field.placeholderString = L("Agent name")
+            nameField = field
+            return field
+        }()
+        renamingCard = id
+        field.stringValue = record.name
+        if field.superview == nil { addSubview(field) }
+        placeNameField()
+        window?.makeFirstResponder(field)
+        field.currentEditor()?.selectAll(nil)
+    }
+
+    fileprivate func placeNameField() {
+        guard let field = nameField, let id = renamingCard, let record = record(id) else { return }
+        let frame = record.frame
+        let title = CGRect(x: frame.minX + CardMetrics.inset, y: frame.minY,
+                           width: frame.width - CardMetrics.inset * 2 - CardMetrics.closeSize - 8, height: CardMetrics.titleHeight)
+        let rect = screen(title)
+        field.frame = CGRect(x: rect.minX, y: rect.midY - 11, width: max(120, rect.width), height: 22)
+    }
+
+    /// Ends editing; the name is kept when `commit` and not empty.
+    fileprivate func endCardRename(commit: Bool = true) {
+        guard let field = nameField, let id = renamingCard else { return }
+        renamingCard = nil
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        field.removeFromSuperview()
+        if commit, !name.isEmpty { store.rename(id, to: name) }
+        window?.makeFirstResponder(self)
+        syncLayers()
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        if (notification.object as? NSTextField) === nameField, renamingCard != nil { endCardRename() }
+    }
+
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if control === nameField, renamingCard != nil {
+            if selector == #selector(NSResponder.insertNewline(_:)) { endCardRename(); return true }
+            if selector == #selector(NSResponder.cancelOperation(_:)) { endCardRename(commit: false); return true }
+            return false
+        }
         guard let id = editingAddress else { return false }
         if selector == #selector(NSResponder.insertNewline(_:)) {
             let address = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -1,4 +1,5 @@
 import AgentRuntime
+import Orchestration
 import SwiftUI
 
 /// A worktree's canvas: the Metal board with its agents, and the toolbars floating on top.
@@ -13,6 +14,7 @@ struct WorktreeCanvas: View {
         ZStack(alignment: .bottom) {
             Theme.canvas
             Board(store: agents, browsers: browsers, fileTrees: fileTrees, worktree: worktree.path, controller: board)
+                .opacity(board.isCovered ? 0.25 : 1)
             if let notice {
                 EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
                     .padding(.leading, board.leadingInset)
@@ -30,13 +32,22 @@ struct WorktreeCanvas: View {
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
-            CanvasToolbar(board: board)
-                .padding(.bottom, 16)
-                .padding(.leading, board.leadingInset)
-            NavigationToolbar(board: board)
+            Group {
+                CanvasToolbar(board: board)
+                    .padding(.bottom, 16)
+                    .padding(.leading, board.leadingInset)
+                VStack(alignment: .trailing, spacing: 8) {
+                    AppUsage()
+                    NavigationToolbar(board: board)
+                }
                 .padding([.bottom, .trailing], 16)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            // They sink below the edge while Needs you covers the board.
+            .offset(y: board.isCovered ? 90 : 0)
+            .opacity(board.isCovered ? 0 : 1)
         }
+        .animation(.snappy(duration: 0.45), value: board.isCovered)
         .animation(.smooth(duration: 0.3), value: isEmpty)
         .animation(.snappy(duration: 0.32), value: board.isZen)
         .animation(.smooth(duration: 0.3), value: notice)
@@ -237,5 +248,42 @@ private struct ToolbarButtonStyle: ButtonStyle {
             .contentShape(.capsule)
             .onHover { isHovered = $0 }
             .animation(.snappy(duration: 0.2), value: isHovered)
+    }
+}
+
+/// What the board itself uses, the app and its core together (not the agents they run),
+/// sampled every two seconds.
+private struct AppUsage: View {
+    @State private var stats: RunnerStats?
+
+    var body: some View {
+        Group {
+            if let stats {
+                HStack(spacing: 10) {
+                    Label(stats.cpu.map { String(format: "%.0f%%", $0) } ?? "–", systemImage: "cpu")
+                    Label(ByteCountFormatter.string(fromByteCount: Int64(stats.memory), countStyle: .memory), systemImage: "memorychip")
+                }
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .foregroundStyle(Theme.line.opacity(0.5))
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .modifier(GlassCapsule())
+                .help(L("CPU and memory the board uses, without its agents."))
+                .transition(.opacity)
+            }
+        }
+        .task {
+            var previous: ProcessInspector.Sample?
+            let core = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("AgentBoardCore")
+            while !Task.isCancelled {
+                let sample = await Task.detached {
+                    let pids = [getpid()] + (core.map(ProcessInspector.processes(running:)) ?? [])
+                    return ProcessInspector.sample(processes: pids, previous: previous)
+                }.value
+                previous = sample
+                withAnimation(.smooth(duration: 0.3)) { stats = sample.stats }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 }

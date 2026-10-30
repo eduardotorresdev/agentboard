@@ -45,7 +45,27 @@ struct NeedsYouButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .disabled(count == 0 && !isOpen)
+        // Floats to the right of the button, leaving the toolbar's layout alone.
+        .overlay(alignment: .trailing) {
+            if isOpen {
+                Button {
+                    withAnimation(.snappy(duration: 0.35)) { isOpen = false }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.line.opacity(0.6))
+                        .frame(width: 30, height: 30)
+                        .background(Theme.line.opacity(0.06), in: .circle)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .help(L("Back to the board (Esc)"))
+                .fixedSize()
+                .alignmentGuide(.trailing) { $0[.leading] - 8 }
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.bouncy(duration: 0.4), value: isOpen)
         .keyboardShortcut("j", modifiers: .command)
         .help(L("Agents waiting on you, across every organization"))
         .animation(.bouncy(duration: 0.4), value: count == 0)
@@ -77,6 +97,8 @@ struct NeedsYouDeck: View {
     /// The hint shows until the first card is dragged away.
     @AppStorage("needsYou.hasSwiped") private var hasSwiped = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// How far opening has come: 1 once the board is blurred away, 2 once the cards are in.
+    @State private var stage = 0
 
     /// Past this, or thrown past twice this, a released card leaves.
     private static let threshold: CGFloat = 150
@@ -92,10 +114,20 @@ struct NeedsYouDeck: View {
             let inset: CGFloat = proxy.size.height < 640 ? 40 : 96
             let size = CGSize(width: proxy.size.width - inset, height: min(820, proxy.size.height - inset))
             ZStack {
-                // The board's faint grid shows through around the deck.
-                CanvasView(mode: .offCanvas) { Color.clear }
-                    .ignoresSafeArea()
-                    .contentShape(.rect)
+                // The board blurs away behind a faint grid of its own.
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial)
+                    Theme.canvas.opacity(0.6)
+                    ZStack {
+                        CanvasGrid(strength: CanvasMode.offCanvas.gridStrength)
+                        if !reduceMotion { GridPulses() }
+                    }
+                    // Softened behind the cards, so they stand out.
+                    .blur(radius: 10)
+                }
+                .opacity(stage >= 1 ? 1 : 0)
+                .ignoresSafeArea()
+                .contentShape(.rect)
                 ZStack {
                     // One list, so a card keeps its identity (and its terminal) as it flies off.
                     let flying = agents.attention.filter { leaving.contains($0.id) }
@@ -108,12 +140,24 @@ struct NeedsYouDeck: View {
                     }
                 }
                 .frame(width: size.width, height: size.height)
+                if queue.isEmpty && leaving.isEmpty {
+                    emptyCard(size: size)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                }
             }
+            // The cards rise in once the board has blurred away.
+            .opacity(stage >= 2 ? 1 : 0)
+            .scaleEffect(stage >= 2 ? 1 : 0.92)
+            .offset(y: stage >= 2 ? 0 : 60)
+            .animation(.snappy(duration: 0.4), value: queue.isEmpty && leaving.isEmpty)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onExitCommand(perform: close)
-        .onChange(of: queue.isEmpty) { _, empty in if empty { close() } }
-        .onAppear { previousResponder = NSApp.keyWindow?.firstResponder }
+        .onAppear {
+            previousResponder = NSApp.keyWindow?.firstResponder
+            withAnimation(.smooth(duration: 0.45)) { stage = 1 }
+            withAnimation(.bouncy(duration: 0.6, extraBounce: 0.05).delay(0.25)) { stage = 2 }
+        }
         .onChange(of: queue.first?.id) { old, _ in
             guard let old else { return }
             focusFollows = leftByUser.remove(old) != nil || leaving.contains(old)
@@ -125,6 +169,16 @@ struct NeedsYouDeck: View {
                 DispatchQueue.main.async { window.makeFirstResponder(previousResponder) }
             }
         }
+    }
+
+    /// Where the next card will land: an outline of one, with nothing waiting in it.
+    private func emptyCard(size: CGSize) -> some View {
+        EmptyCanvas(symbol: "checkmark.circle", title: L("Nobody is waiting on you"),
+                    message: L("An agent shows up here when it finishes its turn or asks you something.")) { EmptyView() }
+            .frame(width: min(size.width, size.height * 0.72), height: size.height)
+            .background(RoundedRectangle(cornerRadius: 18).fill(Theme.surface.opacity(0.5)))
+            .overlay(RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(Theme.line.opacity(0.18), style: StrokeStyle(lineWidth: 1.5, dash: [8, 6])))
     }
 
     @ViewBuilder

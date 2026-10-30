@@ -64,6 +64,33 @@ public enum ProcessInspector {
         return result
     }
 
+    /// Measures exactly `pids` together, without their descendants. `previous` turns CPU time
+    /// into a percentage.
+    public static func sample(processes pids: [pid_t], previous: Sample?) -> Sample {
+        let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        var cpuTime: UInt64 = 0, memory: UInt64 = 0
+        for pid in pids {
+            if let usage = usage(of: pid) {
+                cpuTime += usage.cpu
+                memory += usage.memory
+            }
+        }
+        var cpu: Double?
+        if let previous, now > previous.time, cpuTime >= previous.cpuTime {
+            cpu = Double(cpuTime - previous.cpuTime) / Double(now - previous.time) * 100
+        }
+        return Sample(stats: RunnerStats(cpu: cpu, memory: memory, processes: pids.count, ports: []), cpuTime: cpuTime, time: now)
+    }
+
+    /// The user's processes whose executable is `url`.
+    public static func processes(running url: URL) -> [pid_t] {
+        let path = url.resolvingSymlinksInPath().path
+        var buffer = [CChar](repeating: 0, count: 4096)
+        return childrenByParent().values.joined().filter { pid in
+            proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 && String(cString: buffer) == path
+        }
+    }
+
     /// `root` and every process below it.
     static func descendants(of root: pid_t, children: [pid_t: [pid_t]]) -> [pid_t] {
         var result = [root]

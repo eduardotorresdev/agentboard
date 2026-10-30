@@ -51,7 +51,7 @@ struct ContentView: View {
         .overlay {
             if isNeedsYouOpen {
                 NeedsYouDeck(agents: agents, projects: store, isOpen: $isNeedsYouOpen, onReveal: reveal)
-                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .transition(.opacity)
             }
         }
         .toolbar {
@@ -62,7 +62,10 @@ struct ContentView: View {
         }
         .onChange(of: store.organizationID, initial: true) { old, id in
             agents.organizationID = id
-            if old != id { selection = nil }
+            if old != id {
+                selection = nil
+                withAnimation(.snappy(duration: 0.3)) { isNeedsYouOpen = false }
+            }
         }
         .onAppear(perform: restoreSelection)
         .onChange(of: selection) { _, selection in
@@ -70,6 +73,7 @@ struct ContentView: View {
             dismissAttentionOnScreen()
         }
         .onChange(of: agents.attention) { dismissAttentionOnScreen() }
+        .onChange(of: isNeedsYouOpen) { _, open in boardController.isCovered = open }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             dismissAttentionOnScreen()
         }

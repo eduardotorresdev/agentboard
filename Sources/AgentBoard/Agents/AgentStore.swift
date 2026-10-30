@@ -307,6 +307,14 @@ final class AgentStore {
         agents.append(agents.remove(at: index))
     }
 
+    /// Renames the card, numbered if another in its worktree has the name.
+    func rename(_ id: UUID, to name: String) {
+        guard let index = agents.firstIndex(where: { $0.id == id }), agents[index].name != name else { return }
+        let others = agents.filter { $0.worktree == agents[index].worktree && $0.id != id }
+        agents[index].name = AgentRecord.uniqueName(name, among: others)
+        send(.updateCard(agents[index]))
+    }
+
     func setFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
         guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
         agents[index].frame = frame

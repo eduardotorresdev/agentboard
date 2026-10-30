@@ -43,6 +43,7 @@ final class LiveTerminalView: NSView, NSTextInputClient {
     private var terminal: TerminalLayer?
     private var record: AgentRecord?
     private var marked = ""
+    private var scrollRemainder: CGFloat = 0
     var onEscape: (() -> Void)?
     var takesFocus = true
     private static let fontSize: CGFloat = 12
@@ -179,6 +180,23 @@ final class LiveTerminalView: NSView, NSTextInputClient {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+    }
+
+    /// Scrolls the program when it takes mouse input, as the board does over a focused card.
+    override func scrollWheel(with event: NSEvent) {
+        guard let session, let terminal, terminal.rows > 0, terminal.cols > 0, metal.frame.height > 0,
+              session.withTerminal({ $0.wantsMouse }) else { return super.scrollWheel(with: event) }
+        let point = convert(event.locationInWindow, from: nil)
+        let line = metal.frame.height / CGFloat(terminal.rows)
+        let column = min(max(Int((point.x - metal.frame.minX) / (metal.frame.width / CGFloat(terminal.cols))), 0), terminal.cols - 1)
+        let row = min(max(Int((point.y - metal.frame.minY) / line), 0), terminal.rows - 1)
+        scrollRemainder += event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * line
+        while abs(scrollRemainder) >= line {
+            let mouse = MouseEvent(kind: scrollRemainder > 0 ? .scrollUp : .scrollDown, button: 0, column: column, row: row,
+                                   modifiers: BoardView.modifiers(event))
+            if let bytes = session.withTerminal({ $0.encodeMouse(mouse) }) { session.send(bytes) }
+            scrollRemainder -= scrollRemainder > 0 ? line : -line
+        }
     }
 
     // MARK: Keyboard

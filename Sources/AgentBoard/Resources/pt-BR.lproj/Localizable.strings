@@ -195,6 +195,8 @@
 "Finished its turn. Your move." = "Terminou. Sua vez.";
 "Waiting for you." = "Esperando por você.";
 "All clear" = "Tudo em dia";
+"Nobody is waiting on you" = "Ninguém está esperando por você";
+"An agent shows up here when it finishes its turn or asks you something." = "Um agente aparece aqui quando termina a vez dele ou te pergunta algo.";
 "Asks you a question" = "Faz uma pergunta";
 "Asks you %lld questions" = "Faz %lld perguntas";
 "Answer in terminal" = "Responder no terminal";
@@ -249,3 +251,7 @@
 "Agent: %@" = "Agente: %@";
 "Go to Agent" = "Ir para o agente";
 "Opens its worktree with its card in focus, and takes it off this list." = "Abre a worktree dele com o card em foco e tira ele desta lista.";
+
+"Agent name" = "Nome do agente";
+"CPU and memory the board uses, without its agents." = "CPU e memória que o quadro usa, sem os agentes.";
+"Back to the board (Esc)" = "Voltar ao quadro (Esc)";
