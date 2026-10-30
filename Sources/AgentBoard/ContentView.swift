@@ -45,6 +45,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        .modifier(WindowChrome(isZen: boardController.isZen))
         // On every screen, the first run of a new organization included.
         .overlay {
             if isNeedsYouOpen {
@@ -54,7 +55,9 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
-            ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
+            if !boardController.isZen {
+                ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
+            }
         }
         .onChange(of: store.organizationID, initial: true) { old, id in
             agents.organizationID = id
@@ -91,26 +94,30 @@ struct ContentView: View {
             Sidebar(store: store, agents: agents, browsers: browsers, selection: $selection, renaming: $renaming)
                 // Past its width, so the shadow leaves with it.
                 // The Needs you screen takes the whole window: the sidebar steps aside for it.
-                .offset(x: isSidebarVisible && !isNeedsYouOpen ? 0 : -(Sidebar.width + 32))
+                .offset(x: showsSidebar && !isNeedsYouOpen ? 0 : -(Sidebar.width + 32))
                 .animation(.snappy(duration: 0.32), value: isNeedsYouOpen)
-                .allowsHitTesting(isSidebarVisible)
-                .accessibilityHidden(!isSidebarVisible)
+                .animation(.snappy(duration: 0.32), value: boardController.isZen)
+                .allowsHitTesting(showsSidebar)
+                .accessibilityHidden(!showsSidebar)
         }
-        .onChange(of: isSidebarVisible, initial: true) { _, visible in
+        .onChange(of: showsSidebar, initial: true) { _, visible in
             boardController.leadingInset = visible ? sidebarInset : 0
         }
         .toolbar {
             // The sidebar and the project actions, one group beside the title.
-            ToolbarItemGroup(placement: .navigation) {
+            if !boardController.isZen { ToolbarItemGroup(placement: .navigation) {
                 Button(action: toggleSidebar) { Label(L("Toggle Sidebar"), systemImage: "sidebar.left") }
                     .keyboardShortcut("s", modifiers: [.command, .control])
                 Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
                     .help(L("Clone, create, or open a project."))
                 Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
                     .help(L("Reloads the projects and their worktrees."))
-            }
+            } }
         }
     }
+
+    /// Zen mode hides the sidebar without forgetting whether it was open.
+    private var showsSidebar: Bool { isSidebarVisible && !boardController.isZen }
 
     /// How much of the canvas's leading edge the sidebar covers.
     private var sidebarInset: CGFloat { Sidebar.width }
@@ -126,7 +133,7 @@ struct ContentView: View {
                 message: L("Pick a worktree in the sidebar to open it on the canvas.")
             ) { EmptyView() }
             // Centered on the canvas the sidebar leaves uncovered.
-            .padding(.leading, isSidebarVisible ? sidebarInset : 0)
+            .padding(.leading, showsSidebar ? sidebarInset : 0)
         }
     }
 
@@ -187,3 +194,18 @@ struct ContentView: View {
     #endif
 }
 
+
+/// No title in the top bar; in zen mode, no top bar background either.
+private struct WindowChrome: ViewModifier {
+    let isZen: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content
+                .toolbar(removing: .title)
+                .toolbarBackgroundVisibility(isZen ? .hidden : .automatic, for: .windowToolbar)
+        } else {
+            content.toolbarBackground(isZen ? .hidden : .automatic, for: .windowToolbar)
+        }
+    }
+}

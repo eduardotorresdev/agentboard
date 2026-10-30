@@ -30,14 +30,18 @@ struct WorktreeCanvas: View {
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
-            CanvasToolbar(board: board)
-                .padding(.bottom, 16)
-                .padding(.leading, board.leadingInset)
+            if !board.isZen {
+                CanvasToolbar(board: board)
+                    .padding(.bottom, 16)
+                    .padding(.leading, board.leadingInset)
+                    .transition(.opacity.combined(with: .offset(y: 24)))
+            }
             NavigationToolbar(board: board)
                 .padding([.bottom, .trailing], 16)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .animation(.smooth(duration: 0.3), value: isEmpty)
+        .animation(.snappy(duration: 0.32), value: board.isZen)
         .animation(.smooth(duration: 0.3), value: notice)
         // Content centers on the canvas the sidebar leaves uncovered, following it as it slides.
         .animation(.snappy(duration: 0.32), value: board.leadingInset)
@@ -159,6 +163,21 @@ private struct NavigationToolbar: View {
 
     var body: some View {
         HStack(spacing: 2) {
+            if !board.isZen { zoomControls }
+            Button { board.isZen.toggle() } label: {
+                Image(systemName: board.isZen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(ToolbarButtonStyle(compact: true))
+            .help(board.isZen ? L("Leave zen mode: bring back the sidebar and the bars.") : L("Zen mode: hides everything but the canvas and Needs you."))
+            .accessibilityLabel(board.isZen ? L("Leave zen mode") : L("Zen mode"))
+        }
+        .font(.callout.weight(.medium))
+        .padding(4)
+        .modifier(GlassCapsule())
+    }
+
+    @ViewBuilder private var zoomControls: some View {
             Button(action: board.fitAgents) {
                 Image(systemName: "viewfinder")
             }
@@ -186,10 +205,6 @@ private struct NavigationToolbar: View {
             .buttonStyle(ToolbarButtonStyle(compact: true))
             .disabled(board.zoom >= BoardView.zoomRange.upperBound)
             .help(L("Zoom in (⌘+)"))
-        }
-        .font(.callout.weight(.medium))
-        .padding(4)
-        .modifier(GlassCapsule())
     }
 }
 

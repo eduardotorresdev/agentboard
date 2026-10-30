@@ -240,3 +240,9 @@
 "Connect an agent to this card to send it the notes." = "Conecte um agente a este card para enviar as anotações.";
 "Sends every note to %@." = "Envia todas as anotações para %@.";
 "Discards the notes." = "Descarta as anotações.";
+
+/* Zen mode */
+"Zen mode" = "Modo zen";
+"Leave zen mode" = "Sair do modo zen";
+"Zen mode: hides everything but the canvas and Needs you." = "Modo zen: oculta tudo menos o canvas e o Precisa de você.";
+"Leave zen mode: bring back the sidebar and the bars." = "Sair do modo zen: traz de volta a sidebar e as barras.";

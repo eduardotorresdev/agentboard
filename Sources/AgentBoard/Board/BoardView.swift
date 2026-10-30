@@ -81,6 +81,8 @@ final class BoardController {
     func fitAgents() { view?.fitAgents() }
     /// Width of the canvas's leading edge covered by the floating sidebar, kept clear when fitting.
     var leadingInset: CGFloat = 0
+    /// Only the canvas and the Needs you button show: no sidebar, bars or zoom controls.
+    var isZen = false
 }
 
 struct DeviceRequest: Identifiable {
