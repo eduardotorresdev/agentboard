@@ -203,3 +203,7 @@
 "Gives the agent your answers; it carries on with them." = "Entrega suas respostas ao agente, que segue com elas.";
 "Pick any that apply." = "Marque quantas quiser.";
 "Something else…" = "Outra resposta…";
+"Next" = "Próxima";
+"Keeps this answer and shows the next question." = "Guarda esta resposta e mostra a próxima pergunta.";
+"Shows the previous question, to change its answer." = "Mostra a pergunta anterior, para mudar a resposta.";
+"%lld of %lld" = "%1$lld de %2$lld";

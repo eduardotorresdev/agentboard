@@ -1,18 +1,23 @@
 import Orchestration
 import SwiftUI
 
-/// The questions an agent asked (AskUserQuestion), to answer on the card: one option to pick,
-/// or several to check, and always a field for an answer of the developer's own. Sending gives
-/// the agent the answers keyed by question text, as Claude Code expects them.
+/// The questions an agent asked (AskUserQuestion), to answer on the card one at a time: one
+/// option to pick, or several to check, and always a field for an answer of the developer's own.
+/// Picking the one option of a question moves on to the next. Sending gives the agent the
+/// answers keyed by question text, as Claude Code expects them.
 struct QuestionForm: View {
     let questions: [AgentQuestion]
-    /// Room for the questions; past it they scroll.
+    /// Room for the question; past it it scrolls.
     let maxHeight: CGFloat
     let isActive: Bool
     let onSend: ([String: String]) -> Void
     /// Leaves the questions to the agent's terminal.
     let onTerminal: () -> Void
 
+    /// The question shown.
+    @State private var step = 0
+    /// Which way the last step went, for the transition.
+    @State private var forward = true
     /// Per question: the labels picked, oldest first.
     @State private var picks: [Int: [String]] = [:]
     /// Per question: the answer written in.
@@ -21,36 +26,82 @@ struct QuestionForm: View {
     @State private var writes: Set<Int> = []
     @FocusState private var focusedField: Int?
 
+    private var isLast: Bool { step >= questions.count - 1 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ViewThatFits(in: .vertical) {
-                list
-                ScrollView { list }
+            if questions.count > 1 { progress }
+            ZStack(alignment: .topLeading) {
+                ViewThatFits(in: .vertical) {
+                    current
+                    ScrollView { current }
+                }
+                .id(step)
+                .transition(.asymmetric(insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+                                        removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity)))
             }
-            .frame(maxHeight: maxHeight)
+            .frame(maxHeight: maxHeight, alignment: .top)
+            .clipped()
             HStack(spacing: 10) {
+                if step > 0 {
+                    Button(L("Back")) { go(to: step - 1) }
+                        .controlSize(.small)
+                        .help(L("Shows the previous question, to change its answer."))
+                }
                 Spacer()
                 Button(L("Answer in terminal"), action: onTerminal)
                     .controlSize(.small)
                     .help(L("Shows these questions in the agent's terminal, to answer there."))
-                Button(L("Send answers")) { onSend(answers) }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(!isComplete || !isActive)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .help(L("Gives the agent your answers; it carries on with them."))
+                if isLast {
+                    Button(L("Send answers")) { onSend(answers) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(!isComplete || !isActive)
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help(L("Gives the agent your answers; it carries on with them."))
+                } else {
+                    Button(L("Next")) { go(to: step + 1) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(!isAnswered(step))
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .help(L("Keeps this answer and shows the next question."))
+                }
             }
         }
     }
 
-    private var list: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
-                questionView(index, question)
+    /// One dash per question: filled once answered, wider for the one shown.
+    private var progress: some View {
+        HStack(spacing: 6) {
+            ForEach(questions.indices, id: \.self) { index in
+                Capsule()
+                    .fill(index == step || isAnswered(index) ? Theme.accent : Theme.line.opacity(0.15))
+                    .frame(width: index == step ? 22 : 8, height: 4)
             }
+            Text(L("\(step + 1) of \(questions.count)"))
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .foregroundStyle(Theme.line.opacity(0.5))
+                .padding(.leading, 4)
         }
-        .padding(.vertical, 2)
+        .animation(.snappy(duration: 0.25), value: step)
     }
+
+    private var current: some View {
+        questionView(step, questions[min(step, questions.count - 1)])
+            .padding(.vertical, 2)
+    }
+
+    private func go(to index: Int) {
+        guard questions.indices.contains(index) else { return }
+        focusedField = nil
+        withAnimation(.snappy(duration: 0.3)) {
+            forward = index > step
+            step = index
+        }
+    }
+
+    private func isAnswered(_ index: Int) -> Bool { answers[questions[index].question] != nil }
 
     private func questionView(_ index: Int, _ question: AgentQuestion) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -105,7 +156,9 @@ struct QuestionForm: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 13))
                 .focused($focusedField, equals: index)
-                .onSubmit { if isComplete { onSend(answers) } }
+                .onSubmit {
+                    if !isLast { if isAnswered(index) { go(to: index + 1) } } else if isComplete { onSend(answers) }
+                }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -122,6 +175,10 @@ struct QuestionForm: View {
                 writes.remove(index)
                 if focusedField == index { focusedField = nil }
             }
+        }
+        // One pick answers it: on to the next, after a beat to see the pick land.
+        if !question.multiSelect && index == step && !isLast {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { if step == index { go(to: index + 1) } }
         }
     }
 
