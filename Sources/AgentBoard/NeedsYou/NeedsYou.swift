@@ -88,9 +88,7 @@ struct NeedsYouDeck: View {
         GeometryReader { proxy in
             // Small windows give the card more of themselves, so the terminal stays readable.
             let inset: CGFloat = proxy.size.height < 640 ? 40 : 96
-            let height = min(820, proxy.size.height - inset)
-            // Narrow like a playing card, but wide enough for a readable terminal.
-            let size = CGSize(width: min(proxy.size.width - inset, max(480, height * 0.72)), height: height)
+            let size = CGSize(width: proxy.size.width - inset, height: min(820, proxy.size.height - inset))
             ZStack {
                 // The board's faint grid shows through around the deck.
                 CanvasView(mode: .offCanvas) { Color.clear }
@@ -138,7 +136,7 @@ struct NeedsYouDeck: View {
                      takesFocus: isTop && focusFollows, onDone: { leave(request.id, direction: 1) },
                      onAnswer: { answers in leave(request.id, direction: 1) { agents.answerQuestions(request.id, answers) } },
                      onTerminal: { agents.answerQuestions(request.id, nil) }, onEscape: close)
-            .frame(width: size.width)
+            .frame(width: Self.width(of: record, in: size))
             .frame(maxHeight: size.height)
             .scaleEffect(1 - CGFloat(depth) * 0.04)
             .offset(x: drag.width, y: drag.height * 0.4 + CGFloat(depth) * 14)
@@ -148,6 +146,11 @@ struct NeedsYouDeck: View {
             .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.96)), removal: .opacity))
             .simultaneousGesture(isTop ? swipe(request.id) : nil)
             .animation(.snappy(duration: 0.4), value: depth)
+    }
+
+    /// Narrow like a playing card, but wide enough to show the agent's terminal whole.
+    private static func width(of record: AgentRecord, in size: CGSize) -> CGFloat {
+        min(size.width, max(size.height * 0.72, CardMetrics.terminal(of: record).width + 24))
     }
 
     /// The cards behind lean a little each way, the same way every time for the same agent.
@@ -300,13 +303,14 @@ private struct NeedsYouCard: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(place[place.count - 2])
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(Theme.line)
-                if place[place.count - 1] != place[place.count - 2] {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(place[place.count - 2])
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(Theme.line)
+                        .layoutPriority(1)
                     Text(place[place.count - 1])
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.line.opacity(0.7))
+                        .foregroundStyle(Theme.line.opacity(0.6))
                 }
                 Text((place.dropLast(2) + [record.name]).joined(separator: " · "))
                     .font(.system(size: 12, weight: .medium))
