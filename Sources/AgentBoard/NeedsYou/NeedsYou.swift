@@ -54,7 +54,7 @@ struct NeedsYouButton: View {
     }
 }
 
-/// The agents waiting on the developer, as a screen of its own: a plain canvas (no grid, no
+/// The agents waiting on the developer, as a screen of its own: a canvas with a faint grid (no
 /// sidebar) with a stack of cards. The top one says where the agent works and what it asks, over
 /// its live terminal to answer in; dragging it aside marks it done and brings up the next.
 struct NeedsYouDeck: View {
@@ -88,9 +88,12 @@ struct NeedsYouDeck: View {
         GeometryReader { proxy in
             // Small windows give the card more of themselves, so the terminal stays readable.
             let inset: CGFloat = proxy.size.height < 640 ? 40 : 96
-            let size = CGSize(width: min(1120, proxy.size.width - inset), height: min(760, proxy.size.height - inset))
+            let height = min(820, proxy.size.height - inset)
+            // Narrow like a playing card, but wide enough for a readable terminal.
+            let size = CGSize(width: min(proxy.size.width - inset, max(480, height * 0.72)), height: height)
             ZStack {
-                Theme.canvas
+                // The board's faint grid shows through around the deck.
+                CanvasView(mode: .offCanvas) { Color.clear }
                     .ignoresSafeArea()
                     .contentShape(.rect)
                 ZStack {
@@ -236,8 +239,13 @@ private struct NeedsYouCard: View {
     /// Questions to answer on the card, which then needs no terminal.
     private var questions: [AgentQuestion]? { request.questions.flatMap { $0.isEmpty ? nil : $0 } }
 
-    /// The terminal is wide and short: enough lines to answer in, the rest goes to the context.
-    private var terminalHeight: CGFloat { min(320, max(180, size.height * 0.42)) }
+    /// An agent that only finished its turn says so in its terminal: the card shows that alone.
+    private var showsContext: Bool { request.context != nil && !(request.reason == .turnEnded && questions == nil) }
+
+    /// Alone, the terminal takes the card; next to the context, enough lines to answer in.
+    private var terminalHeight: CGFloat {
+        showsContext ? min(320, max(180, size.height * 0.42)) : max(180, size.height - 190)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -245,9 +253,11 @@ private struct NeedsYouCard: View {
                 .padding(.horizontal, 24)
                 .padding(.top, 20)
                 .padding(.bottom, 14)
-            context
-                .padding(.horizontal, 24)
-                .padding(.bottom, 14)
+            if showsContext {
+                context
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 14)
+            }
             if let questions {
                 QuestionForm(questions: questions, maxHeight: max(160, size.height - (request.context == nil ? 190 : 330)),
                              isActive: isActive, onSend: onAnswer, onTerminal: onTerminal)
@@ -285,39 +295,36 @@ private struct NeedsYouCard: View {
         .shadow(color: Theme.line.opacity(isLive ? 0.14 : 0.08), radius: isLive ? 30 : 16, y: isLive ? 14 : 8)
     }
 
+    /// Where the agent works leads: the project, then the worktree. The agent's name and its
+    /// organization (when there are several) come after, smaller.
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    ForEach(Array(place.enumerated()), id: \.offset) { index, part in
-                        if index > 0 {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(Theme.line.opacity(0.35))
-                        }
-                        Text(part)
-                            .foregroundStyle(Theme.line.opacity(index == place.count - 1 ? 0.75 : 0.5))
-                    }
-                }
-                .font(.system(size: 12, weight: .medium))
-                .lineLimit(1)
-                Text(record.name)
-                    .font(.system(size: 20, weight: .semibold))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(place[place.count - 2])
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(Theme.line)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: 6) {
-                TimelineView(.everyMinute) { context in
-                    Text(Self.age.localizedString(for: request.since, relativeTo: max(context.date, request.since)))
+                if place[place.count - 1] != place[place.count - 2] {
+                    Text(place[place.count - 1])
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.line.opacity(0.7))
                 }
-                .font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(Theme.line.opacity(0.5))
+                Text((place.dropLast(2) + [record.name]).joined(separator: " · "))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.line.opacity(0.45))
+                    .padding(.top, 3)
                 Text(message)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.accent)
-                    .lineLimit(1)
+                    .padding(.top, 6)
             }
+            .lineLimit(1)
+            .truncationMode(.middle)
+            Spacer(minLength: 0)
+            TimelineView(.everyMinute) { context in
+                Text(Self.age.localizedString(for: request.since, relativeTo: max(context.date, request.since)))
+            }
+            .font(.system(size: 12).monospacedDigit())
+            .foregroundStyle(Theme.line.opacity(0.5))
         }
     }
 
@@ -358,14 +365,18 @@ private struct NeedsYouCard: View {
                     .foregroundStyle(Theme.line.opacity(0.5))
             }
             if isActive && questions == nil {
-                Button(L("Done"), action: onDone)
+                Button(action: onDone) {
+                    Label(L("Done"), systemImage: "checkmark")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(minWidth: 120)
+                }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .controlSize(.extraLarge)
                     .keyboardShortcut(.return, modifiers: .command)
                     .help(L("Marks this one as handled and shows the next. ⌥Esc sends Esc to the agent."))
             }
         }
-        .frame(minHeight: 22)
+        .frame(minHeight: 36)
     }
 
     private static let age: RelativeDateTimeFormatter = {
