@@ -76,6 +76,10 @@ public final class Orchestrator: CoreService {
         catalog.add(RunnerTools(store: self))
         catalog.add(PostItTools(store: self))
         toolServer.onQuestion = { [weak self] body, caller in await self?.ask(body, caller: caller) }
+        toolServer.onAttention = { [weak self] body, caller in
+            let notification = AgentHook.prefix + body.base64EncodedString()
+            Task { @MainActor in self?.sessionNotified(caller, [notification]) }
+        }
         catalog.add(BrowserRelay(store: self))
         bus.onGraphChange = { [weak self] graph in
             try? self?.database?.saveConnections(graph.connections)

@@ -20,7 +20,7 @@ struct OrganizationSwitcher: View {
             }
             Button(action: add) {
                 Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Theme.accent)
                     .frame(width: OrganizationBubble.size, height: OrganizationBubble.size)
                     .background(Theme.accent.opacity(0.12), in: .circle)
@@ -54,7 +54,7 @@ private struct OrganizationBubble: View {
     @State private var isHovered = false
     @State private var isPressing = false
 
-    static let size: CGFloat = 22
+    static let size: CGFloat = 30
 
     var body: some View {
         OrganizationAvatar(organization: organization, size: Self.size)

@@ -78,6 +78,14 @@ public struct ClaudeCode: AgentProvider {
         "command": #"printf '\033]9;"# + AgentHook.prefix + #"%s\007' "$(base64 | tr -d '\n')" > /dev/tty 2>/dev/null || true"#,
     ]
 
+    /// The attention hook for an agent with the board's tools: it posts to the board's server,
+    /// since a hook may run without a terminal to write to.
+    private static func attentionHook(_ tools: ToolServerLink) -> [String: Any] {
+        let url = tools.url.absoluteString + "/attention"
+        return ["type": "command", "timeout": 5,
+                "command": "curl -s -m 3 -o /dev/null -X POST -H 'Authorization: Bearer \(tools.token)' --data-binary @- '\(url)' || true"]
+    }
+
     /// A hook that hands its input to the board's server and prints what comes back: the
     /// context the agent should have before going on (connected post-its), which Claude Code
     /// adds to the conversation.
@@ -101,8 +109,9 @@ public struct ClaudeCode: AgentProvider {
     private static func settings(_ tools: ToolServerLink?) -> String {
         let context = tools.map(contextHook)
         func entry(_ hooks: [[String: Any]?]) -> [[String: Any]] { [["hooks": hooks.compactMap { $0 }]] }
-        var hooks: [String: Any] = ["Stop": entry([attentionHook]), "Notification": entry([attentionHook]),
-                                    "UserPromptSubmit": entry([attentionHook, context])]
+        let attention = tools.map(attentionHook) ?? attentionHook
+        var hooks: [String: Any] = ["Stop": entry([attention]), "Notification": entry([attention]),
+                                    "UserPromptSubmit": entry([attention, context])]
         if let context { hooks["SessionStart"] = entry([context]); hooks["PostToolUse"] = entry([context]) }
         if let tools { hooks["PreToolUse"] = [["matcher": "AskUserQuestion", "hooks": [questionHook(tools)]]] }
         return String(decoding: try! JSONSerialization.data(withJSONObject: ["hooks": hooks]), as: UTF8.self)

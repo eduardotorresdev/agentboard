@@ -34,6 +34,8 @@ public final class ToolServer: @unchecked Sendable {
     /// Answers an agent's questions hook (see `questionPath`): it returns once the developer
     /// answered, with the hook's output. Set before `start`.
     public var onQuestion: (@Sendable (Data, UUID) async -> Data?)?
+    /// Hears an agent's attention hooks (see `attentionPath`). Set before `start`.
+    public var onAttention: (@Sendable (Data, UUID) -> Void)?
     /// A stream with nothing on it this long is sent a comment, or clients time it out.
     private static let keepAliveInterval = 25.0
 
@@ -43,6 +45,8 @@ public final class ToolServer: @unchecked Sendable {
     /// Where an agent's hook posts the questions it is about to ask (AskUserQuestion) and waits
     /// for the developer's answers.
     public static let questionPath = path + "/question"
+    /// Where an agent's hooks post that it waits on the developer, or works again.
+    public static let attentionPath = path + "/attention"
 
     /// What a server passes to the one replacing it.
     public struct Release: @unchecked Sendable {
@@ -402,7 +406,7 @@ private final class HTTPExchange: @unchecked Sendable {
 
         let method = String(requestLine[0])
         let path = requestLine[1].split(separator: "?").first.map(String.init) ?? ""
-        guard [ToolServer.path, ToolServer.contextPath, ToolServer.questionPath].contains(path) else {
+        guard [ToolServer.path, ToolServer.contextPath, ToolServer.questionPath, ToolServer.attentionPath].contains(path) else {
             return reply(404, "Not Found", close: close)
         }
         guard let caller = server.caller(authorization: headers["authorization"]) else {
@@ -412,6 +416,10 @@ private final class HTTPExchange: @unchecked Sendable {
         guard method == "POST" else { return reply(405, "Method Not Allowed", headers: ["Allow": "GET, POST"], close: close) }
         isBusy = true
         let server = self.server
+        if path == ToolServer.attentionPath {
+            server.onAttention?(body, caller)
+            return reply(200, "OK", headers: ["Content-Type": "application/json"], body: Data("{}".utf8), close: close)
+        }
         if path == ToolServer.contextPath || path == ToolServer.questionPath {
             let question = path == ToolServer.questionPath ? server.onQuestion : nil
             Task { [weak self, queue] in
