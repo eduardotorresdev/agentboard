@@ -30,12 +30,9 @@ struct WorktreeCanvas: View {
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
-            if !board.isZen {
-                CanvasToolbar(board: board)
-                    .padding(.bottom, 16)
-                    .padding(.leading, board.leadingInset)
-                    .transition(.opacity.combined(with: .offset(y: 24)))
-            }
+            CanvasToolbar(board: board)
+                .padding(.bottom, 16)
+                .padding(.leading, board.leadingInset)
             NavigationToolbar(board: board)
                 .padding([.bottom, .trailing], 16)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -165,11 +162,12 @@ private struct NavigationToolbar: View {
         HStack(spacing: 2) {
             if !board.isZen { zoomControls }
             Button { board.isZen.toggle() } label: {
-                Image(systemName: board.isZen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                Image(systemName: board.isZen ? "sun.max.fill" : "moon.zzz.fill")
+                    .foregroundStyle(board.isZen ? Theme.secondary : Theme.accent)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(ToolbarButtonStyle(compact: true))
-            .help(board.isZen ? L("Leave zen mode: bring back the sidebar and the bars.") : L("Zen mode: hides everything but the canvas and Needs you."))
+            .help(board.isZen ? L("Leave zen mode: bring back the sidebar and the bars.") : L("Zen mode: hides everything but the canvas, its tools, and Needs you."))
             .accessibilityLabel(board.isZen ? L("Leave zen mode") : L("Zen mode"))
         }
         .font(.callout.weight(.medium))

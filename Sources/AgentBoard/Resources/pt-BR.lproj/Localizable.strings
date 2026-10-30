@@ -244,5 +244,5 @@
 /* Zen mode */
 "Zen mode" = "Modo zen";
 "Leave zen mode" = "Sair do modo zen";
-"Zen mode: hides everything but the canvas and Needs you." = "Modo zen: oculta tudo menos o canvas e o Precisa de você.";
+"Zen mode: hides everything but the canvas, its tools, and Needs you." = "Modo zen: oculta tudo menos o canvas, a barra de ferramentas e o Precisa de você.";
 "Leave zen mode: bring back the sidebar and the bars." = "Sair do modo zen: traz de volta a sidebar e as barras.";
