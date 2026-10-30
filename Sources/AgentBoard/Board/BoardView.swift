@@ -79,6 +79,12 @@ final class BoardController {
     func zoomOut() { view?.stepZoom(-1) }
     func resetZoom() { view?.animateZoom(to: 1) }
     func fitAgents() { view?.fitAgents() }
+    /// A card to frame and focus once its worktree shows on the board.
+    @ObservationIgnored var pendingReveal: UUID?
+    func reveal(_ id: UUID) {
+        pendingReveal = id
+        view?.revealPending()
+    }
     /// Width of the canvas's leading edge covered by the floating sidebar, kept clear when fitting.
     var leadingInset: CGFloat = 0
     /// Only the canvas and the Needs you button show: no sidebar, bars or zoom controls.
@@ -114,6 +120,7 @@ struct Board: NSViewRepresentable {
         view.controller = controller
         view.worktree = worktree
         view.syncLayers()
+        if controller.pendingReveal != nil { DispatchQueue.main.async { view.revealPending() } }
     }
 
     static func dismantleNSView(_ view: BoardView, coordinator: ()) {
@@ -802,7 +809,20 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     func fitAgents() {
         let frames = itemFrames.map(\.frame)
         guard let first = frames.first else { return animateCamera(to: Camera(zoom: 1, pan: .zero)) }
-        let union = frames.dropFirst().reduce(first) { $0.union($1) }
+        frame(frames.dropFirst().reduce(first) { $0.union($1) })
+    }
+
+    /// Frames and focuses the card `controller.pendingReveal` names, once it is on this board.
+    func revealPending() {
+        guard let id = controller?.pendingReveal, let record = record(id), record.worktree == worktree else { return }
+        controller?.pendingReveal = nil
+        focusedID = id
+        window?.makeFirstResponder(self)
+        frame(record.frame)
+    }
+
+    /// Springs the camera to show `union` whole, never past actual size.
+    private func frame(_ union: CGRect) {
         // A margin around the cards, larger at the bottom where the toolbars float and clear of the sidebar.
         let inset = controller?.leadingInset ?? 0
         let area = CGRect(x: 48 + inset, y: 48, width: bounds.width - 96 - inset, height: bounds.height - 48 - 96)

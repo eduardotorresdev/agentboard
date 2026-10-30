@@ -1,5 +1,6 @@
 import AgentRuntime
 import AppKit
+import Orchestration
 import SwiftUI
 
 struct WorktreeSelection: Hashable {
@@ -49,7 +50,7 @@ struct ContentView: View {
         // On every screen, the first run of a new organization included.
         .overlay {
             if isNeedsYouOpen {
-                NeedsYouDeck(agents: agents, projects: store, isOpen: $isNeedsYouOpen)
+                NeedsYouDeck(agents: agents, projects: store, isOpen: $isNeedsYouOpen, onReveal: reveal)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             }
         }
@@ -163,6 +164,22 @@ struct ContentView: View {
                 selection = WorktreeSelection(projectID: project.id, worktree: worktree)
             }
         }
+    }
+
+    /// Opens the agent's worktree and frames its card, in focus.
+    private func reveal(_ record: AgentRecord) {
+        guard store.organizationID == record.organizationID else {
+            // Switching organizations clears the selection: select after it has.
+            store.selectOrganization(record.organizationID)
+            DispatchQueue.main.async { reveal(record) }
+            return
+        }
+        for project in store.projects {
+            if let worktree = store.worktrees[project.id]?.first(where: { $0.path == record.worktree }) {
+                selection = WorktreeSelection(projectID: project.id, worktree: worktree)
+            }
+        }
+        boardController.reveal(record.id)
     }
 
     private func select(_ project: Project) {

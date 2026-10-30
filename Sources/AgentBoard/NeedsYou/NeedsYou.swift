@@ -61,6 +61,8 @@ struct NeedsYouDeck: View {
     let agents: AgentStore
     let projects: ProjectStore
     @Binding var isOpen: Bool
+    /// Opens the agent's worktree on the board, focused on its card.
+    let onReveal: (AgentRecord) -> Void
     /// Where each card was dragged, kept while it flies off.
     @State private var drags: [UUID: CGSize] = [:]
     /// Cards flying off: out of the queue already, gone from the store once they land.
@@ -135,7 +137,12 @@ struct NeedsYouDeck: View {
                      position: L("\(queue.count) waiting"), showsHint: !hasSwiped, progress: progress,
                      takesFocus: isTop && focusFollows, onDone: { leave(request.id, direction: 1) },
                      onAnswer: { answers in leave(request.id, direction: 1) { agents.answerQuestions(request.id, answers) } },
-                     onTerminal: { agents.answerQuestions(request.id, nil) }, onEscape: close)
+                     onTerminal: { agents.answerQuestions(request.id, nil) }, onEscape: close,
+                     onReveal: {
+                         agents.dismissAttention(request.id)
+                         close()
+                         onReveal(record)
+                     })
             .frame(width: Self.width(of: record, in: size))
             .frame(maxHeight: size.height)
             .scaleEffect(1 - CGFloat(depth) * 0.04)
@@ -238,6 +245,7 @@ private struct NeedsYouCard: View {
     let onAnswer: ([String: String]) -> Void
     let onTerminal: () -> Void
     let onEscape: () -> Void
+    let onReveal: () -> Void
 
     /// Questions to answer on the card, which then needs no terminal.
     private var questions: [AgentQuestion]? { request.questions.flatMap { $0.isEmpty ? nil : $0 } }
@@ -367,6 +375,15 @@ private struct NeedsYouCard: View {
                 Text(L("Drag aside when you're done"))
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.line.opacity(0.5))
+            }
+            if isActive {
+                Button(action: onReveal) {
+                    Label(L("Go to Agent"), systemImage: "arrow.up.right")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                    .buttonStyle(.bordered)
+                    .controlSize(.extraLarge)
+                    .help(L("Opens its worktree with its card in focus, and takes it off this list."))
             }
             if isActive && questions == nil {
                 Button(action: onDone) {

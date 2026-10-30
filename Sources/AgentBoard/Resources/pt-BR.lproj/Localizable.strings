@@ -247,3 +247,5 @@
 "Zen mode: hides everything but the canvas, its tools, and Needs you." = "Modo zen: oculta tudo menos o canvas, a barra de ferramentas e o Precisa de você.";
 "Leave zen mode: bring back the sidebar and the bars." = "Sair do modo zen: traz de volta a sidebar e as barras.";
 "Agent: %@" = "Agente: %@";
+"Go to Agent" = "Ir para o agente";
+"Opens its worktree with its card in focus, and takes it off this list." = "Abre a worktree dele com o card em foco e tira ele desta lista.";
