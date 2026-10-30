@@ -1,11 +1,64 @@
 #!/bin/bash
 # Builds and launches the app, then shows CPU/memory/disk/network in the terminal.
 # --watch (-w): rebuilds and relaunches whenever a file in Sources/ or Package.swift changes.
-# Ctrl+C stops everything.
+# --restart-core: replaces the running core with the new build's, which takes its agents over
+#   without ending them. Every build does this by itself when the core's sources changed.
+# --kill-core: stops the running core first, ending its agents (for a core too old to hand over).
+# Agents run in the core (AgentBoardCore), not the app: relaunching the app keeps them running.
+# Ctrl+C stops the app; the core keeps the agents until the app quits with Cmd+Q.
+# Builds of the checkout keep a data folder of their own (projects, cards, core), so they never
+# touch the installed app's agents (see ./install). AGENTBOARD_HOME picks another.
 cd "$(dirname "$0")"
+export AGENTBOARD_HOME="${AGENTBOARD_HOME:-$HOME/Library/Application Support/AgentBoard Dev}"
 
-WATCH=false
-[[ "$1" == "--watch" || "$1" == "-w" ]] && WATCH=true
+WATCH=false RESTART_CORE=false KILL_CORE=false
+for arg in "$@"; do
+    case "$arg" in
+        --watch|-w) WATCH=true ;;
+        --restart-core) RESTART_CORE=true ;;
+        --kill-core) KILL_CORE=true ;;
+    esac
+done
+
+CORE_SOURCES="Sources/AgentBoardCore Sources/AgentRuntime Sources/TerminalCore Sources/Orchestration Sources/Connections"
+core_snapshot() {
+    find $CORE_SOURCES -type f -exec stat -f '%m %N' {} + 2>/dev/null | /sbin/md5
+}
+
+# The core sources the running core was last replaced with, per data folder.
+STAMP=".build/core-sources-$(echo "${AGENTBOARD_HOME:-default}" | /sbin/md5).md5"
+
+# Starts the freshly built core in place of the running one, which hands its agents over.
+take_over_core() {
+    local sources
+    sources=$(core_snapshot)
+    # Tried once per change: a core that can't hand over would cost every rebuild the attempt.
+    echo "$sources" > "$STAMP"
+    .build/debug/AgentBoardCore --take-over && return 0
+    echo "The running core couldn't hand its agents over (it may predate handing over)."
+    echo "./run --kill-core starts the new one and ends them."
+    return 1
+}
+
+# After a build: the core too, when its sources changed since it was last replaced.
+replace_core_if_changed() {
+    [ "$(core_snapshot)" = "$(cat "$STAMP" 2>/dev/null)" ] && return 0
+    echo "Core sources changed: replacing the running core; its agents carry on."
+    take_over_core
+}
+
+if $KILL_CORE; then
+    swift build --product AgentBoardCore || exit 1
+    # Only this data folder's core: the one listening on its socket, whatever build it is.
+    SOCKET=$(.build/debug/AgentBoardCore --socket-path)
+    for pid in $(lsof -t -- "$SOCKET" 2>/dev/null); do
+        ps -o command= -p "$pid" | grep -q AgentBoardCore && kill -TERM "$pid" && echo "Stopped the running core (pid $pid)."
+    done
+    core_snapshot > "$STAMP"
+elif $RESTART_CORE; then
+    swift build --product AgentBoardCore || exit 1
+    take_over_core
+fi
 
 mkdir -p .build/tools
 [ .build/tools/monitor -nt scripts/monitor.swift ] || swiftc -O scripts/monitor.swift -o .build/tools/monitor || exit 1
@@ -20,8 +73,11 @@ stop() {
 trap 'stop; exit 0' INT TERM
 trap stop EXIT
 
+# Builds, then swaps the running app for the new one: a failed build leaves the old one up.
 start() {
     swift build || { echo "Build failed, waiting for changes..."; return 1; }
+    stop
+    replace_core_if_changed
     .build/debug/AgentBoard &
     APP=$!
     sleep 1
@@ -39,15 +95,15 @@ if ! $WATCH; then
     exit 0
 fi
 
-start
+# Taken before building: a file saved during the build gets a rebuild of its own.
 LAST=$(snapshot)
+start
 while true; do
     sleep 1
     CURRENT=$(snapshot)
     if [ "$CURRENT" != "$LAST" ]; then
         LAST=$CURRENT
         echo "Change detected, rebuilding..."
-        stop
         start
     fi
 done

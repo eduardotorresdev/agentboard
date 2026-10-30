@@ -34,7 +34,7 @@ public protocol MessageEndpoint: BoardElement {
     func receive(_ message: Message, from sender: any BoardElement)
 }
 
-public struct Message: Identifiable, Hashable, Sendable {
+public struct Message: Identifiable, Hashable, Sendable, Codable {
     public let id: UUID
     public let from: UUID
     public let to: UUID
@@ -105,6 +105,12 @@ public final class MessageBus {
     @discardableResult
     public func connect(_ x: UUID, _ y: UUID, sides: (Side?, Side?) = (nil, nil)) -> Connection? {
         graph.connect(x, y, sides: sides)
+    }
+
+    /// Adds a line drawn elsewhere, keeping its id.
+    @discardableResult
+    public func add(_ connection: Connection) -> Bool {
+        graph.add(connection)
     }
 
     public func disconnect(_ id: UUID) {

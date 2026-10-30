@@ -1,6 +1,7 @@
 import AgentRuntime
 import AppKit
 import Connections
+import Orchestration
 import QuartzCore
 import SwiftUI
 import TerminalCore
@@ -369,13 +370,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     func addRunner(command: String, name: String?, directory: String?) {
-        let size = AgentStore.runnerSize
+        let size = AgentRecord.runnerSize
         let count = store.runners(in: worktree).count
         let cascade = CGFloat(count % 6) * 28
         let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
         let top = world(CGPoint(x: 0, y: 72)).y
         let origin = CGPoint(x: center.x - size.width / 2 + cascade, y: max(top, center.y - size.height / 2) + cascade)
-        let record = store.addRunner(command: command, name: name, directory: directory, owner: nil, to: worktree, at: origin)
+        let record = store.addRunner(command: command, name: name, directory: directory, to: worktree, at: origin)
         appearing.insert(record.id)
         focusedID = record.id
         window?.makeFirstResponder(self)

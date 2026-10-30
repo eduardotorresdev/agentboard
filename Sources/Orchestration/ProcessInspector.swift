@@ -2,38 +2,38 @@ import Darwin
 import Foundation
 
 /// A TCP port a runner's processes listen on.
-struct ListeningPort: Hashable, Comparable {
-    let port: Int
+public struct ListeningPort: Hashable, Comparable, Codable, Sendable {
+    public let port: Int
     /// Listens on every interface, so other devices on the network reach it too (not only this Mac).
-    let exposed: Bool
+    public let exposed: Bool
 
-    static func < (a: ListeningPort, b: ListeningPort) -> Bool { a.port < b.port }
+    public static func < (a: ListeningPort, b: ListeningPort) -> Bool { a.port < b.port }
 }
 
 /// What a runner costs and serves right now, summed over its process and everything it started.
-struct RunnerStats: Equatable {
+public struct RunnerStats: Equatable, Codable, Sendable {
     /// Percent of one core over the last sample interval; nil until two samples exist.
-    var cpu: Double?
+    public var cpu: Double?
     /// Physical footprint in bytes, as Activity Monitor's Memory column shows it.
-    var memory: UInt64
-    var processes: Int
-    var ports: [ListeningPort]
+    public var memory: UInt64
+    public var processes: Int
+    public var ports: [ListeningPort]
 }
 
 /// Reads processes through libproc and sysctl (no `ps` or `lsof` to spawn): a process's
 /// descendants, their CPU time and memory, and the TCP ports they listen on. Only the user's own
 /// processes are visible, which is all a runner starts.
-enum ProcessInspector {
+public enum ProcessInspector {
     /// A measurement of one runner: its stats, and the CPU time it had used, for the next sample.
-    struct Sample {
-        var stats: RunnerStats
+    public struct Sample: Sendable {
+        public var stats: RunnerStats
         let cpuTime: UInt64
         let time: UInt64
     }
 
     /// Measures each root process and its descendants. `previous` gives each its last sample, to
     /// turn CPU time into a percentage.
-    static func sample(_ roots: [UUID: pid_t], previous: [UUID: Sample]) -> [UUID: Sample] {
+    public static func sample(_ roots: [UUID: pid_t], previous: [UUID: Sample]) -> [UUID: Sample] {
         guard !roots.isEmpty else { return [:] }
         let children = childrenByParent()
         let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
@@ -144,7 +144,7 @@ enum ProcessInspector {
     }
 
     /// This Mac's address on the local network (Wi-Fi or Ethernet), for ports other devices can reach.
-    static func networkAddress() -> String? {
+    public static func networkAddress() -> String? {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return nil }
         defer { freeifaddrs(list) }

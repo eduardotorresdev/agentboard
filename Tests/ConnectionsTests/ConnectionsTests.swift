@@ -187,10 +187,137 @@ struct ToolServerTests {
         #expect(try await request(endpoint, token: nil, body: call).0 == 401)
         #expect(try await request(endpoint, token: "forged", body: call).0 == 401)
         #expect(try await request(endpoint, token: token, body: ["jsonrpc": "2.0", "method": "notifications/initialized"]).0 == 202)
-        #expect(try await request(endpoint, method: "GET", token: token, body: nil).0 == 405)
+        #expect(try await request(endpoint, method: "DELETE", token: token, body: nil).0 == 405)
         server.revoke(a.id)
         #expect(try await request(endpoint, token: token, body: call).0 == 401)
         #expect(b.received.count == 1)
+    }
+
+    /// With a secret, a server started later (the board relaunched) takes the same port and
+    /// accepts the token an agent was launched with by the earlier one.
+    @Test func secretKeepsLinksAcrossRestarts() async throws {
+        let bus = MessageBus()
+        let (a, b) = (Inbox("A"), Inbox("B"))
+        [a, b].forEach(bus.register)
+        bus.connect(a.id, b.id)
+        let secret = Data((0..<32).map { UInt8($0) })
+        let first = ToolServer(catalog: ToolCatalog([MessagingTools(bus: bus)]), secret: secret)
+        let firstURL: URL? = await withCheckedContinuation { continuation in first.start { continuation.resume(returning: $0) } }
+        let endpoint = try #require(firstURL)
+        let token = first.token(for: a.id)
+        first.stop()
+        try await Task.sleep(for: .milliseconds(100))
+
+        let second = ToolServer(catalog: ToolCatalog([MessagingTools(bus: bus)]), secret: secret)
+        let secondURL: URL? = await withCheckedContinuation { continuation in
+            second.start(preferredPort: UInt16(endpoint.port!)) { continuation.resume(returning: $0) }
+        }
+        defer { second.stop() }
+        #expect(secondURL == endpoint)
+        #expect(second.token(for: a.id) == token)
+        let call: [String: Any] = ["jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                   "params": ["name": "send_message", "arguments": ["to": "B", "message": "Again"]]]
+        #expect(try await request(endpoint, token: token, body: call).0 == 200)
+        #expect(b.received.map(\.0.text) == ["Again"])
+        // Another secret derives other tokens.
+        let other = ToolServer(catalog: ToolCatalog([]), secret: Data(repeating: 9, count: 32))
+        #expect(other.token(for: a.id) != token)
+    }
+
+    /// An agent's event stream: a TCP connection that asked for one, read with a deadline.
+    private final class Stream {
+        let fd: Int32
+        private var received = ""
+
+        init(port: Int, token: String?) throws {
+            fd = socket(AF_INET, SOCK_STREAM, 0)
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_port = UInt16(port).bigEndian
+            address.sin_addr.s_addr = inet_addr("127.0.0.1")
+            let connected = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            }
+            guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
+            let authorization = token.map { "Authorization: Bearer \($0)\r\n" } ?? ""
+            let head = "GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n\(authorization)Accept: text/event-stream\r\n\r\n"
+            _ = head.withCString { write(fd, $0, strlen($0)) }
+        }
+
+        deinit { close(fd) }
+
+        /// Everything read until `text` turns up after what earlier calls consumed, or nil.
+        func read(until text: String, timeout: Double = 3) -> String? {
+            let deadline = Date().addingTimeInterval(timeout)
+            while !received.contains(text) {
+                var poller = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                let left = Int32(max(0, deadline.timeIntervalSinceNow) * 1000)
+                guard left > 0, poll(&poller, 1, left) > 0 else { return nil }
+                var chunk = [UInt8](repeating: 0, count: 4096)
+                let count = Darwin.read(fd, &chunk, chunk.count)
+                guard count > 0 else { return nil }
+                received += String(decoding: chunk[0..<count], as: UTF8.self)
+            }
+            let range = received.range(of: text)!
+            defer { received = String(received[range.upperBound...]) }
+            return String(received[..<range.upperBound])
+        }
+    }
+
+    /// An agent's GET opens an event stream, on which the server says when the tools changed;
+    /// a server taking over from it carries the stream on and says so there first, since it may
+    /// serve other tools. Requests keep being answered meanwhile.
+    @Test func streamsHearOfToolChanges() async throws {
+        let bus = MessageBus()
+        let a = Inbox("A")
+        bus.register(a)
+        // Shared, as the core's tool key is: the token stays good on the next server.
+        let secret = Data(repeating: 3, count: 32)
+        let first = ToolServer(catalog: ToolCatalog([MessagingTools(bus: bus)]), secret: secret)
+        let firstURL: URL? = await withCheckedContinuation { continuation in first.start { continuation.resume(returning: $0) } }
+        let endpoint = try #require(firstURL)
+        let token = first.token(for: a.id)
+        let changed = "notifications/tools/list_changed"
+
+        #expect(try Stream(port: endpoint.port!, token: nil).read(until: "\r\n\r\n")?.hasPrefix("HTTP/1.1 401") == true)
+        let stream = try Stream(port: endpoint.port!, token: token)
+        let head = try #require(stream.read(until: "\r\n\r\n"))
+        #expect(head.hasPrefix("HTTP/1.1 200"))
+        #expect(head.contains("Content-Type: text/event-stream"))
+        first.notifyToolsChanged()
+        #expect(stream.read(until: "\n\n")?.contains(changed) == true)
+
+        // Handed over, as a newer core takes it.
+        await first.drain()
+        let release = try #require(first.release())
+        #expect(release.streams.count == 1)
+        first.stop()
+        let second = ToolServer(catalog: ToolCatalog([MessagingTools(bus: bus)]), secret: secret)
+        let secondURL: URL? = await withCheckedContinuation { continuation in second.start(inheriting: release) { continuation.resume(returning: $0) } }
+        defer { second.stop() }
+        #expect(secondURL == endpoint)
+        #expect(second.token(for: a.id) == token)
+        #expect(stream.read(until: "\n\n")?.contains(changed) == true)
+        second.notifyToolsChanged()
+        #expect(stream.read(until: "\n\n")?.contains(changed) == true)
+        let list: [String: Any] = ["jsonrpc": "2.0", "id": 1, "method": "tools/list"]
+        #expect(try await request(endpoint, token: token, body: list).0 == 200)
+    }
+
+    /// A taken preferred port falls back to a free one.
+    @Test func takenPortFallsBack() async throws {
+        let first = ToolServer(catalog: ToolCatalog([]))
+        let firstURL: URL? = await withCheckedContinuation { continuation in first.start { continuation.resume(returning: $0) } }
+        defer { first.stop() }
+        let taken = try #require(firstURL?.port)
+        let second = ToolServer(catalog: ToolCatalog([]))
+        let secondURL: URL? = await withCheckedContinuation { continuation in
+            second.start(preferredPort: UInt16(taken)) { continuation.resume(returning: $0) }
+        }
+        defer { second.stop() }
+        #expect(secondURL != nil)
+        #expect(secondURL?.port != taken)
     }
 }
 

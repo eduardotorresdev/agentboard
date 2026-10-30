@@ -1,6 +1,7 @@
 import Connections
 import Foundation
 import Observation
+import Orchestration
 
 /// The screen a browser card emulates: its size and density, whether it is a touch screen and a
 /// mobile browser, and the user agent pages see. Built from one of Playwright's device presets,
@@ -125,7 +126,7 @@ final class BrowserStore {
 
     @ObservationIgnored private let database: Database?
     @ObservationIgnored let host = BrowserHost()
-    @ObservationIgnored private var bus: MessageBus?
+    @ObservationIgnored private weak var agents: AgentStore?
     @ObservationIgnored private var opening: [UUID: Task<Void, Error>] = [:]
     /// Pointer moves waiting for the one in flight, per card: only the latest is sent.
     @ObservationIgnored private var pendingMoves: [UUID: [String: Any]] = [:]
@@ -169,6 +170,7 @@ final class BrowserStore {
         guard let index = browsers.firstIndex(where: { $0.id == id }), browsers[index].profile != profileID else { return }
         browsers[index].profile = profileID
         try? database?.saveBrowser(browsers[index])
+        agents?.elementsChanged()
         guard pages[id] != nil, opening[id] == nil else { return }
         pages[id]?.phase = .opening
         pages[id]?.contextID = nil
@@ -277,9 +279,19 @@ final class BrowserStore {
 
     /// Puts the cards on `agents`' board: lines can reach them and agents get the browser tools.
     func attach(to agents: AgentStore) {
-        bus = agents.bus
-        for record in browsers { agents.bus.register(BrowserElement(id: record.id, store: self)) }
-        agents.catalog.add(BrowserTools(store: self, bus: agents.bus))
+        self.agents = agents
+        agents.browserTools = BrowserTools(store: self, agents: agents)
+        agents.elements = { [weak self] in self?.elementInfos ?? [] }
+        agents.elementsChanged()
+    }
+
+    /// The cards as the core keeps them: lines reach them, and agents see them in `list_peers`.
+    private var elementInfos: [ElementInfo] {
+        browsers.map { record in
+            let element = BrowserElement(id: record.id, store: self)
+            return ElementInfo(id: record.id, name: record.name, kind: ElementKind.browser.rawValue, detail: element.detail,
+                               worktree: record.worktree, frame: record.frame)
+        }
     }
 
     func browsers(in worktree: String) -> [BrowserRecord] {
@@ -314,18 +326,19 @@ final class BrowserStore {
                                    device: device, url: "",
                                    frame: Self.frame(for: device, at: origin, scale: Self.initialScale(for: device)))
         browsers.append(record)
-        bus?.register(BrowserElement(id: record.id, store: self))
         try? database?.saveBrowser(record)
+        agents?.elementsChanged()
         return record
     }
 
     func remove(_ id: UUID) {
-        bus?.remove(element: id)
+        agents?.dropConnections(touching: id)
         browsers.removeAll { $0.id == id }
         opening[id]?.cancel()
         opening[id] = nil
         if pages.removeValue(forKey: id) != nil { host.post("close", ["block": id.uuidString]) }
         try? database?.deleteBrowser(id: id)
+        agents?.elementsChanged()
     }
 
     func raise(_ id: UUID) {
@@ -336,7 +349,10 @@ final class BrowserStore {
     func setFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
         guard let index = browsers.firstIndex(where: { $0.id == id }) else { return }
         browsers[index].frame = frame
-        if persist { try? database?.saveBrowser(browsers[index]) }
+        if persist {
+            try? database?.saveBrowser(browsers[index])
+            agents?.elementsChanged()
+        }
     }
 
     /// Gives the card another device. The page moves to a new context with it, keeping its
@@ -354,6 +370,7 @@ final class BrowserStore {
             browsers[index].name = Self.uniqueName(device.title, among: browsers(in: old.worktree).filter { $0.id != id })
         }
         try? database?.saveBrowser(browsers[index])
+        agents?.elementsChanged()
         guard pages[id] != nil, opening[id] == nil else { return }
         pages[id]?.phase = .opening
         pages[id]?.contextID = nil

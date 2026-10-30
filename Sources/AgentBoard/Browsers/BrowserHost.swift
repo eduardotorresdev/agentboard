@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Orchestration
 
 /// The browser sidecar: a Node process running Playwright's WebKit, shared by every browser card.
 ///
@@ -33,8 +34,8 @@ final class BrowserHost {
     private var queued: [Data] = []
     private var starting = false
 
-    private static let playwrightVersion = "1.64.1"
-    private static let nodeLine = "latest-v24.x"
+    nonisolated private static let playwrightVersion = "1.64.1"
+    nonisolated private static let nodeLine = "latest-v24.x"
 
     struct Failure: LocalizedError {
         let message: String
@@ -205,7 +206,7 @@ final class BrowserHost {
         try? files.removeItem(at: installed)
         try files.copyItem(at: script, to: installed)
 
-        let loginPath = AgentStore.loginShellPath()
+        let loginPath = Orchestrator.loginShellPath()
         let node = try await findOrInstallNode(searchPath: loginPath, progress: progress)
         let path = node.deletingLastPathComponent().path + ":" + loginPath
 
@@ -231,7 +232,7 @@ final class BrowserHost {
         let candidates = searchPath.split(separator: ":").map { URL(fileURLWithPath: String($0)).appendingPathComponent("node") }
         let own = Self.folder.appendingPathComponent("Node/bin/node")
         for node in candidates + [own] where FileManager.default.isExecutableFile(atPath: node.path) {
-            if let version = try? output(node, ["--version"]), let major = Int(version.dropFirst().prefix { $0 != "." }), major >= 18 {
+            if let version = output(node, ["--version"]), let major = Int(version.dropFirst().prefix { $0 != "." }), major >= 18 {
                 return node
             }
         }

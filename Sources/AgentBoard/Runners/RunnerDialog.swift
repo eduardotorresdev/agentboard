@@ -1,4 +1,5 @@
 import AppKit
+import Orchestration
 import SwiftUI
 
 /// Asks what a new runner runs: its name, the command (which the folder's package scripts can
@@ -17,7 +18,7 @@ struct RunnerDialog: View {
         AppDialog(title: L("New runner")) {
             VStack(alignment: .leading, spacing: 14) {
                 FormRow(label: L("Name")) {
-                    TextField("", text: $name, prompt: Text(command.isEmpty ? "web" : AgentStore.runnerName(for: command)))
+                    TextField("", text: $name, prompt: Text(command.isEmpty ? "web" : AgentRecord.runnerName(for: command)))
                 }
                 if !scripts.isEmpty {
                     FormRow(label: L("Script")) {

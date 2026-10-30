@@ -20,7 +20,7 @@ public struct TerminalModes: OptionSet, Sendable {
     public static let defaults: TerminalModes = [.autowrap, .cursorVisible]
 }
 
-public enum MouseTracking: Sendable {
+public enum MouseTracking: UInt8, Sendable {
     case none
     /// ?9: presses only.
     case x10
@@ -32,11 +32,11 @@ public enum MouseTracking: Sendable {
     case anyEvent
 }
 
-public enum MouseEncoding: Sendable {
+public enum MouseEncoding: UInt8, Sendable {
     case x10, utf8, sgr, urxvt, sgrPixels
 }
 
-public enum CursorShape: Sendable {
+public enum CursorShape: UInt8, Sendable {
     case block, underline, bar
 }
 
@@ -58,27 +58,27 @@ public struct TerminalEvents: Sendable {
 /// clusters, bracketed paste, focus and mouse reporting, synchronized output, and the device
 /// queries those programs send at startup.
 public final class Terminal: VTHandler {
-    @exclusivity(unchecked) public private(set) var cols: Int
-    @exclusivity(unchecked) public private(set) var rows: Int
+    @exclusivity(unchecked) public internal(set) var cols: Int
+    @exclusivity(unchecked) public internal(set) var rows: Int
     public let scrollback: Scrollback
     @exclusivity(unchecked) public internal(set) var modes = TerminalModes.defaults
-    @exclusivity(unchecked) public private(set) var mouseTracking = MouseTracking.none
-    @exclusivity(unchecked) public private(set) var mouseEncoding = MouseEncoding.x10
-    @exclusivity(unchecked) public private(set) var cursorShape = CursorShape.block
-    @exclusivity(unchecked) public private(set) var title = ""
-    @exclusivity(unchecked) public private(set) var workingDirectory: String?
+    @exclusivity(unchecked) public internal(set) var mouseTracking = MouseTracking.none
+    @exclusivity(unchecked) public internal(set) var mouseEncoding = MouseEncoding.x10
+    @exclusivity(unchecked) public internal(set) var cursorShape = CursorShape.block
+    @exclusivity(unchecked) public internal(set) var title = ""
+    @exclusivity(unchecked) public internal(set) var workingDirectory: String?
     /// Colors reported to programs that ask (OSC 10/11), as 0xRRGGBB.
     @exclusivity(unchecked) public var reportedForeground: UInt32 = 0x26213A
     @exclusivity(unchecked) public var reportedBackground: UInt32 = 0xFFFFFF
     /// Bumped on screen switches, resizes and resets: renderers must re-read every row.
-    @exclusivity(unchecked) public private(set) var layoutVersion = 0
+    @exclusivity(unchecked) public internal(set) var layoutVersion = 0
 
     @exclusivity(unchecked) public internal(set) var cursorX = 0
     @exclusivity(unchecked) public internal(set) var cursorY = 0
 
     let main: Grid
-    @exclusivity(unchecked) private(set) var alternate: Grid?
-    @exclusivity(unchecked) private(set) var grid: Grid
+    @exclusivity(unchecked) var alternate: Grid?
+    @exclusivity(unchecked) var grid: Grid
     @exclusivity(unchecked) var pendingWrap = false
     @exclusivity(unchecked) var pen = Pen()
     @exclusivity(unchecked) var scrollTop = 0
@@ -92,11 +92,11 @@ public final class Terminal: VTHandler {
     /// After a zero-width joiner, the next character joins the same cluster.
     @exclusivity(unchecked) var joinNext = false
     let clusters = ClusterTable()
-    @exclusivity(unchecked) private var parser = VTParser()
+    @exclusivity(unchecked) var parser = VTParser()
     @exclusivity(unchecked) private var output: [UInt8] = []
     @exclusivity(unchecked) private var events = TerminalEvents()
 
-    enum Charset { case ascii, decSpecialGraphics }
+    enum Charset: UInt8 { case ascii, decSpecialGraphics }
 
     struct SavedCursor {
         var x: Int, y: Int
@@ -562,6 +562,14 @@ final class ClusterTable {
     func scalars(_ id: UInt32) -> [UInt32] { Int(id) < entries.count ? entries[Int(id)].scalars : [] }
 
     func string(_ id: UInt32) -> String { Int(id) < entries.count ? entries[Int(id)].text : "" }
+
+    /// Every cluster's scalars, by id.
+    var allScalars: [[UInt32]] { entries.map(\.scalars) }
+
+    func removeAll() {
+        entries.removeAll()
+        ids.removeAll()
+    }
 
     var memoryUsage: Int { entries.reduce(0) { $0 + $1.scalars.count * 8 + $1.text.utf8.count + 64 } }
 }

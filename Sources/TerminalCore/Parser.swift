@@ -58,6 +58,45 @@ struct VTParser {
 
     func deallocate() { params.deallocate() }
 
+    /// Where the parser is inside a sequence, so a terminal snapshot taken mid-sequence picks
+    /// it up where it was.
+    struct Position: Equatable {
+        var state: UInt8 = 0
+        var params: [UInt16] = []
+        var currentParam = 0
+        var hasParam = false
+        var colonMask: UInt64 = 0
+        var collected: UInt32 = 0
+        var string: [UInt8] = []
+        var utf8Scalar: UInt32 = 0
+        var utf8Remaining = 0
+        var utf8Minimum: UInt32 = 0
+    }
+
+    var position: Position {
+        Position(state: state.rawValue, params: Array(UnsafeBufferPointer(start: params, count: paramCount)), currentParam: currentParam,
+                 hasParam: hasParam, colonMask: colonMask, collected: collected, string: stringBuffer,
+                 utf8Scalar: utf8Scalar, utf8Remaining: utf8Remaining, utf8Minimum: utf8Minimum)
+    }
+
+    /// Puts the parser at `position`; false (and nothing changed) when it isn't one it could be at.
+    mutating func move(to position: Position) -> Bool {
+        guard let state = State(rawValue: position.state), position.params.count <= Self.maxParams,
+              position.string.count <= Self.maxString, (0...3).contains(position.utf8Remaining) else { return false }
+        self.state = state
+        for (index, value) in position.params.enumerated() { params[index] = value }
+        paramCount = position.params.count
+        currentParam = min(max(0, position.currentParam), 0xFFFF)
+        hasParam = position.hasParam
+        colonMask = position.colonMask
+        collected = position.collected
+        stringBuffer = position.string
+        utf8Scalar = position.utf8Scalar
+        utf8Remaining = position.utf8Remaining
+        utf8Minimum = position.utf8Minimum
+        return true
+    }
+
     mutating func advance<Handler: VTHandler>(_ input: UnsafeRawBufferPointer, _ handler: Handler) {
         guard var p = input.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
         let end = p + input.count

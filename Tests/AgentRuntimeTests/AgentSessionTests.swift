@@ -8,7 +8,8 @@ private func run(_ script: String, cols: Int = 400, observed: Bool, until state:
     session.isObserved = observed
     session.start(LaunchSpec(executable: "/bin/sh", arguments: ["-c", script], environment: ["PATH": "/usr/bin:/bin"],
                              directory: NSTemporaryDirectory()))
-    let deadline = Date().addingTimeInterval(10)
+    // Generous: each `sleep` the scripts run is a process, slow to spawn on a loaded machine.
+    let deadline = Date().addingTimeInterval(30)
     while session.state != state, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
     #expect(session.state == state)
     return session
@@ -51,7 +52,7 @@ struct AgentSessionTests {
         session.start(LaunchSpec(executable: "/bin/sh", arguments: ["-c", "i=0; while [ $i -lt 50 ]; do printf x; i=$((i+1)); sleep 0.002; done; sleep 1"],
                                  environment: ["PATH": "/usr/bin:/bin"], directory: NSTemporaryDirectory()))
         // Until every write arrived (a fixed wait is too short on a loaded machine).
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(30)
         while firstRow(session).count < 50, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(firstRow(session) == String(repeating: "x", count: 50))
         // Nobody drew: the first notification is the only one.
@@ -69,12 +70,14 @@ struct AgentSessionTests {
         let marker = "agentboard-terminate-\(UUID().uuidString.prefix(8))"
         let session = try await run("sleep 30 & sleep 31 & echo started; wait # \(marker)", observed: false, until: .running)
         let pid = try #require(session.processID)
-        try await Task.sleep(for: .milliseconds(200))
+        var deadline = Date().addingTimeInterval(5)
+        while childCount(of: pid) < 2, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(childCount(of: pid) == 2)
         let done = Counter()
         session.terminate { done.increment() }
-        let deadline = Date().addingTimeInterval(5)
-        while session.state != .stopped, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        // The completion runs on the main queue, which other suites keep busy.
+        deadline = Date().addingTimeInterval(5)
+        while session.state != .stopped || done.value == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         try await Task.sleep(for: .milliseconds(100))
         #expect(session.state == .stopped)
         #expect(session.processID == nil)
@@ -97,7 +100,9 @@ struct AgentSessionTests {
         #expect(session.state == .stopped)
         let done = Counter()
         session.terminate { done.increment() }
-        try await Task.sleep(for: .milliseconds(100))
+        // The completion runs on the main queue, which other suites keep busy.
+        let deadline = Date().addingTimeInterval(5)
+        while done.value == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         #expect(done.value == 1)
     }
 }
@@ -119,21 +124,35 @@ extension AgentSessionTests {
     }
 }
 
-/// How many live processes have `parent` as their parent.
+/// How many live processes have `parent` as their parent. Asks libproc: waiting on a `Process`
+/// (pgrep) from a test's thread can hang.
 private func childCount(of parent: pid_t) -> Int {
-    let process = Process()
-    let pipe = Pipe()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-    process.arguments = ["-P", String(parent)]
-    process.standardOutput = pipe
-    try? process.run()
-    process.waitUntilExit()
-    return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n").count
+    var pids = [pid_t](repeating: 0, count: 64)
+    let count = proc_listchildpids(parent, &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+    return max(0, Int(count))
 }
 
-private final class Counter: @unchecked Sendable {
+final class Counter: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
     var value: Int { lock.withLock { count } }
     func increment() { lock.withLock { count += 1 } }
+}
+
+struct SessionCloseTests {
+    /// A session closed and let go of right away still hangs up its program and reaps it.
+    @Test func closedSessionReapsItsProgram() async throws {
+        var session: AgentSession? = AgentSession(cols: 20, rows: 2)
+        session!.start(LaunchSpec(executable: "/bin/sh", arguments: ["-c", "sleep 30"], environment: ["PATH": "/usr/bin:/bin"],
+                                  directory: NSTemporaryDirectory()))
+        let deadline = Date().addingTimeInterval(5)
+        while session!.processID == nil, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        let pid = try #require(session!.processID)
+        session!.close(grace: nil)
+        session = nil
+        // Reaped: the pid no longer exists, not even as a zombie.
+        let end = Date().addingTimeInterval(5)
+        while kill(pid, 0) == 0, Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(kill(pid, 0) != 0)
+    }
 }

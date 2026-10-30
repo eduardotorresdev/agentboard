@@ -1,0 +1,6 @@
+/* Why a card's program didn't start, and the marker between a runner's runs. */
+"This worktree no longer exists on disk." = "Esta worktree não existe mais no disco.";
+"Could not find “%@” in your PATH." = "Não encontrei “%@” no seu PATH.";
+"Unknown agent “%@”." = "Agente desconhecido “%@”.";
+"This folder no longer exists on disk." = "Esta pasta não existe mais no disco.";
+"restarted" = "reiniciado";

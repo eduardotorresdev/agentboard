@@ -6,9 +6,9 @@ import Foundation
 /// watches, restarts and stops the runners connected to it by a line.
 @MainActor
 final class RunnerTools: ToolProvider {
-    private unowned let store: AgentStore
+    private unowned let store: Orchestrator
 
-    init(store: AgentStore) {
+    init(store: Orchestrator) {
         self.store = store
     }
 
@@ -105,7 +105,7 @@ final class RunnerTools: ToolProvider {
             return .text(output.isEmpty ? "\(runner.name) has no output\(arguments["match"] == nil ? "" : " matching that") yet."
                                         : "\(runner.name), last \(output.count) lines:\n" + output.joined(separator: "\n"))
         case "runner_stop":
-            guard store.sessions[id]?.processID != nil else { return .text(report(id) ?? "\(runner.name) is not running.") }
+            guard store.session(id)?.processID != nil else { return .text(report(id) ?? "\(runner.name) is not running.") }
             await withCheckedContinuation { done in store.stopRunner(id) { done.resume() } }
             return .text("Stopped. " + (report(id) ?? ""))
         case "runner_restart":
@@ -113,7 +113,7 @@ final class RunnerTools: ToolProvider {
             store.restartRunner(id, command: command?.isEmpty == false ? command : nil)
             return .text(await settle(id, arguments))
         case "runner_input":
-            guard let session = store.sessions[id], session.processID != nil else { return .error("\(runner.name) is not running.") }
+            guard let session = store.session(id), session.processID != nil else { return .error("\(runner.name) is not running.") }
             let text = arguments["text"] as? String ?? ""
             session.send(Array(text.utf8) + ((arguments["enter"] as? Bool ?? true) ? [0x0D] : []))
             return .text("Typed into \(runner.name). Its output follows with runner_logs.")
@@ -168,7 +168,7 @@ final class RunnerTools: ToolProvider {
             // Give the stop of a restart time to land before judging the state.
             try? await Task.sleep(for: .milliseconds(300))
             while Date() < deadline {
-                let state = store.sessions[id]?.state
+                let state = store.session(id)?.state
                 if store.runnerStats[id]?.ports.isEmpty == false || state == .exited || state == .stopped { break }
                 if case .failed = state { break }
                 try? await Task.sleep(for: .milliseconds(400))
@@ -197,7 +197,7 @@ final class RunnerTools: ToolProvider {
     /// Several lines on a runner: what it runs and where, its state, URLs and cost.
     private func report(_ id: UUID) -> String? {
         guard let record = store.record(id), let runner = record.runner else { return nil }
-        let session = store.sessions[id]
+        let session = store.session(id)
         var state: String
         switch session?.state {
         case .running, .starting:

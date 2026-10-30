@@ -36,8 +36,11 @@ final class PseudoTerminal {
 
     /// Called on `queue` with each chunk the program writes.
     var onOutput: ((UnsafeRawBufferPointer) -> Void)?
-    /// Called on `queue` once the program has exited, with its exit status.
-    var onExit: ((Int32) -> Void)?
+    /// Called on `queue` once the program has exited, with its exit status (nil for an
+    /// adopted program, whose status only its parent can read).
+    var onExit: ((Int32?) -> Void)?
+    /// The program was started by another process and handed to this one (see `adopt`).
+    private var adopted = false
 
     init(queue: DispatchQueue) {
         self.queue = queue
@@ -93,8 +96,46 @@ final class PseudoTerminal {
             _exit(127)
         }
 
+        attach(master: fd, pid: child)
+    }
+
+    /// Takes over a program another process started (a core handing its programs to a newer
+    /// one): `fd` is its PTY's master, `input` what was typed that it hasn't been given yet.
+    /// Must be called on `queue`.
+    func adopt(master fd: Int32, pid: pid_t, input: [UInt8] = []) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        adopted = true
+        attach(master: fd, pid: pid)
+        if !input.isEmpty {
+            pendingWrite = input
+            flush()
+        }
+        // Gone before the watcher existed: it would never fire.
+        if kill(pid, 0) != 0, errno == ESRCH { reap() }
+    }
+
+    /// Stops reading and watching the program without touching it, and gives its PTY's master
+    /// (a duplicate, the caller's to close), its pid and the input it hasn't taken yet, for
+    /// another process to carry on. Nil when nothing runs. Must be called on `queue`.
+    func release() -> (master: Int32, pid: pid_t, input: [UInt8])? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard pid > 0 else { return nil }
+        let copy = dup(master)
+        guard copy >= 0 else { return nil }
+        let released = (copy, pid, pendingWrite)
+        pid = 0
+        exitWatcher?.cancel()
+        exitWatcher = nil
+        cancelReader()
+        writer?.cancel()
+        writer = nil
+        pendingWrite.removeAll()
+        return released
+    }
+
+    private func attach(master fd: Int32, pid: pid_t) {
         master = fd
-        pid = child
+        self.pid = pid
         _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
 
@@ -104,7 +145,7 @@ final class PseudoTerminal {
         reader.resume()
         self.reader = reader
 
-        let exitWatcher = DispatchSource.makeProcessSource(identifier: child, eventMask: .exit, queue: queue)
+        let exitWatcher = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: queue)
         exitWatcher.setEventHandler { [weak self] in self?.reap() }
         exitWatcher.resume()
         self.exitWatcher = exitWatcher
@@ -152,8 +193,14 @@ final class PseudoTerminal {
     }
 
     private func reap() {
+        guard pid > 0 else { return }
         var status: Int32 = 0
-        guard pid > 0, waitpid(pid, &status, WNOHANG) == pid else { return }
+        if adopted {
+            // Not our child: launchd reaps it, and its status is lost with it.
+            guard kill(pid, 0) != 0, errno == ESRCH else { return }
+        } else {
+            guard waitpid(pid, &status, WNOHANG) == pid else { return }
+        }
         pid = 0
         exitWatcher?.cancel()
         exitWatcher = nil
@@ -163,7 +210,7 @@ final class PseudoTerminal {
         writer?.cancel()
         writer = nil
         pendingWrite.removeAll()
-        onExit?(status)
+        onExit?(adopted ? nil : status)
     }
 
     /// Queues bytes for the program. Safe from any thread.

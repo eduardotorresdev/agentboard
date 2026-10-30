@@ -1,9 +1,20 @@
+import AgentRuntime
 import AppKit
 import SwiftUI
 
 struct WorktreeSelection: Hashable {
     let projectID: Project.ID
     let worktree: Worktree
+}
+
+/// The worktree open on the canvas, kept per data folder so another instance keeps its own.
+enum OpenWorktree {
+    private static var key: String { "openWorktree:" + DataFolder.url.path }
+
+    static var path: String? {
+        get { UserDefaults.standard.string(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
 }
 
 struct ContentView: View {
@@ -37,6 +48,8 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        .onAppear(perform: restoreSelection)
+        .onChange(of: selection) { _, selection in OpenWorktree.path = selection?.worktree.path }
         #if BENCH
         .task { await runBenchScenario() }
         #endif
@@ -138,6 +151,16 @@ struct ContentView: View {
         guard panel.runModal() == .OK, let url = panel.url,
               let project = store.addProject(at: url) else { return }
         select(project)
+    }
+
+    /// Reopens the worktree that was open when the board last ran, as after a rebuild.
+    private func restoreSelection() {
+        guard selection == nil, let path = OpenWorktree.path else { return }
+        for project in store.projects {
+            if let worktree = store.worktrees[project.id]?.first(where: { $0.path == path }) {
+                selection = WorktreeSelection(projectID: project.id, worktree: worktree)
+            }
+        }
     }
 
     private func select(_ project: Project) {

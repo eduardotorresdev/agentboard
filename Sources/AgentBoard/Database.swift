@@ -1,4 +1,4 @@
-import Connections
+import AgentRuntime
 import Foundation
 import SQLite3
 
@@ -12,7 +12,8 @@ enum DatabaseError: Error {
     case sqlite(String)
 }
 
-/// Thin wrapper over the system SQLite library.
+/// Thin wrapper over the system SQLite library: projects, worktree names and browsers. The
+/// cards and the lines between elements are in the same file, kept by the core (`CardDatabase`).
 final class Database {
     private var db: OpaquePointer?
 
@@ -20,15 +21,15 @@ final class Database {
         #if BENCH
         if let url = BenchScenario.database { return url }
         #endif
-        let dir = try FileManager.default
-            .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            .appendingPathComponent("AgentBoard", isDirectory: true)
+        let dir = DataFolder.url
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("agentboard.sqlite")
     }
 
     init(url: URL) throws {
         guard sqlite3_open(url.path, &db) == SQLITE_OK else { throw error() }
+        // The core has the same file open.
+        sqlite3_busy_timeout(db, 3000)
         try execute("""
             CREATE TABLE IF NOT EXISTS projects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,18 +39,6 @@ final class Database {
             CREATE TABLE IF NOT EXISTS worktree_aliases (
                 path TEXT PRIMARY KEY,
                 alias TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS agents (
-                id TEXT PRIMARY KEY,
-                worktree TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                x REAL NOT NULL, y REAL NOT NULL,
-                width REAL NOT NULL, height REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS connections (
-                id TEXT PRIMARY KEY,
-                a TEXT NOT NULL,
-                b TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS browsers (
                 id TEXT PRIMARY KEY,
@@ -67,16 +56,6 @@ final class Database {
             """)
         if try !columns(of: "browsers").contains("profile") {
             try execute("ALTER TABLE browsers ADD COLUMN profile TEXT")
-        }
-        if try !columns(of: "agents").contains("name") {
-            try execute("ALTER TABLE agents ADD COLUMN name TEXT")
-        }
-        if try !columns(of: "agents").contains("command") {
-            // Runner cards: what they run, where, and the agent that started them.
-            try execute("ALTER TABLE agents ADD COLUMN command TEXT; ALTER TABLE agents ADD COLUMN directory TEXT; ALTER TABLE agents ADD COLUMN owner TEXT")
-        }
-        if try !columns(of: "connections").contains("a_side") {
-            try execute("ALTER TABLE connections ADD COLUMN a_side INTEGER; ALTER TABLE connections ADD COLUMN b_side INTEGER")
         }
     }
 
@@ -136,57 +115,6 @@ final class Database {
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, path)
         if let alias { bind(stmt, 2, alias) }
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
-    }
-
-    func agents() throws -> [AgentRecord] {
-        let stmt = try prepare("SELECT id, worktree, kind, x, y, width, height, name, command, directory, owner FROM agents ORDER BY rowid")
-        defer { sqlite3_finalize(stmt) }
-        var result: [AgentRecord] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))),
-                  let providerID = sqlite3_column_text(stmt, 2).map({ String(cString: $0) }) else { continue }
-            let worktree = String(cString: sqlite3_column_text(stmt, 1))
-            let runner = sqlite3_column_text(stmt, 8).map { command in
-                RunnerSpec(command: String(cString: command),
-                           directory: sqlite3_column_text(stmt, 9).map { String(cString: $0) } ?? worktree,
-                           owner: sqlite3_column_text(stmt, 10).flatMap { UUID(uuidString: String(cString: $0)) })
-            }
-            result.append(AgentRecord(
-                id: id,
-                worktree: worktree,
-                providerID: providerID,
-                name: sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? "",
-                frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
-                              width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
-                runner: runner))
-        }
-        return result
-    }
-
-    func saveAgent(_ agent: AgentRecord) throws {
-        let stmt = try prepare("""
-            INSERT OR REPLACE INTO agents (id, worktree, kind, x, y, width, height, name, command, directory, owner)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-        defer { sqlite3_finalize(stmt) }
-        bind(stmt, 1, agent.id.uuidString)
-        bind(stmt, 2, agent.worktree)
-        bind(stmt, 3, agent.providerID)
-        for (index, value) in [agent.frame.minX, agent.frame.minY, agent.frame.width, agent.frame.height].enumerated() {
-            sqlite3_bind_double(stmt, Int32(index + 4), value)
-        }
-        bind(stmt, 8, agent.name)
-        for (column, value) in [(Int32(9), agent.runner?.command), (10, agent.runner?.directory), (11, agent.runner?.owner?.uuidString)] {
-            if let value { bind(stmt, column, value) } else { sqlite3_bind_null(stmt, column) }
-        }
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
-    }
-
-    func deleteAgent(id: UUID) throws {
-        let stmt = try prepare("DELETE FROM agents WHERE id = ?")
-        defer { sqlite3_finalize(stmt) }
-        bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 
@@ -256,46 +184,6 @@ final class Database {
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
-    }
-
-    /// Lines between cards, in the order they were drawn.
-    func connections() throws -> [Connection] {
-        let stmt = try prepare("SELECT id, a, b, a_side, b_side FROM connections ORDER BY rowid")
-        defer { sqlite3_finalize(stmt) }
-        func side(_ column: Int32) -> Side? {
-            sqlite3_column_type(stmt, column) == SQLITE_NULL ? nil : Side(rawValue: Int(sqlite3_column_int(stmt, column)))
-        }
-        var result: [Connection] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let ids = (0..<3).map { UUID(uuidString: String(cString: sqlite3_column_text(stmt, $0))) }
-            guard let id = ids[0], let a = ids[1], let b = ids[2] else { continue }
-            result.append(Connection(id: id, a: a, b: b, aSide: side(3), bSide: side(4)))
-        }
-        return result
-    }
-
-    /// Replaces the stored lines with `connections`, keeping their order.
-    func saveConnections(_ connections: [Connection]) throws {
-        try execute("BEGIN")
-        do {
-            try execute("DELETE FROM connections")
-            let stmt = try prepare("INSERT INTO connections (id, a, b, a_side, b_side) VALUES (?, ?, ?, ?, ?)")
-            defer { sqlite3_finalize(stmt) }
-            for connection in connections {
-                sqlite3_reset(stmt)
-                bind(stmt, 1, connection.id.uuidString)
-                bind(stmt, 2, connection.a.uuidString)
-                bind(stmt, 3, connection.b.uuidString)
-                for (column, side) in [(Int32(4), connection.aSide), (5, connection.bSide)] {
-                    if let side { sqlite3_bind_int(stmt, column, Int32(side.rawValue)) } else { sqlite3_bind_null(stmt, column) }
-                }
-                guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
-            }
-            try execute("COMMIT")
-        } catch {
-            try? execute("ROLLBACK")
-            throw error
-        }
     }
 
     private func execute(_ sql: String) throws {

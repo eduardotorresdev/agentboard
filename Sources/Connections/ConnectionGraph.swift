@@ -1,12 +1,12 @@
 import Foundation
 
 /// A side of a card, where a line may attach.
-public enum Side: Int, CaseIterable, Sendable {
+public enum Side: Int, CaseIterable, Sendable, Codable {
     case top, right, bottom, left
 }
 
 /// A line between two board elements. Undirected: messages travel both ways.
-public struct Connection: Identifiable, Hashable, Sendable {
+public struct Connection: Identifiable, Hashable, Sendable, Codable {
     public let id: UUID
     public let a: UUID
     public let b: UUID
@@ -58,6 +58,15 @@ public struct ConnectionGraph: Hashable, Sendable {
         let connection = Connection(a: x, b: y, aSide: sides.0, bSide: sides.1)
         connections.append(connection)
         return connection
+    }
+
+    /// Adds `connection` as it is (drawn elsewhere, with its id). Returns false for a
+    /// self-connection or one between elements already connected.
+    @discardableResult
+    public mutating func add(_ connection: Connection) -> Bool {
+        guard connection.a != connection.b, self.connection(between: connection.a, connection.b) == nil else { return false }
+        connections.append(connection)
+        return true
     }
 
     public mutating func disconnect(_ id: UUID) {

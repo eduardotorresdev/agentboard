@@ -46,6 +46,15 @@ let package = Package(
                           path: "Pacing", plugins: plugins),
         .executableTarget(name: "App", dependencies: suite + ["FakeAgent"], path: "App", plugins: plugins),
 
+        // The gate of GOAL.md: agents keep running, untouched, while boards and cores come and go.
+        .executableTarget(name: "Chaos", dependencies: [
+            "FakeAgent",
+            .product(name: "AgentRuntime", package: "AgentBoard"),
+            .product(name: "Orchestration", package: "AgentBoard"),
+            .product(name: "Connections", package: "AgentBoard"),
+            .product(name: "TerminalCore", package: "AgentBoard"),
+        ]),
+
         // Not benchmarks: renders and prints things to look at.
         .executableTarget(name: "Inspect", dependencies: [
             "BenchKit", "ClaudeSim",

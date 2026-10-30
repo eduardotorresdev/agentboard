@@ -1,0 +1,82 @@
+#!/bin/bash
+# Installs this checkout as AgentBoard.app (in /Applications, or INSTALL_DIR), or updates the
+# installed one, without ending a single agent: the new build's core takes the agents over
+# from the running core, and the app relaunches onto them. An agent working in the installed
+# app can run it to update the app it runs in.
+#
+# The installed app keeps the main data folder (~/Library/Application Support/AgentBoard);
+# ./run's builds keep their own, so trying a change never touches the installed app's agents.
+# AGENTBOARD_HOME installs onto another data folder (to try installing out).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+DEST="${INSTALL_DIR:-/Applications}/AgentBoard.app"
+BUNDLE_ID="dev.agentboard.AgentBoard"
+
+swift build -c release
+BIN=$(swift build -c release --show-bin-path)
+
+# Assembled next to where it goes, so putting it in place is a rename.
+mkdir -p "$(dirname "$DEST")"
+STAGE=$(mktemp -d "$(dirname "$DEST")/.AgentBoard-install.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
+APP="$STAGE/AgentBoard.app"
+mkdir -p "$APP/Contents/MacOS"
+cp "$BIN/AgentBoard" "$BIN/AgentBoardCore" "$BIN/libBrowserInjection.dylib" "$APP/Contents/MacOS/"
+# Where SwiftPM's resource accessors look: the bundle's root.
+cp -R "$BIN"/AgentBoard_*.bundle "$APP/"
+VERSION=$(date +%Y.%m.%d)
+BUILD=$(date +%Y%m%d%H%M)
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+git diff --quiet HEAD 2>/dev/null || COMMIT="$COMMIT+changes"
+cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>AgentBoard</string>
+    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+    <key>CFBundleName</key><string>AgentBoard</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
+    <key>CFBundleVersion</key><string>$BUILD</string>
+    <key>AgentBoardCommit</key><string>$COMMIT</string>
+    <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+
+# Settings kept by the builds before the app was installed (project folder, the worktree that
+# was open, window frames) carry over once.
+# (An emptied domain still reads, so a key says it was done.)
+if ! defaults read "$BUNDLE_ID" settingsCarriedOver >/dev/null 2>&1; then
+    defaults read AgentBoard >/dev/null 2>&1 && defaults export AgentBoard - | defaults import "$BUNDLE_ID" -
+    defaults write "$BUNDLE_ID" settingsCarriedOver -bool true
+fi
+
+# The installed app running now, to relaunch after the swap. Its command line has the real
+# path (/private/var, not /var).
+REAL_DEST="$(cd "$(dirname "$DEST")" && pwd -P)/AgentBoard.app"
+APP_PIDS=$( (pgrep -f "^$DEST/Contents/MacOS/AgentBoard\$"; pgrep -f "^$REAL_DEST/Contents/MacOS/AgentBoard\$") | sort -u || true)
+
+[ -d "$DEST" ] && mv "$DEST" "$STAGE/previous.app"
+mv "$APP" "$DEST"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST" 2>/dev/null || true
+
+# The agents move to the new core; with none running, this starts one.
+"$DEST/Contents/MacOS/AgentBoardCore" --take-over
+
+# SIGTERM leaves the agents on the core (Cmd+Q would end them).
+for pid in $APP_PIDS; do
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in $(seq 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+done
+OPEN_ARGS=()
+for name in AGENTBOARD_HOME AGENTBOARD_CORE_SOCKET AGENTBOARD_BACKGROUND AGENTBOARD_SCREENS; do
+    [ -n "${!name:-}" ] && OPEN_ARGS+=(--env "$name=${!name}")
+done
+open ${OPEN_ARGS[@]+"${OPEN_ARGS[@]}"} "$DEST"
+echo "AgentBoard $VERSION ($COMMIT) is installed at $DEST."

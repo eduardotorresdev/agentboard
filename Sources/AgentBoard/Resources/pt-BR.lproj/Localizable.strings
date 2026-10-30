@@ -57,6 +57,11 @@
 "Back to actual size (⌘0)" = "Voltar ao tamanho real (⌘0)";
 "Agent exited. Click to restart." = "Agente encerrado. Clique para reiniciar.";
 "This worktree no longer exists on disk." = "Esta worktree não existe mais no disco.";
+"Couldn't start the process that runs the agents." = "Não consegui iniciar o processo que roda os agentes.";
+"Lost the process that runs the agents. Reconnecting…" = "Perdi o processo que roda os agentes. Reconectando…";
+"Your agents can't be shown" = "Não dá para mostrar seus agentes";
+"Your agents run on a newer build. Open that build to see them." = "Seus agentes rodam numa versão mais nova. Abra essa versão para vê-los.";
+"Your agents run on an older build that can't hand them over to this one. Open that build to carry on with them." = "Seus agentes rodam numa versão mais antiga, que não consegue passá-los para esta. Abra aquela versão para continuar com eles.";
 "Could not find “%@” in your PATH." = "Não encontrei “%@” no seu PATH.";
 "Starting %@…" = "Iniciando %@…";
 "Unknown agent “%@”." = "Agente desconhecido “%@”.";

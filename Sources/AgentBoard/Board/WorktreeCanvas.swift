@@ -12,7 +12,12 @@ struct WorktreeCanvas: View {
         ZStack(alignment: .bottom) {
             Theme.canvas
             Board(store: agents, browsers: browsers, worktree: worktree.path, controller: board)
-            if isEmpty {
+            if let notice {
+                EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            } else if isEmpty {
                 EmptyCanvas(
                     symbol: "terminal",
                     title: L("No agents yet"),
@@ -29,6 +34,7 @@ struct WorktreeCanvas: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .animation(.smooth(duration: 0.3), value: isEmpty)
+        .animation(.smooth(duration: 0.3), value: notice)
         .clipped()
         .sheet(item: Binding(get: { board.deviceRequest }, set: { board.deviceRequest = $0 })) { request in
             let current: BrowserDevice? = if case .browser(let id) = request.target { browsers.record(id)?.device } else { nil }
@@ -47,8 +53,13 @@ struct WorktreeCanvas: View {
         }
     }
 
+    /// Shown where the cards would be, when there are none to show.
+    private var notice: String? {
+        agents.agents(in: worktree.path).isEmpty ? agents.notice : nil
+    }
+
     private var isEmpty: Bool {
-        agents.agents(in: worktree.path).isEmpty && browsers.browsers(in: worktree.path).isEmpty
+        agents.isLoaded && agents.agents(in: worktree.path).isEmpty && browsers.browsers(in: worktree.path).isEmpty
     }
 }
 

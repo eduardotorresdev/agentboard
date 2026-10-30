@@ -88,6 +88,19 @@ public final class Scrollback {
         return nil
     }
 
+    /// Every line from the oldest, unpacked to `cols` cells, in one pass over the pages.
+    func forEachLine(cols: Int, _ body: (_ cells: [Cell], _ wrapped: Bool) -> Void) {
+        for (pageIndex, page) in pages.enumerated() {
+            var cursor = UnsafeRawPointer(page.base) + (pageIndex == 0 ? headOffset : 0)
+            for _ in 0..<(pageIndex == 0 ? page.lines - headExpired : page.lines) {
+                let length = Self.readVarint(&cursor)
+                let line = decode(UnsafeRawBufferPointer(start: cursor, count: length), cols: cols)
+                body(line.cells, line.wrapped)
+                cursor += length
+            }
+        }
+    }
+
     private func dropOldest() {
         var cursor = UnsafeRawPointer(pages[0].base) + headOffset
         let length = Self.readVarint(&cursor)

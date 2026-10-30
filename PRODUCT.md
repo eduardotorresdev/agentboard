@@ -29,7 +29,7 @@ Runs alongside the developer's normal tools: git repositories on disk, branches 
 ## Capabilities and Constraints
 
 - Local-first: all data is local (SQLite at `~/Library/Application Support/AgentBoard/agentboard.sqlite`, git on disk). No server, no account.
-- Current state: sidebar of projects with their git worktrees; each worktree is a canvas of agent terminals. Agents connected by a line on the canvas can message each other: the app runs a local MCP server (127.0.0.1, one token per agent) whose `list_peers` and `send_message` tools only reach connected agents, and a message arrives typed into the recipient's terminal. The attention signal is not built yet.
+- Current state: sidebar of projects with their git worktrees; each worktree is a canvas of agent terminals. Agents connected by a line on the canvas can message each other: the app runs a local MCP server (127.0.0.1, one token per agent) whose `list_peers` and `send_message` tools only reach connected agents, and a message arrives typed into the recipient's terminal. The cards' programs run in a local companion process (`AgentBoardCore`, see `docs/core.md`), so they survive the app being relaunched or rebuilt. The attention signal is not built yet.
 - Open: how "needs feedback" is detected per agent; how agents are launched or attached.
 - Distribution: personal use for now, but not a fixed constraint; avoid decisions that would prevent wider distribution later.
 

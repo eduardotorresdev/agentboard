@@ -82,7 +82,7 @@ public final class ToolCatalog {
         case "initialize":
             result = [
                 "protocolVersion": params["protocolVersion"] as? String ?? Self.fallbackProtocolVersion,
-                "capabilities": ["tools": ["listChanged": false]],
+                "capabilities": ["tools": ["listChanged": true]],
                 "serverInfo": ["name": Self.serverName, "version": "1.0"],
                 "instructions": providers.compactMap { $0.instructions(for: caller) }.joined(separator: "\n\n"),
             ]
