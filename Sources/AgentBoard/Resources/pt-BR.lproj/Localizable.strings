@@ -207,7 +207,6 @@
 "Keeps this answer and shows the next question." = "Guarda esta resposta e mostra a próxima pergunta.";
 "Shows the previous question, to change its answer." = "Mostra a pergunta anterior, para mudar a resposta.";
 "%lld of %lld" = "%1$lld de %2$lld";
-"Remove Worktree…" = "Remover worktree…";
 "Commit and Push" = "Commitar e dar push";
 "Remove %@?" = "Remover %@?";
 "%lld files with uncommitted changes" = "%lld arquivos com mudanças não commitadas";

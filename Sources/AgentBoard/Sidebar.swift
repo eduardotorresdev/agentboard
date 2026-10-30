@@ -100,7 +100,7 @@ struct Sidebar: View {
                 Button(L("Rename")) { renaming = worktree }
                 if !store.isMain(worktree, in: project) {
                     Divider()
-                    Button(L("Remove Worktree…"), role: .destructive) { requestRemoval(of: worktree, in: project) }
+                    Button(L("Remove"), role: .destructive) { requestRemoval(of: worktree, in: project) }
                 }
             }
     }
