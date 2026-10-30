@@ -45,24 +45,24 @@ struct QuestionForm: View {
             HStack(spacing: 10) {
                 if step > 0 {
                     Button(L("Back")) { go(to: step - 1) }
-                        .controlSize(.small)
+                        .controlSize(.large)
                         .help(L("Shows the previous question, to change its answer."))
                 }
                 Spacer()
                 Button(L("Answer in terminal"), action: onTerminal)
-                    .controlSize(.small)
+                    .controlSize(.large)
                     .help(L("Shows these questions in the agent's terminal, to answer there."))
                 if isLast {
                     Button(L("Send answers")) { onSend(answers) }
                         .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                        .controlSize(.large)
                         .disabled(!isComplete || !isActive)
                         .keyboardShortcut(.return, modifiers: .command)
                         .help(L("Gives the agent your answers; it carries on with them."))
                 } else {
                     Button(L("Next")) { go(to: step + 1) }
                         .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                        .controlSize(.large)
                         .disabled(!isAnswered(step))
                         .keyboardShortcut(.return, modifiers: .command)
                         .help(L("Keeps this answer and shows the next question."))
