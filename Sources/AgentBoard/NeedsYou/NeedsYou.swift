@@ -141,7 +141,7 @@ struct NeedsYouDeck: View {
             .scaleEffect(1 - CGFloat(depth) * 0.04)
             .offset(x: drag.width, y: drag.height * 0.4 + CGFloat(depth) * 14)
             .rotationEffect(.degrees(depth == 0 ? (reduceMotion ? 0 : Double(drag.width / 24)) : Self.tilt(depth, request.id)))
-            .opacity(isLeaving && reduceMotion ? 0 : 1)
+            .opacity(isLeaving ? 0 : 1)
             .allowsHitTesting(isTop)
             .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.96)), removal: .opacity))
             .simultaneousGesture(isTop ? swipe(request.id) : nil)
@@ -179,7 +179,7 @@ struct NeedsYouDeck: View {
             }
     }
 
-    /// Flies the card off toward `direction`, then takes it out of the queue.
+    /// Slides the card a little toward `direction` as it fades, then takes it out of the queue.
     /// `then` runs as it lands, before the request leaves the queue (answering questions).
     private func leave(_ id: UUID, direction: CGFloat, then: (() -> Void)? = nil) {
         guard !leaving.contains(id) else { return }
@@ -188,7 +188,7 @@ struct NeedsYouDeck: View {
         // The next card rises while this one leaves.
         withAnimation(.snappy(duration: 0.4)) { _ = leaving.insert(id) }
         withAnimation(.snappy(duration: 0.32)) {
-            drags[id] = CGSize(width: direction * (reduceMotion ? 80 : 1400), height: current.height)
+            drags[id] = CGSize(width: direction * (reduceMotion ? 40 : 220), height: current.height)
         } completion: {
             leaving.remove(id)
             drags[id] = nil
