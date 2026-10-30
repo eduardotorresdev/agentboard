@@ -4,6 +4,8 @@ import SwiftUI
 /// it blurred, so the board stays in view behind the list.
 struct Sidebar: View {
     let store: ProjectStore
+    let agents: AgentStore
+    let browsers: BrowserStore
     @Binding var selection: WorktreeSelection?
     @Binding var renaming: Worktree?
     @State private var collapsed: Set<Project.ID> = []
@@ -62,7 +64,7 @@ struct Sidebar: View {
 
     private func row(for worktree: Worktree, in project: Project) -> some View {
         let tag = WorktreeSelection(projectID: project.id, worktree: worktree)
-        return WorktreeRow(worktree: worktree, name: store.displayName(of: worktree),
+        return WorktreeRow(worktree: worktree, name: store.displayName(of: worktree), contents: contents(of: worktree),
                            isSelected: selection == tag, isRenaming: renaming == worktree,
                            selectionSpace: selectionSpace,
                            onSelect: { withAnimation(.snappy(duration: 0.3)) { selection = tag } },
@@ -73,6 +75,15 @@ struct Sidebar: View {
             .contextMenu {
                 Button(L("Rename")) { renaming = worktree }
             }
+    }
+
+    /// What is on the worktree's canvas, and whether any of it is at work.
+    private func contents(of worktree: Worktree) -> WorktreeContents {
+        let cards = agents.agents(in: worktree.path)
+        let runners = cards.filter { $0.runner != nil }
+        return WorktreeContents(hasAgents: cards.contains { $0.runner == nil }, hasRunners: !runners.isEmpty,
+                                runnerRunning: runners.contains { agents.runningRunners.contains($0.id) },
+                                hasBrowsers: !browsers.browsers(in: worktree.path).isEmpty)
     }
 }
 
@@ -141,6 +152,7 @@ private struct ProjectHeader: View {
 private struct WorktreeRow: View {
     let worktree: Worktree
     let name: String
+    let contents: WorktreeContents
     let isSelected: Bool
     let isRenaming: Bool
     let selectionSpace: Namespace.ID
@@ -152,10 +164,17 @@ private struct WorktreeRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: worktree.branch == nil ? "circle.dashed" : "arrow.triangle.branch")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(isSelected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
-                .frame(width: 14)
+            Group {
+                if contents.isEmpty {
+                    Image(systemName: worktree.branch == nil ? "circle.dashed" : "arrow.triangle.branch")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
+                } else {
+                    WorktreeGlyph(contents: contents, isSelected: isSelected)
+                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
+                }
+            }
+            .frame(width: 14)
             VStack(alignment: .leading, spacing: 2) {
                 title
                 if let subtitle {

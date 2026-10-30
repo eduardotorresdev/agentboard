@@ -60,7 +60,14 @@ final class AgentStore {
 
     // Runners (see AgentStore+Runners.swift).
     /// What each running runner serves and costs, and when it started, as the core measures it.
-    @ObservationIgnored var runnerReport = RunnerReport()
+    @ObservationIgnored var runnerReport = RunnerReport() {
+        didSet {
+            let running = Set(runnerReport.starts.keys)
+            if running != runningRunners { runningRunners = running }
+        }
+    }
+    /// The runners running now. Observed, unlike the report, whose stats change every second.
+    private(set) var runningRunners: Set<UUID> = []
     /// Runners to start when their session is created; the others come back stopped.
     @ObservationIgnored var runnersToStart: Set<UUID> = []
     /// Called when runner stats or states change, so the board redraws their cards.

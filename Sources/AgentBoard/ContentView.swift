@@ -97,7 +97,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Always in the tree and slid off-screen when hidden: removing it from the ZStack drops
             // it behind the board while it leaves, so the slide never shows.
-            Sidebar(store: store, selection: $selection, renaming: $renaming)
+            Sidebar(store: store, agents: agents, browsers: browsers, selection: $selection, renaming: $renaming)
                 // Past its width, so the shadow leaves with it.
                 .offset(x: isSidebarVisible ? 0 : -(Sidebar.width + 32))
                 .allowsHitTesting(isSidebarVisible)
