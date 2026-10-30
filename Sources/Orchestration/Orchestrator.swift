@@ -232,6 +232,10 @@ public final class Orchestrator: CoreService {
             update(record.id, from: board) { $0 = record }
         case .removeCard(let id):
             remove(id, from: board)
+        case .deliver(let from, let text):
+            for peer in bus.peers(of: from) where peer is any MessageEndpoint {
+                _ = try? bus.deliver(text, from: from, to: peer.id)
+            }
         case .connect(let connection):
             bus.add(connection)
         case .disconnect(let id):

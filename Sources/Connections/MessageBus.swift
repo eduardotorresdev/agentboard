@@ -9,6 +9,7 @@ public struct ElementKind: RawRepresentable, Hashable, Sendable {
     public static let browser = ElementKind(rawValue: "browser")
     public static let runner = ElementKind(rawValue: "runner")
     public static let postIt = ElementKind(rawValue: "postit")
+    public static let fileTree = ElementKind(rawValue: "filetree")
 }
 
 /// Anything on the board a line can reach: an agent's terminal, a browser, a post-it and more.

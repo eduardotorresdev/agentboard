@@ -64,6 +64,7 @@ final class BoardController {
     func add(_ provider: any AgentProvider) { view?.addAgent(provider) }
     func add(_ device: BrowserDevice) { view?.addBrowser(device) }
     func addPostIt() { view?.addPostIt() }
+    func addFileTree() { view?.addFileTree() }
     /// The dialog that asks what a new runner runs is open.
     var addingRunner = false
     func addRunner(command: String, name: String?, directory: String?) { view?.addRunner(command: command, name: name, directory: directory) }
@@ -95,11 +96,12 @@ struct DeviceRequest: Identifiable {
 struct Board: NSViewRepresentable {
     let store: AgentStore
     let browsers: BrowserStore
+    let fileTrees: FileTreeStore
     let worktree: String
     let controller: BoardController
 
     func makeNSView(context: Context) -> BoardView {
-        let view = BoardView(store: store, browsers: browsers)
+        let view = BoardView(store: store, browsers: browsers, fileTrees: fileTrees)
         controller.view = view
         view.controller = controller
         return view
@@ -136,6 +138,11 @@ struct Board: NSViewRepresentable {
 final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private let store: AgentStore
     private let browsers: BrowserStore
+    fileprivate let fileTrees: FileTreeStore
+    fileprivate var fileTreeCards: [UUID: FileTreeCardLayer] = [:]
+    /// The SwiftUI files and file of each file tree card, over its content, and the bar that
+    /// sends its notes, below it.
+    fileprivate var fileTreeViews: [UUID: (host: FileTreeHost, content: NSView, bar: NSView, barHost: FileTreeHost)] = [:]
     private let presenter: TerminalPresenter?
     private let surface: SharedSurface<UUID>?
     /// Glyphs at the backing scale times `renderZoom`.
@@ -271,9 +278,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         let frame: CGRect
     }
 
-    init(store: AgentStore, browsers: BrowserStore) {
+    init(store: AgentStore, browsers: BrowserStore, fileTrees: FileTreeStore) {
         self.store = store
         self.browsers = browsers
+        self.fileTrees = fileTrees
         presenter = MTLCreateSystemDefaultDevice().flatMap { TerminalPresenter(device: $0) }
         surface = presenter.map { SharedSurface(device: $0.device) }
         super.init(frame: .zero)
@@ -431,6 +439,18 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         beginPostItEditing(on: record.id, at: nil)
     }
 
+    func addFileTree() {
+        let size = FileTreeRecord.size
+        let cascade = CGFloat(fileTrees.trees(in: worktree).count % 6) * 28
+        let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
+        let top = world(CGPoint(x: 0, y: 72)).y
+        let origin = CGPoint(x: center.x - size.width / 2 + cascade, y: max(top, center.y - size.height / 2) + cascade)
+        let record = fileTrees.add(to: worktree, at: origin)
+        appearing.insert(record.id)
+        focusedID = record.id
+        syncLayers()
+    }
+
     // MARK: Layers
 
     private func prepareGlyphs() -> GlyphCache? {
@@ -527,6 +547,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }
         syncPostIts(scale: renderScale)
         syncBrowsers(onScreen: onScreen, scale: renderScale)
+        syncFileTrees(scale: renderScale)
         syncLinks(scale: renderScale)
         // Terminals that got a new place in the surface are drawn there before they show again.
         if let surface { dirty.formUnion(surface.arrange(sizes)) }
@@ -571,12 +592,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// Every card of this worktree, agents, post-its then browsers: bottom to top.
     private var itemFrames: [(id: UUID, frame: CGRect)] {
         store.agents(in: worktree).map { ($0.id, $0.frame) } + store.postIts(in: worktree).map { ($0.id, $0.frame) }
-            + browsers.browsers(in: worktree).map { ($0.id, $0.frame) }
+            + browsers.browsers(in: worktree).map { ($0.id, $0.frame) } + fileTrees.trees(in: worktree).map { ($0.id, $0.frame) }
     }
 
     /// The lines of this worktree, between any of its cards.
     private var worktreeConnections: [Connection] {
-        store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree).map(\.id)))
+        store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree).map(\.id)).union(fileTrees.trees(in: worktree).map(\.id)))
     }
 
     /// Lays out the lines between this worktree's cards (rerouting only when cards or lines
@@ -855,28 +876,34 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// The topmost agent card under a world point, unless a browser or post-it covers it.
     private func card(at point: CGPoint) -> AgentRecord? {
-        guard browser(at: point) == nil, postIt(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, postIt(at: point) == nil, fileTree(at: point) == nil else { return nil }
         return store.agents(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost browser card under a world point.
     private func browser(at point: CGPoint) -> BrowserRecord? {
-        browsers.browsers(in: worktree).last { $0.frame.contains(point) }
+        guard fileTree(at: point) == nil else { return nil }
+        return browsers.browsers(in: worktree).last { $0.frame.contains(point) }
+    }
+
+    /// The topmost file tree card under a world point; their files float above every other card.
+    fileprivate func fileTree(at point: CGPoint) -> FileTreeRecord? {
+        fileTrees.trees(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost post-it under a world point, unless a browser card covers it.
     fileprivate func postIt(at point: CGPoint) -> PostItRecord? {
-        guard browser(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, fileTree(at: point) == nil else { return nil }
         return store.postIts(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost card of any kind under a world point.
     private func item(at point: CGPoint) -> UUID? {
-        browser(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
+        fileTree(at: point)?.id ?? browser(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
     }
 
     private func frame(of id: UUID) -> CGRect? {
-        record(id)?.frame ?? store.postIt(id)?.frame ?? browsers.record(id)?.frame
+        record(id)?.frame ?? store.postIt(id)?.frame ?? browsers.record(id)?.frame ?? fileTrees.record(id)?.frame
     }
 
     private func record(_ id: UUID) -> AgentRecord? {
@@ -965,6 +992,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let id = hoveredLink, let link = links[id], link.knobContains(location, zoom: zoom) {
             store.disconnect(id)
             hoveredLink = nil
+            syncLayers()
+            return
+        }
+        if let tree = fileTree(at: location) {
+            endAddressEditing()
+            endPostItEditing()
+            fileTreeMouseDown(tree, at: location, point: point)
             syncLayers()
             return
         }
@@ -1135,6 +1169,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let card, CardMetrics.close(of: card.frame).contains(point) {
             hovered = card.id
         }
+        let tree = fileTree(at: point)
+        if let tree, CardMetrics.close(of: tree.frame).contains(point) {
+            hovered = tree.id
+        }
         let browser = browser(at: point)
         let control = browser.flatMap { record in Self.control(at: point, in: record).map { (record.id, $0) } }
         if let browser, browser.id == focusedID, BrowserCardLayout(frame: browser.frame, record: browser).content.contains(point) {
@@ -1151,7 +1189,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             syncLayers()
         }
         let handle = handle(at: point)
-        let showing = handle?.card ?? browser?.id ?? postIt?.id ?? card?.id
+        let showing = handle?.card ?? tree?.id ?? browser?.id ?? postIt?.id ?? card?.id
         if control?.0 != hoveredControl?.card || control?.1 != hoveredControl?.control {
             hoveredControl = control.map { (card: $0.0, control: $0.1) }
             syncLayers()
@@ -1424,7 +1462,9 @@ extension BoardView {
     }
 
     fileprivate func setFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
-        if browsers.record(id) != nil {
+        if fileTrees.record(id) != nil {
+            fileTrees.setFrame(frame, for: id, persist: persist)
+        } else if browsers.record(id) != nil {
             browsers.setFrame(frame, for: id, persist: persist)
         } else if store.postIt(id) != nil {
             store.setPostItFrame(frame, for: id, persist: persist)
@@ -2312,5 +2352,88 @@ private final class LinkLayer: CALayer {
         }
         if let last = points.last { path.addLine(to: last) }
         return path
+    }
+}
+
+// MARK: - File trees
+
+extension BoardView {
+    /// File tree cards sit above every other card: their files are views over the board.
+    fileprivate func syncFileTrees(scale: CGFloat) {
+        let records = fileTrees.trees(in: worktree)
+        let ids = Set(records.map(\.id))
+        for (id, card) in fileTreeCards where !ids.contains(id) {
+            card.removeFromSuperlayer()
+            fileTreeCards[id] = nil
+        }
+        for (id, views) in fileTreeViews where !ids.contains(id) {
+            views.content.removeFromSuperview()
+            views.bar.removeFromSuperview()
+            fileTreeViews[id] = nil
+        }
+        let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count + browsers.browsers(in: worktree).count)
+        for (index, record) in records.enumerated() {
+            let card = fileTreeCards[record.id] ?? {
+                let card = FileTreeCardLayer()
+                fileTreeCards[record.id] = card
+                cardsLayer.addSublayer(card)
+                if appearing.remove(record.id) != nil { card.animateAppearance() }
+                return card
+            }()
+            card.zPosition = below + CGFloat(index)
+            card.update(frame: record.frame, name: record.name, focused: record.id == focusedID, closeHovered: hoveredClose == record.id,
+                        scale: scale)
+            let lit: Int? = if let linkDrag {
+                linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
+            } else {
+                record.id == hoveredCard ? hoveredHandle : nil
+            }
+            card.updateHandles(visible: linkDrag != nil || record.id == hoveredCard, hovered: lit, linkTarget: linkDrag?.target == record.id)
+
+            let views = fileTreeViews[record.id] ?? {
+                let host = FileTreeHost()
+                let content = NSHostingView(rootView: Zoomed(host: host) {
+                    FileTreeView(store: fileTrees, id: record.id, model: fileTrees.browser(for: record))
+                })
+                let barHost = FileTreeHost()
+                let bar = NSHostingView(rootView: Zoomed(host: barHost) { SendAnnotationsBar(store: fileTrees, id: record.id) })
+                let views = (host: host, content: content as NSView, bar: bar as NSView, barHost: barHost)
+                fileTreeViews[record.id] = views
+                return views
+            }()
+            if views.content.superview == nil { addSubview(views.content) }
+            let content = CardMetrics.content(of: record.frame)
+            if views.host.size != content.size { views.host.size = content.size }
+            if views.host.zoom != zoom { views.host.zoom = zoom }
+            views.content.frame = screen(content)
+
+            let hasNotes = !(fileTrees.annotations[record.id]?.isEmpty ?? true)
+            if hasNotes {
+                let bar = CGRect(x: record.frame.midX - 140, y: record.frame.maxY + 12, width: 280, height: 44)
+                if views.barHost.size != bar.size { views.barHost.size = bar.size }
+                if views.barHost.zoom != zoom { views.barHost.zoom = zoom }
+                if views.bar.superview == nil { addSubview(views.bar) }
+                views.bar.frame = screen(bar)
+            } else if views.bar.superview != nil {
+                views.bar.removeFromSuperview()
+            }
+        }
+    }
+
+    fileprivate func fileTreeMouseDown(_ record: FileTreeRecord, at location: CGPoint, point: CGPoint) {
+        focusedID = record.id
+        fileTrees.raise(record.id)
+        let frame = record.frame
+        let handle = CardMetrics.resizeHandle / zoom
+        if CardMetrics.close(of: frame).contains(location) {
+            fileTrees.remove(record.id)
+            focusedID = nil
+            hoveredClose = nil
+        } else if location.x > frame.maxX - handle && location.y > frame.maxY - handle {
+            interaction = Interaction(id: record.id, kind: .resize, start: point, frame: frame)
+        } else {
+            // The title bar and the card's margins move it.
+            interaction = Interaction(id: record.id, kind: .move, start: point, frame: frame)
+        }
     }
 }

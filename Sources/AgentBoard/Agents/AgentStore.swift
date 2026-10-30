@@ -55,8 +55,13 @@ final class AgentStore {
     @ObservationIgnored private var replacedCore = false
     /// Runs the browser tools agents call through the core.
     @ObservationIgnored var browserTools: BrowserTools?
-    /// The board's other elements (browsers), which the core keeps lines to.
-    @ObservationIgnored var elements: () -> [ElementInfo] = { [] }
+    /// Where the board's other elements come from (browsers, file trees), by family; the core
+    /// keeps lines to them.
+    @ObservationIgnored var elementSources: [String: () -> [ElementInfo]] = [:]
+
+    func elements() -> [ElementInfo] {
+        elementSources.keys.sorted().flatMap { elementSources[$0]?() ?? [] }
+    }
 
     // Runners (see AgentStore+Runners.swift).
     /// What each running runner serves and costs, and when it started, as the core measures it.

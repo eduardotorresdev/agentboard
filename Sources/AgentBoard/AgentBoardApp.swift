@@ -7,6 +7,7 @@ struct AgentBoardApp: App {
     @State private var store: ProjectStore
     @State private var agents: AgentStore
     @State private var browsers: BrowserStore
+    @State private var fileTrees: FileTreeStore
 
     init() {
         let store = ProjectStore()
@@ -15,6 +16,9 @@ struct AgentBoardApp: App {
         // A core in this process keeps the cards in the same file as the projects (a bench run's own).
         let agents = AgentStore(database: try? Database.defaultURL())
         browsers.attach(to: agents)
+        let fileTrees = FileTreeStore(database: store.database)
+        fileTrees.attach(to: agents)
+        _fileTrees = State(initialValue: fileTrees)
         AppDelegate.agents = agents
         _agents = State(initialValue: agents)
         _browsers = State(initialValue: browsers)
@@ -22,7 +26,7 @@ struct AgentBoardApp: App {
 
     var body: some Scene {
         WindowGroup("AgentBoard") {
-            ContentView(store: store, agents: agents, browsers: browsers)
+            ContentView(store: store, agents: agents, browsers: browsers, fileTrees: fileTrees)
                 .preferredColorScheme(.light)
                 .tint(Theme.accent)
                 .modifier(DevBuildToolbar())

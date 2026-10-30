@@ -5,13 +5,14 @@ import SwiftUI
 struct WorktreeCanvas: View {
     let agents: AgentStore
     let browsers: BrowserStore
+    let fileTrees: FileTreeStore
     let worktree: Worktree
     let board: BoardController
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Theme.canvas
-            Board(store: agents, browsers: browsers, worktree: worktree.path, controller: board)
+            Board(store: agents, browsers: browsers, fileTrees: fileTrees, worktree: worktree.path, controller: board)
             if let notice {
                 EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
                     .padding(.leading, board.leadingInset)
@@ -66,6 +67,7 @@ struct WorktreeCanvas: View {
     private var isEmpty: Bool {
         agents.isLoaded && agents.agents(in: worktree.path).isEmpty && agents.postIts(in: worktree.path).isEmpty
             && browsers.browsers(in: worktree.path).isEmpty
+            && fileTrees.trees(in: worktree.path).isEmpty
     }
 }
 
@@ -94,6 +96,11 @@ private struct CanvasToolbar: View {
                 .fixedSize()
                 .accessibilityLabel(L("Add post-it"))
                 .help(L("A new post-it in markdown: you and every agent connected to it read and write it."))
+            Button { board.addFileTree() } label: { Image(systemName: "folder") }
+                .buttonStyle(ToolbarButtonStyle(icon: true))
+                .fixedSize()
+                .accessibilityLabel(L("Add file tree"))
+                .help(L("Browse the worktree's files and leave notes on their lines for the connected agents."))
         }
         .font(.system(size: 18, weight: .medium))
         .padding(5)

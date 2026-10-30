@@ -71,6 +71,14 @@ final class Database {
             CREATE TABLE IF NOT EXISTS browser_profiles (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS file_trees (
+                id TEXT PRIMARY KEY,
+                worktree TEXT NOT NULL,
+                name TEXT NOT NULL,
+                x REAL NOT NULL, y REAL NOT NULL,
+                width REAL NOT NULL, height REAL NOT NULL,
+                organization TEXT NOT NULL
             )
             """)
         if try !columns(of: "projects").contains("organization") {
@@ -231,6 +239,43 @@ final class Database {
         }
         bind(stmt, 10, browser.profile.uuidString)
         bind(stmt, 11, browser.organization.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func fileTrees() throws -> [FileTreeRecord] {
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, organization FROM file_trees ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [FileTreeRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            result.append(FileTreeRecord(
+                id: id,
+                worktree: String(cString: sqlite3_column_text(stmt, 1)),
+                name: String(cString: sqlite3_column_text(stmt, 2)),
+                frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
+                              width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
+                organization: UUID(uuidString: String(cString: sqlite3_column_text(stmt, 7))) ?? OrganizationHome.defaultID))
+        }
+        return result
+    }
+
+    func saveFileTree(_ tree: FileTreeRecord) throws {
+        let stmt = try prepare("INSERT OR REPLACE INTO file_trees (id, worktree, name, x, y, width, height, organization) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, tree.id.uuidString)
+        bind(stmt, 2, tree.worktree)
+        bind(stmt, 3, tree.name)
+        for (index, value) in [tree.frame.minX, tree.frame.minY, tree.frame.width, tree.frame.height].enumerated() {
+            sqlite3_bind_double(stmt, Int32(index + 4), value)
+        }
+        bind(stmt, 8, tree.organization.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func deleteFileTree(id: UUID) throws {
+        let stmt = try prepare("DELETE FROM file_trees WHERE id = ?")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 

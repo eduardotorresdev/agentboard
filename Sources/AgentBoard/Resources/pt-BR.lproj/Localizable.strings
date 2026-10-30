@@ -213,3 +213,30 @@
 "%lld commits not pushed" = "%lld commits sem push";
 "Commit and Push saves this work to the remote, then removes the worktree. Remove deletes its folder and loses it." = "Commitar e dar push salva esse trabalho no remoto e depois remove a worktree. Remover apaga a pasta dela e perde esse trabalho.";
 "Remove" = "Remover";
+
+/* Top bar */
+"Clone, create, or open a project." = "Clone, crie ou abra um projeto.";
+"Reloads the projects and their worktrees." = "Recarrega os projetos e suas worktrees.";
+
+/* File tree */
+"Files" = "Arquivos";
+"Add file tree" = "Adicionar árvore de arquivos";
+"Browse the worktree's files and leave notes on their lines for the connected agents." = "Navegue pelos arquivos da worktree e deixe anotações nas linhas para os agentes conectados.";
+"Search files" = "Buscar arquivos";
+"Reads the folders and the git status again." = "Lê de novo as pastas e o status do git.";
+"This file is binary and can't be shown." = "Este arquivo é binário e não pode ser exibido.";
+"This file is too large to show." = "Este arquivo é grande demais para exibir.";
+"This file can't be read." = "Não foi possível ler este arquivo.";
+"Pick a file to read it and annotate its lines." = "Escolha um arquivo para ler e anotar suas linhas.";
+"Closes the file." = "Fecha o arquivo.";
+"Select the line to annotate it; shift-click to select several." = "Selecione a linha para anotá-la; shift-clique para selecionar várias.";
+"Line %lld" = "Linha %lld";
+"Lines %lld–%lld" = "Linhas %lld–%lld";
+"Add a note for the agents…" = "Adicione uma anotação para os agentes…";
+"Keeps the note; send every note at once from below the card." = "Guarda a anotação; envie todas de uma vez pelo botão abaixo do card.";
+"Removes the note." = "Remove a anotação.";
+"Send 1 note" = "Enviar 1 anotação";
+"Send %lld notes" = "Enviar %lld anotações";
+"Connect an agent to this card to send it the notes." = "Conecte um agente a este card para enviar as anotações.";
+"Sends every note to %@." = "Envia todas as anotações para %@.";
+"Discards the notes." = "Descarta as anotações.";

@@ -284,7 +284,7 @@ final class BrowserStore {
     func attach(to agents: AgentStore) {
         self.agents = agents
         agents.browserTools = BrowserTools(store: self, agents: agents)
-        agents.elements = { [weak self] in self?.elementInfos ?? [] }
+        agents.elementSources[ElementKind.browser.rawValue] = { [weak self] in self?.elementInfos ?? [] }
         agents.elementsChanged()
     }
 

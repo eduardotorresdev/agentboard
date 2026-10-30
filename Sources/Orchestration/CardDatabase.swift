@@ -203,14 +203,16 @@ final class CardDatabase {
         try execute("DROP TABLE notes")
     }
 
-    /// Ids of the browser cards the board stored, so lines to them survive loading before any
-    /// board has said which elements it has.
+    /// Ids of the elements the board stored (browsers, file trees), so lines to them survive
+    /// loading before any board has said which elements it has.
     func browserIDs() -> Set<UUID> {
-        guard let stmt = try? prepare("SELECT id FROM browsers") else { return [] }
-        defer { sqlite3_finalize(stmt) }
         var result = Set<UUID>()
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) { result.insert(id) }
+        for table in ["browsers", "file_trees"] {
+            guard let stmt = try? prepare("SELECT id FROM \(table)") else { continue }
+            defer { sqlite3_finalize(stmt) }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) { result.insert(id) }
+            }
         }
         return result
     }

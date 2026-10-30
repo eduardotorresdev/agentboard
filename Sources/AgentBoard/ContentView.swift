@@ -21,6 +21,7 @@ struct ContentView: View {
     let store: ProjectStore
     let agents: AgentStore
     let browsers: BrowserStore
+    let fileTrees: FileTreeStore
     @State private var selection: WorktreeSelection?
     @State private var renaming: Worktree?
     @State private var boardController = BoardController()
@@ -54,16 +55,6 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
             ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
-            // The organizations and the project actions sit in groups of their own.
-            if #available(macOS 26, *) {
-                ToolbarSpacer(.fixed, placement: .primaryAction)
-            }
-            if !store.projects.isEmpty {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
-                    Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
-                }
-            }
         }
         .onChange(of: store.organizationID, initial: true) { old, id in
             agents.organizationID = id
@@ -109,9 +100,14 @@ struct ContentView: View {
             boardController.leadingInset = visible ? sidebarInset : 0
         }
         .toolbar {
-            ToolbarItem(placement: .navigation) {
+            // The sidebar and the project actions, one group beside the title.
+            ToolbarItemGroup(placement: .navigation) {
                 Button(action: toggleSidebar) { Label(L("Toggle Sidebar"), systemImage: "sidebar.left") }
                     .keyboardShortcut("s", modifiers: [.command, .control])
+                Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
+                    .help(L("Clone, create, or open a project."))
+                Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
+                    .help(L("Reloads the projects and their worktrees."))
             }
         }
     }
@@ -122,7 +118,7 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         if let selection {
-            WorktreeCanvas(agents: agents, browsers: browsers, worktree: selection.worktree, board: boardController)
+            WorktreeCanvas(agents: agents, browsers: browsers, fileTrees: fileTrees, worktree: selection.worktree, board: boardController)
         } else {
             EmptyCanvas(
                 symbol: "sidebar.left",
@@ -190,3 +186,4 @@ struct ContentView: View {
     }
     #endif
 }
+

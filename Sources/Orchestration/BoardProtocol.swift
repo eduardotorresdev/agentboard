@@ -38,6 +38,9 @@ public enum BoardRequest: Codable, Sendable {
     /// The developer answered the questions the agent asked, keyed by question text; nil
     /// leaves them to the agent's terminal.
     case answerQuestions(id: UUID, answers: [String: String]?)
+    /// The user sent `text` from one of the board's elements (a file tree's annotations) to
+    /// every agent connected to it.
+    case deliver(from: UUID, text: String)
 }
 
 /// Core → board.
