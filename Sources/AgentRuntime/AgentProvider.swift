@@ -56,7 +56,7 @@ public struct ClaudeCode: AgentProvider {
             // Both options take several values: each is ended by the next option.
             arguments += ["--mcp-config", config, "--allowedTools", "mcp__\(tools.name)"]
         }
-        arguments += ["--settings", Self.attentionSettings]
+        arguments += ["--settings", Self.settings(tools)]
         return arguments + (Self.conversationExists(id) ? ["--resume", id] : ["--session-id", id])
     }
 
@@ -73,12 +73,29 @@ public struct ClaudeCode: AgentProvider {
     /// Claude Code notified) and when it works again (a prompt was submitted). Each forwards
     /// its payload untouched, base64 in a desktop notification (OSC 9) written to the agent's
     /// terminal, where the core reads it (see `AgentHook`).
-    private static let attentionSettings: String = {
-        let command = #"printf '\033]9;"# + AgentHook.prefix + #"%s\007' "$(base64 | tr -d '\n')" > /dev/tty 2>/dev/null || true"#
-        let hook = [["hooks": [["type": "command", "command": command]]]]
-        let settings = ["hooks": ["Stop": hook, "Notification": hook, "UserPromptSubmit": hook]]
-        return String(decoding: try! JSONSerialization.data(withJSONObject: settings), as: UTF8.self)
-    }()
+    private static let attentionHook: [String: Any] = [
+        "type": "command",
+        "command": #"printf '\033]9;"# + AgentHook.prefix + #"%s\007' "$(base64 | tr -d '\n')" > /dev/tty 2>/dev/null || true"#,
+    ]
+
+    /// A hook that hands its input to the board's server and prints what comes back: the
+    /// context the agent should have before going on (connected post-its), which Claude Code
+    /// adds to the conversation.
+    private static func contextHook(_ tools: ToolServerLink) -> [String: Any] {
+        let url = tools.url.absoluteString + "/context"
+        return ["type": "command", "timeout": 5,
+                "command": "curl -s -m 3 -X POST -H 'Authorization: Bearer \(tools.token)' --data-binary @- '\(url)' || true"]
+    }
+
+    /// The attention hooks, and the context hooks when the agent has the board's tools.
+    private static func settings(_ tools: ToolServerLink?) -> String {
+        let context = tools.map(contextHook)
+        func entry(_ hooks: [[String: Any]?]) -> [[String: Any]] { [["hooks": hooks.compactMap { $0 }]] }
+        var hooks: [String: Any] = ["Stop": entry([attentionHook]), "Notification": entry([attentionHook]),
+                                    "UserPromptSubmit": entry([attentionHook, context])]
+        if let context { hooks["SessionStart"] = entry([context]); hooks["PostToolUse"] = entry([context]) }
+        return String(decoding: try! JSONSerialization.data(withJSONObject: ["hooks": hooks]), as: UTF8.self)
+    }
 
     /// Drops markers inherited when the app itself was launched from Claude Code, so the child
     /// behaves like a top-level session (child sessions don't save transcripts, which would
@@ -97,7 +114,7 @@ public struct ClaudeCode: AgentProvider {
     }
 }
 
-/// What an agent's hook forwards (see `ClaudeCode.attentionSettings`): Claude Code's hook
+/// What an agent's hook forwards (see `ClaudeCode.attentionHook`): Claude Code's hook
 /// input, of which only these fields matter.
 public struct AgentHook: Decodable, Sendable {
     /// Starts a notification that carries a hook's payload.

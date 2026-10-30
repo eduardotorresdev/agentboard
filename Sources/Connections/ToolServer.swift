@@ -18,6 +18,7 @@ import Foundation
 public final class ToolServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "agentboard.tools")
     private let handle: @Sendable (Data, UUID) async -> Data?
+    private let handleContext: @Sendable (Data, UUID) async -> Data?
     private var listener: DispatchSourceRead?
     private var listenerFD: Int32 = -1
     private var exchanges: [ObjectIdentifier: HTTPExchange] = [:]
@@ -34,6 +35,8 @@ public final class ToolServer: @unchecked Sendable {
     private static let keepAliveInterval = 25.0
 
     public static let path = "/mcp"
+    /// Where an agent's hooks fetch what it should have in context (see `ToolCatalog.context`).
+    public static let contextPath = path + "/context"
 
     /// What a server passes to the one replacing it.
     public struct Release: @unchecked Sendable {
@@ -53,6 +56,7 @@ public final class ToolServer: @unchecked Sendable {
 
     public init(catalog: ToolCatalog, secret: Data? = nil) {
         handle = { body, caller in await catalog.respond(to: body, caller: caller) }
+        handleContext = { body, caller in await catalog.context(hook: body, caller: caller) }
         self.secret = secret.map { SymmetricKey(data: $0) }
     }
 
@@ -169,6 +173,10 @@ public final class ToolServer: @unchecked Sendable {
 
     fileprivate func respond(to body: Data, caller: UUID) async -> Data? {
         await handle(body, caller)
+    }
+
+    fileprivate func context(hook body: Data, caller: UUID) async -> Data? {
+        await handleContext(body, caller)
     }
 
     // MARK: On `queue`
@@ -388,7 +396,7 @@ private final class HTTPExchange: @unchecked Sendable {
 
         let method = String(requestLine[0])
         let path = requestLine[1].split(separator: "?").first.map(String.init) ?? ""
-        guard path == ToolServer.path else { return reply(404, "Not Found", close: close) }
+        guard path == ToolServer.path || path == ToolServer.contextPath else { return reply(404, "Not Found", close: close) }
         guard let caller = server.caller(authorization: headers["authorization"]) else {
             return reply(401, "Unauthorized", close: close)
         }
@@ -396,6 +404,16 @@ private final class HTTPExchange: @unchecked Sendable {
         guard method == "POST" else { return reply(405, "Method Not Allowed", headers: ["Allow": "GET, POST"], close: close) }
         isBusy = true
         let server = self.server
+        if path == ToolServer.contextPath {
+            Task { [weak self, queue] in
+                let answer = await server.context(hook: body, caller: caller) ?? Data("{}".utf8)
+                queue.async { [weak self] in
+                    guard let self, !self.closed else { return }
+                    self.reply(200, "OK", headers: ["Content-Type": "application/json"], body: answer, close: close)
+                }
+            }
+            return
+        }
         if let onRequest = server.onRequest {
             let name = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["method"] as? String ?? "?"
             onRequest("\(caller) \(name)")

@@ -69,6 +69,18 @@ private func call(_ tool: String, _ arguments: [String: Any] = [:], as caller: U
     return (text, result["isError"] as? Bool ?? false)
 }
 
+/// What an agent's context hook gets back before `event`: the added context, or nil.
+private func context(_ event: String, as caller: UUID, on core: Core) async throws -> String? {
+    let (url, token) = await MainActor.run { (core.orchestrator.toolsEndpoint, core.orchestrator.toolToken(for: caller)) }
+    var request = URLRequest(url: try #require(url).appendingPathComponent("context"))
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONSerialization.data(withJSONObject: ["hook_event_name": event, "session_id": "x"])
+    let (data, _) = try await URLSession.shared.data(for: request)
+    let answer = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    return (answer["hookSpecificOutput"] as? [String: Any])?["additionalContext"] as? String
+}
+
 private func board(_ core: Core) async throws -> CoreClient {
     let path = await MainActor.run { core.path }
     return try #require(CoreClient.connect(socketPath: path, timeout: 3))
@@ -411,6 +423,50 @@ struct OrchestratorTests {
         #expect(reloaded.map(\.name) == ["Post-it"])
         #expect(reloaded.first?.text == "Ship on Friday.")
         #expect(reloaded.first?.editor == nil)
+    }
+
+    /// Connected post-its reach an agent's context through its hooks: all of them when its
+    /// session starts, then only what changed, was connected or was disconnected.
+    @Test func postItsReachContext() async throws {
+        let core = try await MainActor.run { try Core() }
+        let folder = await MainActor.run { core.folder }
+        let a = agent("Ada", in: folder), b = agent("Bob", in: folder)
+        let plan = PostItRecord(id: UUID(), worktree: folder.path, name: "Plan", frame: CGRect(origin: .zero, size: PostItRecord.size))
+        let rules = PostItRecord(id: UUID(), worktree: folder.path, name: "Rules", frame: CGRect(origin: .zero, size: PostItRecord.size))
+        let client = try await board(core)
+        for card in [a, b] { client.send(.addCard(card)) }
+        client.send(.addPostIt(plan))
+        client.send(.addPostIt(rules))
+        client.send(.connect(Connection(a: a.id, b: plan.id)))
+        client.send(.connect(Connection(a: b.id, b: plan.id)))
+        try await waitUntil { core.orchestrator.bus.graph.connections.count == 2 }
+        client.send(.writePostIt(id: plan.id, text: "- Ship on Friday"))
+        try await waitUntil { core.orchestrator.postIt(plan.id)?.text == "- Ship on Friday" }
+
+        let start = try await context("SessionStart", as: a.id, on: core)
+        #expect(start?.contains("<postit name=\"Plan\">") == true, "\(start ?? "nil")")
+        #expect(start?.contains("- Ship on Friday") == true)
+        #expect(try await context("UserPromptSubmit", as: a.id, on: core) == nil)
+
+        // Another agent's change reaches Ada; Ada's own change doesn't come back to her.
+        _ = try await call("postit_write", ["text": "- Ship on Monday"], as: b.id, on: core)
+        let changed = try await context("PostToolUse", as: a.id, on: core)
+        #expect(changed?.contains("- Ship on Monday") == true, "\(changed ?? "nil")")
+        _ = try await call("postit_write", ["text": "- Ship today", "append": true], as: a.id, on: core)
+        #expect(try await context("PostToolUse", as: a.id, on: core) == nil)
+
+        // Connecting and disconnecting are context too.
+        client.send(.connect(Connection(a: a.id, b: rules.id)))
+        try await waitUntil { core.orchestrator.bus.graph.connections.count == 3 }
+        let connected = try await context("UserPromptSubmit", as: a.id, on: core)
+        #expect(connected?.contains("<postit name=\"Rules\">") == true, "\(connected ?? "nil")")
+        #expect(connected?.contains("Plan") == false)
+        let line = try #require(await core.orchestrator.bus.graph.connections.first { Set([$0.a, $0.b]) == [a.id, rules.id] })
+        client.send(.disconnect(line.id))
+        try await waitUntil { core.orchestrator.bus.graph.connections.count == 2 }
+        let disconnected = try await context("UserPromptSubmit", as: a.id, on: core)
+        #expect(disconnected?.contains("“Rules” is no longer connected") == true, "\(disconnected ?? "nil")")
+        client.disconnect()
     }
 
     /// The notes blocks of the build before come back as post-its: same id, so their lines hold,

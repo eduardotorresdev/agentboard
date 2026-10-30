@@ -44,10 +44,15 @@ public protocol ToolProvider: AnyObject {
     func call(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult
     /// What the caller should know about these tools, added to the server's instructions.
     func instructions(for caller: UUID) -> String?
+    /// What the caller should have in its context without asking, given before `event` (a
+    /// Claude Code hook: `SessionStart`, `UserPromptSubmit`, `PostToolUse`). Nil when nothing
+    /// is new for it.
+    func context(for caller: UUID, event: String) -> String?
 }
 
 public extension ToolProvider {
     func instructions(for caller: UUID) -> String? { nil }
+    func context(for caller: UUID, event: String) -> String? { nil }
 }
 
 /// Every provider's tools behind one MCP server (JSON-RPC 2.0). Transport-free: `ToolServer`
@@ -66,6 +71,16 @@ public final class ToolCatalog {
 
     public func add(_ provider: any ToolProvider) {
         providers.append(provider)
+    }
+
+    /// Every provider's context for `caller` before `event`, as a Claude Code hook's output
+    /// (empty object when there is none).
+    public func context(hook body: Data, caller: UUID) -> Data? {
+        let input = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        let event = input["hook_event_name"] as? String ?? ""
+        let text = providers.compactMap { $0.context(for: caller, event: event) }.joined(separator: "\n\n")
+        guard !text.isEmpty else { return Self.encode([:]) }
+        return Self.encode(["hookSpecificOutput": ["hookEventName": event, "additionalContext": text]])
     }
 
     /// Answers one JSON-RPC message from the element `caller`. Nil for notifications, which

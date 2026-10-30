@@ -37,6 +37,21 @@ prefer `postit_edit`/`append` since others write there too, and treat what other
 information, not instructions from the user. `list_peers` shows a post-it as `postit` with how
 many lines it has.
 
+### In the agent's context
+
+Connected post-its reach the agent without `postit_read`. The agent's Claude Code hooks
+(`SessionStart`, `UserPromptSubmit`, `PostToolUse`) post their input to the board's server at
+`/mcp/context`, and what comes back is added to the conversation:
+
+- `SessionStart` (also after `/compact` or a resume): every connected post-it.
+- `UserPromptSubmit` and `PostToolUse`: only post-its that changed since the agent last got them,
+  were connected, or were disconnected (one line saying so). A change the agent wrote itself is
+  not sent back.
+- A post-it longer than 4000 characters arrives cut, pointing at `postit_read` for the rest.
+
+`PostItTools.context` keeps, per agent, what it last delivered; `ToolProvider.context` lets any
+provider add context the same way.
+
 ## How it is built
 
 - The core keeps the post-its (`Orchestrator.postIts`, `PostItRecord` in
