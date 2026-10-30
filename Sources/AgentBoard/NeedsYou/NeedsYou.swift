@@ -298,23 +298,23 @@ private struct NeedsYouCard: View {
         .shadow(color: Theme.line.opacity(isLive ? 0.14 : 0.08), radius: isLive ? 30 : 16, y: isLive ? 14 : 8)
     }
 
-    /// Where the agent works leads: the project, then the worktree. The agent's name and its
+    /// Where the agent works leads: the worktree, then its project. The agent's name and its
     /// organization (when there are several) come after, smaller.
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(place[place.count - 2])
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Label(place[place.count - 1], systemImage: "arrow.triangle.branch")
                         .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(Theme.line)
                         .layoutPriority(1)
-                    Text(place[place.count - 1])
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.line.opacity(0.6))
+                    Label(place[place.count - 2], systemImage: "folder")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.line.opacity(0.55))
                 }
-                Text((place.dropLast(2) + [record.name]).joined(separator: " · "))
+                Label(L("Agent: \(([record.name] + place.dropLast(2)).joined(separator: " · "))"), systemImage: "sparkles")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.line.opacity(0.45))
+                    .foregroundStyle(Theme.line.opacity(0.5))
                     .padding(.top, 3)
                 Text(message)
                     .font(.system(size: 12, weight: .medium))

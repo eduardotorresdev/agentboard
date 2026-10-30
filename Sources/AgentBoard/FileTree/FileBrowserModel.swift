@@ -31,6 +31,8 @@ final class FileBrowserModel {
     private(set) var status: [String: Character] = [:]
     private(set) var openFile: String?
     private(set) var content: Content?
+    /// The open file's lines, colored.
+    private(set) var highlighted: [AttributedString] = []
     var query = "" {
         didSet { if query != oldValue { search() } }
     }
@@ -39,7 +41,7 @@ final class FileBrowserModel {
 
     static let maxFileSize = 4 * 1024 * 1024
     /// Folders search doesn't walk into.
-    private static let skipped: Set<String> = [".git", "node_modules", ".build", "DerivedData"]
+    nonisolated private static let skipped: Set<String> = [".git", "node_modules", ".build", "DerivedData"]
 
     init(root: String) {
         self.root = root
@@ -77,11 +79,17 @@ final class FileBrowserModel {
     func open(_ path: String) {
         openFile = path
         content = Self.read(URL(fileURLWithPath: root).appendingPathComponent(path))
+        if case .lines(let lines) = content, lines.count <= SyntaxHighlighter.maxLines {
+            highlighted = SyntaxHighlighter.highlight(lines, fileName: (path as NSString).lastPathComponent)
+        } else {
+            highlighted = []
+        }
     }
 
     func closeFile() {
         openFile = nil
         content = nil
+        highlighted = []
     }
 
     private static func list(_ path: String, in root: String) -> [FileEntry] {

@@ -229,9 +229,9 @@
 "This file can't be read." = "Não foi possível ler este arquivo.";
 "Pick a file to read it and annotate its lines." = "Escolha um arquivo para ler e anotar suas linhas.";
 "Closes the file." = "Fecha o arquivo.";
-"Select the line to annotate it; shift-click to select several." = "Selecione a linha para anotá-la; shift-clique para selecionar várias.";
-"Line %lld" = "Linha %lld";
-"Lines %lld–%lld" = "Linhas %lld–%lld";
+"Drag over lines to annotate them; Command-drag adds more lines, Shift extends the selection." = "Arraste sobre as linhas para anotá-las; com Command adiciona mais linhas, com Shift estende a seleção.";
+"Line %@" = "Linha %@";
+"Lines %@" = "Linhas %@";
 "Add a note for the agents…" = "Adicione uma anotação para os agentes…";
 "Keeps the note; send every note at once from below the card." = "Guarda a anotação; envie todas de uma vez pelo botão abaixo do card.";
 "Removes the note." = "Remove a anotação.";
@@ -246,3 +246,4 @@
 "Leave zen mode" = "Sair do modo zen";
 "Zen mode: hides everything but the canvas, its tools, and Needs you." = "Modo zen: oculta tudo menos o canvas, a barra de ferramentas e o Precisa de você.";
 "Leave zen mode: bring back the sidebar and the bars." = "Sair do modo zen: traz de volta a sidebar e as barras.";
+"Agent: %@" = "Agente: %@";

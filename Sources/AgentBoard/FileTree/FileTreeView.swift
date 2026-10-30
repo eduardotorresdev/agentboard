@@ -145,17 +145,22 @@ private struct FileRow: View {
     }
 }
 
-/// The open file, numbered; clicking a line number selects it (shift extends) to annotate it.
+/// The open file, numbered and colored. Dragging over lines selects them, Command adds more
+/// lines to the selection, and Shift extends it; the selection takes a note for the agents.
 private struct FileContentView: View {
     let store: FileTreeStore
     let id: UUID
     let model: FileBrowserModel
-    @State private var selection: ClosedRange<Int>?
+    @State private var selection: Set<Int> = []
     @State private var anchor: Int?
+    @State private var drag: (start: Int, base: Set<Int>, previous: Set<Int>, moved: Bool)?
+    @State private var lineTops: [Int: CGFloat] = [:]
     @State private var draft = ""
     @FocusState private var isWriting: Bool
 
     private static let font = Font.system(size: 12, design: .monospaced)
+    private static let lineHeight: CGFloat = 18
+    private static let space = "code"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -169,8 +174,10 @@ private struct FileContentView: View {
             }
         }
         .onChange(of: model.openFile) { _, _ in
-            selection = nil
+            selection = []
             anchor = nil
+            drag = nil
+            lineTops = [:]
             draft = ""
         }
     }
@@ -204,28 +211,36 @@ private struct FileContentView: View {
 
     private func code(_ lines: [String]) -> some View {
         let notes = (store.annotations[id] ?? []).filter { $0.path == model.openFile }
+        let noted = Set(notes.flatMap(\.lines))
         let gutter = CGFloat(String(lines.count).count) * 7.5 + 22
-        return ScrollView([.vertical, .horizontal]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(lines.indices, id: \.self) { index in
-                    let number = index + 1
-                    line(number, lines[index], gutter: gutter, noted: notes.contains { $0.lines.contains(number) })
-                    ForEach(notes.filter { $0.lines.upperBound == number }) { note in
-                        NoteView(note: note) { store.removeAnnotation(note.id, from: id) }
-                            .padding(.leading, gutter + 8)
-                    }
-                    if let selection, selection.upperBound == number {
-                        composer(lines, selection: selection)
-                            .padding(.leading, gutter + 8)
+        let colored = model.highlighted.count == lines.count ? model.highlighted : nil
+        let composerLine = drag == nil ? selection.max() : nil
+        return GeometryReader { viewport in
+            ScrollView([.vertical, .horizontal]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(lines.indices, id: \.self) { index in
+                        let number = index + 1
+                        line(number, colored.map { $0[index] } ?? AttributedString(lines[index]), gutter: gutter,
+                             noted: noted.contains(number))
+                        ForEach(notes.filter { $0.lines.last == number }) { note in
+                            NoteView(note: note) { store.removeAnnotation(note.id, from: id) }
+                                .padding(.leading, gutter + 8)
+                        }
+                        if composerLine == number {
+                            composer(lines)
+                                .padding(.leading, gutter + 8)
+                        }
                     }
                 }
+                .padding(.bottom, 12)
+                .coordinateSpace(.named(Self.space))
+                .frame(minWidth: viewport.size.width, minHeight: viewport.size.height, alignment: .topLeading)
             }
-            .padding(.bottom, 12)
         }
     }
 
-    private func line(_ number: Int, _ text: String, gutter: CGFloat, noted: Bool) -> some View {
-        let selected = selection?.contains(number) ?? false
+    private func line(_ number: Int, _ text: AttributedString, gutter: CGFloat, noted: Bool) -> some View {
+        let selected = selection.contains(number)
         return HStack(spacing: 0) {
             HStack(spacing: 4) {
                 Capsule().fill(Theme.accent).frame(width: 3, height: 14).opacity(noted ? 1 : 0)
@@ -234,24 +249,64 @@ private struct FileContentView: View {
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .frame(width: gutter)
-            .contentShape(.rect)
-            .onTapGesture { select(number) }
-            .help(L("Select the line to annotate it; shift-click to select several."))
-            Text(text.isEmpty ? " " : text)
+            Text(text.characters.isEmpty ? AttributedString(" ") : text)
                 .fixedSize()
                 .padding(.leading, 12)
                 .padding(.trailing, 16)
-                .textSelection(.enabled)
         }
         .font(Self.font)
-        .frame(height: 18)
+        .frame(height: Self.lineHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? Theme.accent.opacity(0.12) : .clear)
+        .background(selected ? Theme.accent.opacity(0.14) : noted ? Theme.accent.opacity(0.05) : .clear)
+        .contentShape(.rect)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { lineTops[number] = $0 }
+        .gesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
+                .onChanged { dragged($0) }
+                .onEnded { _ in endDrag() }
+        )
+        .help(L("Drag over lines to annotate them; Command-drag adds more lines, Shift extends the selection."))
     }
 
-    private func composer(_ lines: [String], selection: ClosedRange<Int>) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(selection.count == 1 ? L("Line \(selection.lowerBound)") : L("Lines \(selection.lowerBound)–\(selection.upperBound)"),
+    /// The line under a point in the code's space; notes and the composer belong to the line above them.
+    private func line(at y: CGFloat) -> Int? {
+        lineTops.filter { $0.value <= y }.max { $0.value < $1.value }?.key ?? lineTops.min { $0.value < $1.value }?.key
+    }
+
+    private func dragged(_ value: DragGesture.Value) {
+        guard let current = line(at: value.location.y) else { return }
+        if drag == nil {
+            guard let start = line(at: value.startLocation.y) else { return }
+            let flags = NSEvent.modifierFlags
+            if flags.contains(.shift), let anchor {
+                drag = (anchor, flags.contains(.command) ? selection : [], selection, true)
+            } else {
+                drag = (start, flags.contains(.command) ? selection : [], selection, false)
+            }
+            if !flags.contains(.shift) { anchor = start }
+        }
+        guard var drag else { return }
+        if current != drag.start { drag.moved = true }
+        self.drag = drag
+        selection = drag.base.union(min(drag.start, current)...max(drag.start, current))
+    }
+
+    private func endDrag() {
+        guard let drag else { return }
+        // A click on a selected line takes it out again.
+        if !drag.moved, drag.base.contains(drag.start) {
+            selection = drag.base.subtracting([drag.start])
+        } else if !drag.moved, drag.base.isEmpty, drag.previous == [drag.start] {
+            selection = []
+        }
+        withAnimation(.snappy(duration: 0.2)) { self.drag = nil }
+    }
+
+    private func composer(_ lines: [String]) -> some View {
+        let sorted = selection.sorted()
+        let ranges = FileTreeStore.ranges(of: sorted).map { $0.count == 1 ? "\($0.lowerBound)" : "\($0.lowerBound)–\($0.upperBound)" }
+        return VStack(alignment: .leading, spacing: 8) {
+            Label(sorted.count == 1 ? L("Line \(ranges.joined())") : L("Lines \(ranges.joined(separator: ", "))"),
                   systemImage: "text.bubble")
                 .font(.system(size: 12, weight: .semibold))
             HStack(alignment: .bottom, spacing: 8) {
@@ -259,11 +314,11 @@ private struct FileContentView: View {
                     .textFieldStyle(.plain)
                     .lineLimit(1...6)
                     .focused($isWriting)
-                    .onSubmit { add(lines, selection: selection) }
+                    .onSubmit { add(lines) }
                     .padding(8)
                     .background(Theme.surface, in: .rect(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.line.opacity(0.14)))
-                Button { add(lines, selection: selection) } label: {
+                Button { add(lines) } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 22)).foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
@@ -278,32 +333,21 @@ private struct FileContentView: View {
         .shadow(color: Theme.line.opacity(0.14), radius: 10, y: 4)
         .padding(.vertical, 6)
         .onAppear { isWriting = true }
-        .onExitCommand { withAnimation(.snappy(duration: 0.2)) { self.selection = nil } }
+        .onExitCommand { withAnimation(.snappy(duration: 0.2)) { selection = [] } }
         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topLeading)))
     }
 
-    private func select(_ number: Int) {
-        withAnimation(.snappy(duration: 0.2)) {
-            if NSEvent.modifierFlags.contains(.shift), let anchor {
-                selection = min(anchor, number)...max(anchor, number)
-            } else if selection == number...number {
-                selection = nil
-                anchor = nil
-            } else {
-                selection = number...number
-                anchor = number
-            }
-        }
-    }
-
-    private func add(_ lines: [String], selection: ClosedRange<Int>) {
+    private func add(_ lines: [String]) {
         let comment = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !comment.isEmpty, let path = model.openFile else { return }
-        let excerpt = lines[(selection.lowerBound - 1)...(min(selection.upperBound, lines.count) - 1)].joined(separator: "\n")
-        store.annotate(FileAnnotation(path: path, lines: selection, excerpt: excerpt, comment: comment), on: id)
+        let numbers = selection.filter { $0 >= 1 && $0 <= lines.count }.sorted()
+        guard !comment.isEmpty, !numbers.isEmpty, let path = model.openFile else { return }
+        let excerpt = FileTreeStore.ranges(of: numbers)
+            .map { lines[($0.lowerBound - 1)...($0.upperBound - 1)].joined(separator: "\n") }
+            .joined(separator: "\n…\n")
+        store.annotate(FileAnnotation(path: path, lines: numbers, excerpt: excerpt, comment: comment), on: id)
         draft = ""
         withAnimation(.snappy(duration: 0.2)) {
-            self.selection = nil
+            selection = []
             anchor = nil
         }
     }

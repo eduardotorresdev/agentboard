@@ -21,8 +21,8 @@ struct FileAnnotation: Identifiable, Hashable {
     let id = UUID()
     /// Relative to the worktree.
     let path: String
-    /// One-based, inclusive.
-    let lines: ClosedRange<Int>
+    /// One-based and sorted; they need not be contiguous.
+    let lines: [Int]
     let excerpt: String
     let comment: String
 }
@@ -144,9 +144,23 @@ final class FileTreeStore {
     static func message(for notes: [FileAnnotation]) -> String {
         var text = "The user left notes on files in this worktree. Address each one:\n"
         for note in notes {
-            let lines = note.lines.count == 1 ? "line \(note.lines.lowerBound)" : "lines \(note.lines.lowerBound)-\(note.lines.upperBound)"
+            let ranges = Self.ranges(of: note.lines).map { $0.count == 1 ? "\($0.lowerBound)" : "\($0.lowerBound)-\($0.upperBound)" }
+            let lines = (note.lines.count == 1 ? "line " : "lines ") + ranges.joined(separator: ", ")
             text += "\n\(note.path), \(lines):\n```\n\(note.excerpt)\n```\n\(note.comment)\n"
         }
         return text
+    }
+
+    /// Sorted line numbers folded into runs: [1, 2, 3, 7] is 1...3 and 7...7.
+    static func ranges(of lines: [Int]) -> [ClosedRange<Int>] {
+        var result: [ClosedRange<Int>] = []
+        for line in lines {
+            if let last = result.last, last.upperBound + 1 == line {
+                result[result.count - 1] = last.lowerBound...line
+            } else {
+                result.append(line...line)
+            }
+        }
+        return result
     }
 }
