@@ -38,6 +38,27 @@ enum Git {
         return result
     }
 
+    /// Work in a worktree that removing it would lose: changed or untracked files, and commits
+    /// no remote branch has.
+    struct PendingWork {
+        let changedFiles: Int
+        let unpushedCommits: Int
+        var isEmpty: Bool { changedFiles == 0 && unpushedCommits == 0 }
+    }
+
+    static func pendingWork(at path: String) -> PendingWork {
+        let status = (try? run(["-C", path, "status", "--porcelain"])) ?? ""
+        let unpushed = (try? run(["-C", path, "rev-list", "--count", "HEAD", "--not", "--remotes"]))
+            .flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? 0
+        return PendingWork(changedFiles: status.split(separator: "\n").count, unpushedCommits: unpushed)
+    }
+
+    /// Removes the worktree at `path` from the repository at `repository`, deleting its folder.
+    /// `force` discards its changed and untracked files.
+    static func removeWorktree(at path: String, from repository: String, force: Bool) throws {
+        try run(["-C", repository, "worktree", "remove"] + (force ? ["--force"] : []) + [path])
+    }
+
     /// Creates `directory`, initializes a repository on `main`, and makes an empty first commit
     /// so the main worktree has a real branch.
     static func createRepository(at directory: URL) throws {

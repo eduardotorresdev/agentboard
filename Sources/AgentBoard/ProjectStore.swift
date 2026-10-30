@@ -56,6 +56,20 @@ final class ProjectStore {
         perform { try $0.setAlias(alias, path: worktree.path) }
     }
 
+    /// Whether the worktree is the repository's own checkout, which can't be removed.
+    func isMain(_ worktree: Worktree, in project: Project) -> Bool {
+        worktrees[project.id]?.first == worktree
+    }
+
+    func removeWorktree(_ worktree: Worktree, from project: Project, force: Bool) {
+        do {
+            try Git.removeWorktree(at: worktree.path, from: project.path, force: force)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        reload()
+    }
+
     func reload() {
         guard let database else { return }
         do {

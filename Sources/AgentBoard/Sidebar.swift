@@ -9,6 +9,7 @@ struct Sidebar: View {
     @Binding var selection: WorktreeSelection?
     @Binding var renaming: Worktree?
     @State private var collapsed: Set<Project.ID> = []
+    @State private var pendingRemoval: PendingRemoval?
     @Namespace private var selectionSpace
 
     static let width: CGFloat = 264
@@ -28,6 +29,25 @@ struct Sidebar: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .background { SidebarBackdrop() }
+        .confirmationDialog(pendingRemoval.map { L("Remove \(store.displayName(of: $0.worktree))?") } ?? "",
+                            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
+                            presenting: pendingRemoval) { removal in
+            Button(L("Remove Worktree"), role: .destructive) { remove(removal) }
+            Button(L("Cancel"), role: .cancel) {}
+        } message: { removal in
+            Text(removal.warning)
+        }
+    }
+
+    /// Removes right away when nothing would be lost; otherwise asks first.
+    private func requestRemoval(of worktree: Worktree, in project: Project) {
+        let removal = PendingRemoval(worktree: worktree, project: project, work: Git.pendingWork(at: worktree.path))
+        if removal.work.isEmpty { remove(removal) } else { pendingRemoval = removal }
+    }
+
+    private func remove(_ removal: PendingRemoval) {
+        if selection?.worktree == removal.worktree { selection = nil }
+        store.removeWorktree(removal.worktree, from: removal.project, force: !removal.work.isEmpty)
     }
 
     private func group(for project: Project) -> some View {
@@ -74,6 +94,10 @@ struct Sidebar: View {
                            })
             .contextMenu {
                 Button(L("Rename")) { renaming = worktree }
+                if !store.isMain(worktree, in: project) {
+                    Divider()
+                    Button(L("Remove Worktree…"), role: .destructive) { requestRemoval(of: worktree, in: project) }
+                }
             }
     }
 
@@ -84,6 +108,20 @@ struct Sidebar: View {
         return WorktreeContents(hasAgents: cards.contains { $0.runner == nil }, hasRunners: !runners.isEmpty,
                                 runnerRunning: runners.contains { agents.runningRunners.contains($0.id) },
                                 hasBrowsers: !browsers.browsers(in: worktree.path).isEmpty)
+    }
+}
+
+/// A worktree waiting on the user to confirm its removal, with what removing it would lose.
+private struct PendingRemoval {
+    let worktree: Worktree
+    let project: Project
+    let work: Git.PendingWork
+
+    var warning: String {
+        var parts: [String] = []
+        if work.changedFiles > 0 { parts.append(L("\(work.changedFiles) files with uncommitted changes")) }
+        if work.unpushedCommits > 0 { parts.append(L("\(work.unpushedCommits) commits not pushed")) }
+        return parts.joined(separator: "\n") + "\n\n" + L("Removing the worktree deletes its folder and loses this work.")
     }
 }
 
