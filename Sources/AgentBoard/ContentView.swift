@@ -99,7 +99,9 @@ struct ContentView: View {
             // it behind the board while it leaves, so the slide never shows.
             Sidebar(store: store, agents: agents, browsers: browsers, selection: $selection, renaming: $renaming)
                 // Past its width, so the shadow leaves with it.
-                .offset(x: isSidebarVisible ? 0 : -(Sidebar.width + 32))
+                // The Needs you screen takes the whole window: the sidebar steps aside for it.
+                .offset(x: isSidebarVisible && !isNeedsYouOpen ? 0 : -(Sidebar.width + 32))
+                .animation(.snappy(duration: 0.32), value: isNeedsYouOpen)
                 .allowsHitTesting(isSidebarVisible)
                 .accessibilityHidden(!isSidebarVisible)
         }

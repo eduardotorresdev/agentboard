@@ -106,6 +106,10 @@ public struct AgentHook: Decodable, Sendable {
     public let hook_event_name: String
     public let message: String?
     public let notification_type: String?
+    /// The conversation so far, as Claude Code keeps it (JSONL).
+    public let transcript_path: String?
+    /// Stop only, from Claude Code versions that send it: what the agent said last.
+    public let last_assistant_message: String?
 
     /// The hook a notification carries; nil for any other notification.
     public init?(notification: String) {

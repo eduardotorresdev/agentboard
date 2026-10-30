@@ -54,8 +54,9 @@ struct NeedsYouButton: View {
     }
 }
 
-/// The agents waiting on the developer as a stack of cards. The top one shows its agent's live
-/// terminal to answer in; dragging it aside marks it done and brings up the next.
+/// The agents waiting on the developer, as a screen of its own: a plain canvas (no grid, no
+/// sidebar) with a stack of cards. The top one says where the agent works and what it asks, over
+/// its live terminal to answer in; dragging it aside marks it done and brings up the next.
 struct NeedsYouDeck: View {
     let agents: AgentStore
     let projects: ProjectStore
@@ -87,12 +88,11 @@ struct NeedsYouDeck: View {
         GeometryReader { proxy in
             // Small windows give the card more of themselves, so the terminal stays readable.
             let inset: CGFloat = proxy.size.height < 640 ? 40 : 96
-            let size = CGSize(width: min(880, proxy.size.width - inset), height: min(600, proxy.size.height - inset))
+            let size = CGSize(width: min(1120, proxy.size.width - inset), height: min(760, proxy.size.height - inset))
             ZStack {
-                Theme.line.opacity(0.16)
+                Theme.canvas
                     .ignoresSafeArea()
                     .contentShape(.rect)
-                    .onTapGesture(perform: close)
                 ZStack {
                     // One list, so a card keeps its identity (and its terminal) as it flies off.
                     let flying = agents.attention.filter { leaving.contains($0.id) }
@@ -129,11 +129,12 @@ struct NeedsYouDeck: View {
         let drag = drags[request.id] ?? .zero
         let isTop = depth == 0 && !isLeaving
         let progress = isLeaving ? 1 : isTop ? min(abs(drag.width) / Self.threshold, 1) : 0
-        NeedsYouCard(agents: agents, request: request, record: record, place: place(of: record), isActive: isTop,
+        NeedsYouCard(agents: agents, request: request, record: record, place: place(of: record), size: size, isActive: isTop,
                      isLive: isTop || isLeaving,
                      position: L("\(queue.count) waiting"), showsHint: !hasSwiped, progress: progress,
                      takesFocus: isTop && focusFollows, onDone: { leave(request.id, direction: 1) }, onEscape: close)
-            .frame(width: size.width, height: size.height)
+            .frame(width: size.width)
+            .frame(maxHeight: size.height)
             .scaleEffect(1 - CGFloat(depth) * 0.04)
             .offset(x: drag.width, y: drag.height * 0.4 + CGFloat(depth) * 14)
             .rotationEffect(.degrees(depth == 0 ? (reduceMotion ? 0 : Double(drag.width / 24)) : Self.tilt(depth, request.id)))
@@ -190,12 +191,20 @@ struct NeedsYouDeck: View {
         withAnimation(.snappy(duration: 0.3)) { isOpen = false }
     }
 
-    /// Where the agent works: its organization (when there are several) and worktree folder.
-    private func place(of record: AgentRecord) -> String {
-        let folder = URL(fileURLWithPath: record.worktree).lastPathComponent
-        guard projects.organizations.count > 1,
-              let organization = projects.organizations.first(where: { $0.id == record.organization }) else { return folder }
-        return "\(organization.name) · \(folder)"
+    /// Where the agent works: its organization (when there are several), project and worktree.
+    private func place(of record: AgentRecord) -> [String] {
+        let worktreeURL = URL(fileURLWithPath: record.worktree)
+        let project = projects.projects.first { project in
+            project.path == record.worktree || projects.worktrees[project.id]?.contains { $0.path == record.worktree } == true
+        }
+        let worktree = projects.worktrees.values.joined().first { $0.path == record.worktree }
+        var place = [project?.name ?? worktreeURL.deletingLastPathComponent().lastPathComponent,
+                     worktree.map(projects.displayName(of:)) ?? worktreeURL.lastPathComponent]
+        if projects.organizations.count > 1,
+           let organization = projects.organizations.first(where: { $0.id == record.organization }) {
+            place.insert(organization.name, at: 0)
+        }
+        return place
     }
 }
 
@@ -203,7 +212,9 @@ private struct NeedsYouCard: View {
     let agents: AgentStore
     let request: AttentionRequest
     let record: AgentRecord
-    let place: String
+    /// Organization (when there are several), project, worktree.
+    let place: [String]
+    let size: CGSize
     /// The top card: its terminal is live and its shortcuts work.
     let isActive: Bool
     /// Shows the live terminal: the active card, and the one flying off.
@@ -216,11 +227,17 @@ private struct NeedsYouCard: View {
     let onDone: () -> Void
     let onEscape: () -> Void
 
+    /// The terminal is wide and short: enough lines to answer in, the rest goes to the context.
+    private var terminalHeight: CGFloat { min(320, max(180, size.height * 0.42)) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-                .padding(.horizontal, 22)
-                .padding(.top, 18)
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+                .padding(.bottom, 14)
+            context
+                .padding(.horizontal, 24)
                 .padding(.bottom, 14)
             Group {
                 if isLive {
@@ -229,9 +246,10 @@ private struct NeedsYouCard: View {
                     Color.white
                 }
             }
+            .frame(height: terminalHeight)
             .padding(.horizontal, 12)
             footer
-                .padding(.horizontal, 22)
+                .padding(.horizontal, 24)
                 .padding(.vertical, 12)
         }
         .background(Theme.surface, in: .rect(cornerRadius: 18))
@@ -248,33 +266,68 @@ private struct NeedsYouCard: View {
                 .scaleEffect(progress >= 1 ? 1.06 : 1)
                 .animation(.snappy(duration: 0.2), value: progress >= 1)
         }
-        .shadow(color: Theme.line.opacity(isLive ? 0.18 : 0.10), radius: isLive ? 30 : 16, y: isLive ? 14 : 8)
+        .shadow(color: Theme.line.opacity(isLive ? 0.14 : 0.08), radius: isLive ? 30 : 16, y: isLive ? 14 : 8)
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(record.name)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Theme.line)
-                    Text(place)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.line.opacity(0.55))
-                        .lineLimit(1)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    ForEach(Array(place.enumerated()), id: \.offset) { index, part in
+                        if index > 0 {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Theme.line.opacity(0.35))
+                        }
+                        Text(part)
+                            .foregroundStyle(Theme.line.opacity(index == place.count - 1 ? 0.75 : 0.5))
+                    }
                 }
-                Text(message)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.line.opacity(0.78))
-                    .lineLimit(2)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                Text(record.name)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Theme.line)
+                    .lineLimit(1)
             }
             Spacer(minLength: 0)
-            TimelineView(.everyMinute) { context in
-                Text(Self.age.localizedString(for: request.since, relativeTo: max(context.date, request.since)))
-            }
+            VStack(alignment: .trailing, spacing: 6) {
+                TimelineView(.everyMinute) { context in
+                    Text(Self.age.localizedString(for: request.since, relativeTo: max(context.date, request.since)))
+                }
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(Theme.line.opacity(0.5))
+                Text(message)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+            }
         }
+    }
+
+    /// What the agent asks: its last words, its question, or the command it wants to run.
+    @ViewBuilder
+    private var context: some View {
+        if let text = request.context {
+            let body = Text(Self.markdown(text))
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.line.opacity(0.85))
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+            // Short context sits as it is; long context scrolls in what the terminal leaves.
+            ViewThatFits(in: .vertical) {
+                body
+                ScrollView { body }
+            }
+            .frame(maxHeight: max(80, size.height - terminalHeight - 190))
+            .background(Theme.canvas, in: .rect(cornerRadius: 12))
+        }
+    }
+
+    private static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
     }
 
     private var footer: some View {

@@ -214,6 +214,57 @@ struct OrchestratorTests {
         client.disconnect()
     }
 
+    /// A waiting agent's request carries what it asks: its last words when its turn ends, the
+    /// question it asked, or the call waiting for permission, read from its conversation.
+    @Test @MainActor func requestsSayWhatTheAgentAsks() throws {
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let transcript = folder.appendingPathComponent("conversation.jsonl")
+        func write(_ lines: [[String: Any]]) throws {
+            let text = try lines.map { String(decoding: try JSONSerialization.data(withJSONObject: $0), as: UTF8.self) }.joined(separator: "\n")
+            try Data(("cut off line\n" + text + "\n").utf8).write(to: transcript)
+        }
+        func assistant(_ block: [String: Any], sidechain: Bool = false) -> [String: Any] {
+            ["type": "assistant", "isSidechain": sidechain, "message": ["role": "assistant", "content": [block]]]
+        }
+        let prompt: [String: Any] = ["type": "user", "message": ["role": "user", "content": "Ship it"]]
+        let toolResult: [String: Any] = ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "content": "ok"]]]]
+        let meta: [String: Any] = ["type": "user", "isMeta": true, "message": ["role": "user", "content": "reminder"]]
+
+        try write([prompt, assistant(["type": "text", "text": "Earlier"]), toolResult,
+                   assistant(["type": "thinking", "thinking": "hmm"]), assistant(["type": "text", "text": "  Merge to main?  "]),
+                   assistant(["type": "text", "text": "a subagent"], sidechain: true), meta])
+        #expect(TranscriptContext.lastRequest(in: transcript) == "Merge to main?")
+
+        try write([prompt, assistant(["type": "tool_use", "name": "AskUserQuestion", "input": ["questions": [
+            ["question": "Which layout?", "options": [["label": "Wide"], ["label": "Tall"]]],
+        ]]])])
+        #expect(TranscriptContext.lastRequest(in: transcript) == "Which layout?\n- Wide\n- Tall")
+
+        try write([prompt, assistant(["type": "text", "text": "Cleaning up."]),
+                   assistant(["type": "tool_use", "name": "Bash", "input": ["command": "rm -rf build"]])])
+        #expect(TranscriptContext.lastRequest(in: transcript) == "**Bash**\n`rm -rf build`")
+
+        // A turn that said nothing yet has nothing to show; a missing file neither.
+        try write([assistant(["type": "text", "text": "Old turn"]), prompt])
+        #expect(TranscriptContext.lastRequest(in: transcript) == nil)
+        #expect(TranscriptContext.lastRequest(in: folder.appendingPathComponent("missing.jsonl")) == nil)
+
+        // Through the hooks: the end of a turn queues the agent with its last words.
+        let orchestrator = Orchestrator(server: CoreServer(socketPath: NSTemporaryDirectory() + "abcore-unused.sock", queue: .main),
+                                        dataFolder: folder, providers: [EchoAgent()], searchPath: "/usr/bin:/bin")
+        let card = agent("Ada", in: folder)
+        orchestrator.insert(card)
+        try write([prompt, assistant(["type": "text", "text": "Done. Merge to main?"])])
+        let stop = #"{"hook_event_name":"Stop","transcript_path":"\#(transcript.path)"}"#
+        orchestrator.sessionNotified(card.id, [AgentHook.prefix + Data(stop.utf8).base64EncodedString()])
+        #expect(orchestrator.attention.first?.context == "Done. Merge to main?")
+        // Claude Code versions that send the last message directly are taken at their word.
+        let direct = #"{"hook_event_name":"Stop","last_assistant_message":"Said directly"}"#
+        orchestrator.sessionNotified(card.id, [AgentHook.prefix + Data(direct.utf8).base64EncodedString()])
+        #expect(orchestrator.attention.first?.context == "Said directly")
+    }
+
     /// A newer core carries on the queue, without requests for cards it doesn't have.
     @Test @MainActor func theQueueSurvivesATakeOver() throws {
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")

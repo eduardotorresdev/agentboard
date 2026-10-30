@@ -18,11 +18,15 @@ public struct AttentionRequest: Codable, Equatable, Identifiable, Sendable {
     public var reason: Reason
     /// When it started waiting; a newer signal while it waits doesn't move it.
     public var since: Date
+    /// What the developer is asked to decide on: the agent's last words, the question it asked,
+    /// or the command it wants to run. Nil when its conversation can't be read.
+    public var context: String?
 
-    public init(id: UUID, reason: Reason, since: Date = Date()) {
+    public init(id: UUID, reason: Reason, since: Date = Date(), context: String? = nil) {
         self.id = id
         self.reason = reason
         self.since = since
+        self.context = context
     }
 }
 
@@ -40,9 +44,12 @@ extension Orchestrator {
         for hook in notifications.compactMap(AgentHook.init(notification:)) {
             switch hook.hook_event_name {
             case "Stop":
-                requestAttention(id, .turnEnded)
+                let context = hook.last_assistant_message.flatMap(TranscriptContext.trimmed)
+                    ?? hook.transcript_path.flatMap { TranscriptContext.lastRequest(in: URL(fileURLWithPath: $0)) }
+                requestAttention(id, .turnEnded, context: context)
             case "Notification" where hook.notification_type.map(Self.waitingNotifications.contains) ?? true:
-                requestAttention(id, hook.message.map { .said($0) } ?? .waiting)
+                requestAttention(id, hook.message.map { .said($0) } ?? .waiting,
+                                 context: hook.transcript_path.flatMap { TranscriptContext.lastRequest(in: URL(fileURLWithPath: $0)) })
             case "UserPromptSubmit":
                 dismissAttention(id)
             default:
@@ -52,13 +59,15 @@ extension Orchestrator {
     }
 
     /// Queues the agent, or updates why it waits while keeping its place.
-    func requestAttention(_ id: UUID, _ reason: AttentionRequest.Reason) {
+    func requestAttention(_ id: UUID, _ reason: AttentionRequest.Reason, context: String? = nil) {
         guard record(id) != nil else { return }
         if let index = attention.firstIndex(where: { $0.id == id }) {
-            guard attention[index].reason != reason else { return }
+            let context = context ?? attention[index].context
+            guard attention[index].reason != reason || attention[index].context != context else { return }
             attention[index].reason = reason
+            attention[index].context = context
         } else {
-            attention.append(AttentionRequest(id: id, reason: reason))
+            attention.append(AttentionRequest(id: id, reason: reason, context: context))
         }
         broadcast(.attention(attention))
     }
