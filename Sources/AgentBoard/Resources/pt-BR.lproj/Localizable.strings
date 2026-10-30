@@ -208,8 +208,9 @@
 "Shows the previous question, to change its answer." = "Mostra a pergunta anterior, para mudar a resposta.";
 "%lld of %lld" = "%1$lld de %2$lld";
 "Remove Worktree…" = "Remover worktree…";
-"Remove Worktree" = "Remover worktree";
+"Commit and Push" = "Commitar e dar push";
 "Remove %@?" = "Remover %@?";
 "%lld files with uncommitted changes" = "%lld arquivos com mudanças não commitadas";
 "%lld commits not pushed" = "%lld commits sem push";
-"Removing the worktree deletes its folder and loses this work." = "Remover a worktree apaga a pasta dela e perde esse trabalho.";
+"Commit and Push saves this work to the remote, then removes the worktree. Remove deletes its folder and loses it." = "Commitar e dar push salva esse trabalho no remoto e depois remove a worktree. Remover apaga a pasta dela e perde esse trabalho.";
+"Remove" = "Remover";

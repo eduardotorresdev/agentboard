@@ -32,7 +32,11 @@ struct Sidebar: View {
         .confirmationDialog(pendingRemoval.map { L("Remove \(store.displayName(of: $0.worktree))?") } ?? "",
                             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
                             presenting: pendingRemoval) { removal in
-            Button(L("Remove Worktree"), role: .destructive) { remove(removal) }
+            Button(L("Commit and Push")) {
+                if selection?.worktree == removal.worktree { selection = nil }
+                store.commitPushAndRemove(removal.worktree, from: removal.project)
+            }
+            Button(L("Remove"), role: .destructive) { remove(removal) }
             Button(L("Cancel"), role: .cancel) {}
         } message: { removal in
             Text(removal.warning)
@@ -121,7 +125,7 @@ private struct PendingRemoval {
         var parts: [String] = []
         if work.changedFiles > 0 { parts.append(L("\(work.changedFiles) files with uncommitted changes")) }
         if work.unpushedCommits > 0 { parts.append(L("\(work.unpushedCommits) commits not pushed")) }
-        return parts.joined(separator: "\n") + "\n\n" + L("Removing the worktree deletes its folder and loses this work.")
+        return parts.joined(separator: "\n") + "\n\n" + L("Commit and Push saves this work to the remote, then removes the worktree. Remove deletes its folder and loses it.")
     }
 }
 

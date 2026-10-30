@@ -53,6 +53,16 @@ enum Git {
         return PendingWork(changedFiles: status.split(separator: "\n").count, unpushedCommits: unpushed)
     }
 
+    /// Commits every change in the worktree at `path` and pushes its branch, setting the
+    /// upstream when it has none.
+    static func commitAndPush(at path: String, message: String) throws {
+        if !(try run(["-C", path, "status", "--porcelain"])).isEmpty {
+            try run(["-C", path, "add", "-A"])
+            try run(["-C", path, "commit", "-m", message])
+        }
+        try run(["-C", path, "push", "-u", "origin", "HEAD"])
+    }
+
     /// Removes the worktree at `path` from the repository at `repository`, deleting its folder.
     /// `force` discards its changed and untracked files.
     static func removeWorktree(at path: String, from repository: String, force: Bool) throws {

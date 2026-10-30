@@ -70,6 +70,17 @@ final class ProjectStore {
         reload()
     }
 
+    /// Saves the worktree's work to the remote, then removes it; stops at the first failure.
+    func commitPushAndRemove(_ worktree: Worktree, from project: Project) {
+        do {
+            try Git.commitAndPush(at: worktree.path, message: "Save work before removing the worktree")
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        removeWorktree(worktree, from: project, force: false)
+    }
+
     func reload() {
         guard let database else { return }
         do {
