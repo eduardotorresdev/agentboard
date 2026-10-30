@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var boardController = BoardController()
     @State private var isSidebarVisible = true
     @State private var addProjectStep: AddProjectDialog.Step?
+    @State private var isNeedsYouOpen = false
     /// Set in code per screen; not a user-facing toggle.
     var canvasMode: CanvasMode = .canvas
 
@@ -44,8 +45,25 @@ struct ContentView: View {
         }
         .frame(minWidth: 760, minHeight: 480)
         // On every screen, the first run of a new organization included.
+        .overlay {
+            if isNeedsYouOpen {
+                NeedsYouDeck(agents: agents, projects: store, isOpen: $isNeedsYouOpen)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
         .toolbar {
+            ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
             ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
+            // The organizations and the project actions sit in groups of their own.
+            if #available(macOS 26, *) {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
+            if !store.projects.isEmpty {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
+                    Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
+                }
+            }
         }
         .onChange(of: store.organizationID, initial: true) { old, id in
             agents.organizationID = id
@@ -92,10 +110,6 @@ struct ContentView: View {
             ToolbarItem(placement: .navigation) {
                 Button(action: toggleSidebar) { Label(L("Toggle Sidebar"), systemImage: "sidebar.left") }
                     .keyboardShortcut("s", modifiers: [.command, .control])
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
-                Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
             }
         }
     }

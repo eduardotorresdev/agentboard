@@ -184,3 +184,14 @@
 "Remove Organization" = "Remover organização";
 "Its project list goes; the folders and its Claude login stay on disk." = "A lista de projetos sai; as pastas e o login do Claude ficam no disco.";
 "That file isn't an image." = "Esse arquivo não é uma imagem.";
+
+/* Needs you */
+"Needs you" = "Precisa de você";
+"Agents waiting on you, across every organization" = "Agentes esperando por você, em todas as organizações";
+"%lld waiting" = "%lld esperando";
+"Drag aside when you're done" = "Arraste para o lado quando terminar";
+"Done" = "Feito";
+"Marks this one as handled and shows the next. ⌥Esc sends Esc to the agent." = "Marca este como resolvido e mostra o próximo. ⌥Esc envia Esc ao agente.";
+"Finished its turn. Your move." = "Terminou. Sua vez.";
+"Waiting for you." = "Esperando por você.";
+"All clear" = "Tudo em dia";

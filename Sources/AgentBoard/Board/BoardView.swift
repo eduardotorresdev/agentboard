@@ -360,7 +360,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// Drops every terminal layer and stops observing sessions; the next sync brings back
     /// whatever is on screen then.
     func releaseTerminals() {
-        for id in observed { store.sessions[id]?.isObserved = false }
+        for id in observed { store.stopObserving(id, by: self) }
         observed.removeAll()
         dirty.removeAll()
         cards.values.forEach { $0.detachTerminal() }
@@ -641,9 +641,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// Starts observing sessions that came on screen and stops the ones that left.
     private func observe(_ visible: Set<UUID>) {
-        for id in observed.subtracting(visible) { store.sessions[id]?.isObserved = false }
+        for id in observed.subtracting(visible) { store.stopObserving(id, by: self) }
         for id in visible.subtracting(observed) {
-            store.sessions[id]?.isObserved = true
+            store.observe(id, by: self)
             dirty.insert(id)
         }
         observed = visible
@@ -893,7 +893,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         return (min(max(column, 0), layer.cols - 1), min(max(row, 0), layer.rows - 1))
     }
 
-    private static func modifiers(_ event: NSEvent) -> KeyModifiers {
+    static func modifiers(_ event: NSEvent) -> KeyModifiers {
         let flags = event.modifierFlags
         var modifiers: KeyModifiers = []
         if flags.contains(.shift) { modifiers.insert(.shift) }
@@ -1274,7 +1274,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         session.send(session.withTerminal { $0.encodePaste(text) })
     }
 
-    private static func terminalKey(_ event: NSEvent) -> TerminalKey? {
+    static func terminalKey(_ event: NSEvent) -> TerminalKey? {
         switch event.keyCode {
         case 36, 76: .enter
         case 48: .tab
@@ -1306,7 +1306,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }
     }
 
-    private static func controlKey(_ event: NSEvent) -> [UInt8]? {
+    static func controlKey(_ event: NSEvent) -> [UInt8]? {
         guard let scalar = event.charactersIgnoringModifiers?.lowercased().unicodeScalars.first else { return nil }
         switch scalar {
         case "a"..."z": return [UInt8(scalar.value - 96)]

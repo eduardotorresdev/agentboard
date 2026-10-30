@@ -19,6 +19,8 @@ public protocol CoreService: AnyObject {
     @MainActor func handedOff()
     /// The newer core didn't take it: carry on as before `prepareHandOff`.
     @MainActor func handOffFailed()
+    /// Session `id`'s program sent desktop notifications (OSC 9 or 777).
+    @MainActor func sessionNotified(_ id: UUID, _ notifications: [String])
 }
 
 extension CoreService {
@@ -26,6 +28,7 @@ extension CoreService {
     @MainActor public func handOffState() -> (state: Data?, descriptors: [Int32]) { (nil, []) }
     @MainActor public func handedOff() {}
     @MainActor public func handOffFailed() {}
+    @MainActor public func sessionNotified(_ id: UUID, _ notifications: [String]) {}
 }
 
 /// The core: owns the agents' sessions and serves them to boards over a Unix socket. Programs
@@ -98,8 +101,20 @@ public final class CoreServer: @unchecked Sendable {
     /// Carries on the sessions an older core handed over. Call before `start`.
     public func adopt(_ sessions: [(id: UUID, handoff: AgentSession.Handoff)]) {
         onQueue {
-            for (id, handoff) in sessions { self.sessions[id] = Hosted(id: id, session: AgentSession(adopting: handoff)) }
+            for (id, handoff) in sessions { self.sessions[id] = hosted(id, AgentSession(adopting: handoff)) }
         }
+    }
+
+    /// Wraps a session for serving; its notifications go to the service, on `queue`.
+    private func hosted(_ id: UUID, _ session: AgentSession) -> Hosted {
+        session.onNotify = { [weak self] notifications in
+            guard let self else { return }
+            queue.async {
+                guard let service = self.service else { return }
+                MainActor.assumeIsolated { service.sessionNotified(id, notifications) }
+            }
+        }
+        return Hosted(id: id, session: session)
     }
 
     // MARK: For the service (on `queue`)
@@ -116,7 +131,7 @@ public final class CoreServer: @unchecked Sendable {
             if let board, !hosted.has(board) { attach(board, to: hosted) }
             return hosted.session
         }
-        let hosted = Hosted(id: id, session: AgentSession(cols: cols, rows: rows))
+        let hosted = self.hosted(id, AgentSession(cols: cols, rows: rows))
         sessions[id] = hosted
         if let board { attach(board, to: hosted) }
         return hosted.session
@@ -201,7 +216,7 @@ public final class CoreServer: @unchecked Sendable {
                 hosted = existing
                 if !hosted.has(client) { attach(client, to: hosted) }
             } else {
-                hosted = Hosted(id: id, session: AgentSession(cols: cols, rows: rows))
+                hosted = self.hosted(id, AgentSession(cols: cols, rows: rows))
                 sessions[id] = hosted
                 hosted.add(client)
             }
@@ -300,7 +315,7 @@ public final class CoreServer: @unchecked Sendable {
         if let service { MainActor.assumeIsolated { service.handOffFailed() } }
         for (entry, handoff) in zip(ordered, handoffs) {
             guard let handoff else { continue }
-            let hosted = Hosted(id: entry.key, session: AgentSession(adopting: handoff))
+            let hosted = hosted(entry.key, AgentSession(adopting: handoff))
             entry.value.subscribers.forEach(hosted.add)
             sessions[entry.key] = hosted
         }

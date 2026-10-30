@@ -76,6 +76,9 @@ public final class AgentSession {
     public var onOutput: ((UnsafeRawBufferPointer) -> Void)?
     /// Called whenever `state`, `processID` or `exitCode` change, on any thread. Set before starting.
     public var onStatus: ((SessionStatus) -> Void)?
+    /// Called with the desktop notifications (OSC 9 and 777) the program sent, on any thread,
+    /// outside the terminal's lock. Set before starting.
+    public var onNotify: (([String]) -> Void)?
 
     public init(cols: Int, rows: Int) {
         terminal = Terminal(cols: cols, rows: rows, scrollback: 5000)
@@ -361,9 +364,12 @@ public final class AgentSession {
     // MARK: Process output (on `queue`, or the core client's queue when mirroring)
 
     private func received(_ bytes: UnsafeRawBufferPointer) {
+        var notifications: [String] = []
         let (reply, notify, started) = lock.withLock { () -> ([UInt8]?, Bool, Bool) in
             terminal.feed(bytes)
             onOutput?(bytes)
+            // Drained on every feed, so they never pile up where nobody listens.
+            notifications = terminal.takeEvents().notifications
             let started = _state == .starting
             if started { _state = .running }
             if terminal.isSynchronizing {
@@ -379,6 +385,7 @@ public final class AgentSession {
         if let reply { pty.write(reply) }
         if started { reportStatus() }
         if notify { scheduleChange() }
+        if !notifications.isEmpty { onNotify?(notifications) }
     }
 
     private func exited(_ status: Int32?) {

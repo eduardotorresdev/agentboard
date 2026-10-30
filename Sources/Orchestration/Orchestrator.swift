@@ -18,6 +18,8 @@ public final class Orchestrator: CoreService {
     private(set) var cards: [AgentRecord] = []
     /// The post-its (see PostItTools).
     private(set) var postIts: [PostItRecord] = []
+    /// The agents waiting on the developer, oldest first (see Attention.swift).
+    var attention: [AttentionRequest] = []
     let bus: MessageBus
     let catalog: ToolCatalog
     let toolServer: ToolServer
@@ -81,6 +83,7 @@ public final class Orchestrator: CoreService {
         for record in postIts { bus.register(PostItElement(id: record.id, store: self)) }
         let inherited = inheriting.flatMap { try? JSONDecoder().decode(Inherited.self, from: $0) }
         if let inherited {
+            attention = (inherited.attention ?? []).filter { id in cards.contains { $0.id == id.id } }
             runnerStarts = inherited.runnerStarts.filter { server.session($0.key)?.processID != nil }
             if !runnerStarts.isEmpty { startMonitoring() }
         }
@@ -160,6 +163,8 @@ public final class Orchestrator: CoreService {
         var runnerStarts: [UUID: Date]
         var toolConnections: [Data]
         var toolStreams: [Int]?
+        /// Nil from a core that predates the attention queue.
+        var attention: [AttentionRequest]?
     }
 
     /// The tool server's socket and connections, until the newer core has them.
@@ -176,7 +181,8 @@ public final class Orchestrator: CoreService {
         let streams = releasedTools?.streams ?? []
         let state = try? JSONEncoder().encode(Inherited(runnerStarts: runnerStarts,
                                                         toolConnections: connections.map(\.pending) + streams.map { _ in Data() },
-                                                        toolStreams: streams.indices.map { connections.count + $0 }))
+                                                        toolStreams: streams.indices.map { connections.count + $0 },
+                                                        attention: attention))
         return (state, releasedTools.map { [$0.listener] + connections.map(\.fd) + streams } ?? [])
     }
 
@@ -197,7 +203,8 @@ public final class Orchestrator: CoreService {
 
     public func boardConnected(_ board: CoreBoard) -> Data? {
         boards.insert(board)
-        return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts).encoded
+        return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
+                          attention: attention).encoded
     }
 
     public func boardDisconnected(_ board: CoreBoard) {
@@ -267,6 +274,8 @@ public final class Orchestrator: CoreService {
             removePostIt(id, from: board)
         case .writePostIt(let id, let text):
             updatePostIt(id, from: board) { $0.write(text, by: nil) }
+        case .dismissAttention(let id):
+            dismissAttention(id)
         }
     }
 
@@ -315,6 +324,7 @@ public final class Orchestrator: CoreService {
         cards.removeAll { $0.id == id }
         try? database?.deleteAgent(id: id)
         broadcast(.cardRemoved(id), except: sender)
+        dismissAttention(id)
     }
 
     // MARK: Post-its

@@ -164,6 +164,79 @@ struct OrchestratorTests {
         client.disconnect()
     }
 
+    /// An agent's notifications queue it for the developer: its hooks raise and clear the
+    /// request, a later signal keeps its place, and dismissing or removing it takes it out.
+    @Test func agentsAskForTheDeveloper() async throws {
+        let core = try await MainActor.run { try Core() }
+        defer { Task { @MainActor in core.stop() } }
+        let folder = await MainActor.run { core.folder }
+        let a = agent("Ada", in: folder), b = agent("Bea", in: folder)
+        let client = try await board(core)
+        let inbox = Inbox()
+        client.onService { data in if let event = BoardEvent(data) { inbox.add(event) } }
+        for card in [a, b] {
+            client.send(.addCard(card))
+            client.send(.open(id: card.id, cols: 80, rows: 24, start: true))
+        }
+        try await waitUntil { core.screen(a.id).contains("ready") && core.screen(b.id).contains("ready") }
+        func queue() -> [AttentionRequest] {
+            inbox.events.compactMap { event -> [AttentionRequest]? in if case .attention(let list) = event { list } else { nil } }.last ?? []
+        }
+        func notify(_ id: UUID, _ text: String) async {
+            await MainActor.run { core.server.session(id)?.send(Array("\u{1B}]9;\(text)\u{07}\r".utf8)) }
+        }
+        func hook(_ json: String) -> String { AgentHook.prefix + Data(json.utf8).base64EncodedString() }
+
+        await notify(a.id, hook(#"{"hook_event_name":"Stop"}"#))
+        try await waitUntil { queue().map(\.reason) == [.turnEnded] }
+        await notify(b.id, hook(#"{"hook_event_name":"Notification","message":"Need a hand","notification_type":"elicitation_dialog"}"#))
+        try await waitUntil { queue().count == 2 }
+        // Ada says more: she keeps her place, and idle reminders change nothing.
+        await notify(a.id, hook(#"{"hook_event_name":"Notification","message":"Use \"Bash\"? é","notification_type":"permission_prompt"}"#))
+        try await waitUntil { queue().first?.reason == .said(#"Use "Bash"? é"#) }
+        // Neither idle reminders, nor what only informs, nor the program's own notifications count.
+        await notify(a.id, hook(#"{"hook_event_name":"Notification","message":"idle","notification_type":"idle_prompt"}"#))
+        await notify(a.id, hook(#"{"hook_event_name":"Notification","message":"signed in","notification_type":"auth_success"}"#))
+        await notify(a.id, "Claude is waiting for your input")
+        await notify(b.id, hook(#"{"hook_event_name":"Stop"}"#))
+        try await waitUntil { queue().last?.reason == .turnEnded }
+        #expect(queue().map(\.id) == [a.id, b.id])
+        #expect(queue().first?.reason == .said(#"Use "Bash"? é"#))
+        // Answering Ada in her terminal clears her; dismissing and removing clear the rest.
+        await notify(a.id, hook(#"{"hook_event_name":"UserPromptSubmit"}"#))
+        try await waitUntil { queue().map(\.id) == [b.id] }
+        client.send(.dismissAttention(b.id))
+        try await waitUntil { queue().isEmpty }
+        await notify(b.id, hook(#"{"hook_event_name":"Stop"}"#))
+        try await waitUntil { queue().count == 1 }
+        client.send(.removeCard(b.id))
+        try await waitUntil { queue().isEmpty }
+        client.disconnect()
+    }
+
+    /// A newer core carries on the queue, without requests for cards it doesn't have.
+    @Test @MainActor func theQueueSurvivesATakeOver() throws {
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let unused = NSTemporaryDirectory() + "abcore-\(UUID().uuidString.prefix(8)).sock"
+        let first = Orchestrator(server: CoreServer(socketPath: unused, queue: .main), dataFolder: folder, providers: [EchoAgent()],
+                                 searchPath: "/usr/bin:/bin")
+        let card = agent("Ada", in: folder)
+        first.insert(card)
+        first.sessionNotified(card.id, [AgentHook.prefix + Data(#"{"hook_event_name":"Stop"}"#.utf8).base64EncodedString()])
+        first.requestAttention(UUID(), .waiting)
+        #expect(first.attention.map(\.id) == [card.id])
+        first.attention.append(AttentionRequest(id: UUID(), reason: .waiting))
+        let (state, descriptors) = first.handOffState()
+        descriptors.forEach { close($0) }
+        first.handedOff()
+        let next = Orchestrator(server: CoreServer(socketPath: unused, queue: .main), dataFolder: folder, providers: [EchoAgent()],
+                                searchPath: "/usr/bin:/bin", inheriting: state)
+        #expect(next.attention.map(\.id) == [card.id])
+        #expect(next.attention.first?.reason == .turnEnded)
+        next.handedOff()
+    }
+
     /// Browser tools run on a board; with none open, the agent is told so.
     @Test func browserCallsGoToTheBoard() async throws {
         let core = try await MainActor.run { try Core() }

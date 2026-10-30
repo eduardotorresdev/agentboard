@@ -33,6 +33,8 @@ public enum BoardRequest: Codable, Sendable {
     case removePostIt(UUID)
     /// The user rewrote its text.
     case writePostIt(id: UUID, text: String)
+    /// The developer dealt with the agent's attention request.
+    case dismissAttention(UUID)
 }
 
 /// Core → board.
@@ -51,6 +53,8 @@ public enum BoardEvent: Codable, Sendable {
     /// Its name, frame or text changed.
     case postItUpdated(PostItRecord)
     case postItRemoved(UUID)
+    /// Every attention request, oldest first, after any change.
+    case attention([AttentionRequest])
 }
 
 /// What a board gets with its welcome.
@@ -60,12 +64,16 @@ public struct BoardState: Codable, Sendable {
     public var runners: RunnerReport
     /// The post-its; nil from a core that predates them.
     public var postIts: [PostItRecord]?
+    /// The agents waiting on the developer; nil from a core that predates them.
+    public var attention: [AttentionRequest]?
 
-    public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = []) {
+    public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = [],
+                attention: [AttentionRequest] = []) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
         self.postIts = postIts
+        self.attention = attention
     }
 }
 

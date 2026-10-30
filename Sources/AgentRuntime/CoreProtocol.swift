@@ -38,7 +38,8 @@ public enum CoreProtocol {
     /// change only adds: optional fields, and requests or events an older peer can ignore
     /// (unknown ones are dropped). Anything else raises `oldest` past the versions it breaks.
     /// 3: `takeOver`, and both sides say the oldest version they speak.
-    public static let version = 3
+    /// 4: the attention queue (`BoardEvent.attention`, `BoardRequest.dismissAttention`).
+    public static let version = 4
     public static let oldest = 2
     public static let versions = Versions(version: version, oldest: oldest)
 

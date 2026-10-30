@@ -19,6 +19,8 @@ final class AgentStore {
     private(set) var connections: [Connection] = []
     /// Post-its (see AgentStore+PostIts.swift).
     var postIts: [PostItRecord] = []
+    /// Agents waiting on the developer, in every organization, oldest first.
+    private(set) var attention: [AttentionRequest] = []
     /// False until the core has said which cards there are.
     private(set) var isLoaded = false
     /// Why the cards can't be shown, when the core runs another build this one can't talk to.
@@ -28,6 +30,9 @@ final class AgentStore {
     @ObservationIgnored private(set) var sessions: [UUID: AgentSession] = [:]
     /// Called with the card's id when an observed session changes, so the board redraws it.
     @ObservationIgnored var onSessionChange: ((UUID) -> Void)?
+    /// Who is showing each session, and what each wants called when it changes; a session stays
+    /// observed while anyone shows it.
+    @ObservationIgnored private var viewers: [UUID: [ObjectIdentifier: () -> Void]] = [:]
     /// Called after a message travels along a line, so the board can show it.
     @ObservationIgnored var onMessage: ((Message) -> Void)?
 
@@ -134,6 +139,7 @@ final class AgentStore {
         replacedCore = false
         agents = state.cards
         postIts = state.postIts ?? []
+        attention = state.attention ?? []
         connections = state.connections
         runnerReport = state.runners
         isLoaded = true
@@ -186,6 +192,8 @@ final class AgentStore {
         case .postItRemoved(let id):
             postIts.removeAll { $0.id == id }
             connections.removeAll { $0.touches(id) }
+        case .attention(let list):
+            attention = list
         case .toolCall(let call, let name, let arguments, let caller):
             let parsed = (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]
             Task {
@@ -246,6 +254,8 @@ final class AgentStore {
     /// Drops the card here; the core ends its program.
     private func forget(_ id: UUID) {
         if sessions.removeValue(forKey: id) != nil { core?.unregister(id) }
+        viewers[id] = nil
+        attention.removeAll { $0.id == id }
         hosted[id] = nil
         runnersToStart.remove(id)
         agents.removeAll { $0.id == id }
@@ -298,7 +308,10 @@ final class AgentStore {
         if let session = sessions[record.id] { return session }
         let session = AgentSession(cols: cols, rows: rows)
         let id = record.id
-        session.onChange = { [weak self] in self?.onSessionChange?(id) }
+        session.onChange = { [weak self] in
+            self?.onSessionChange?(id)
+            self?.viewers[id]?.values.forEach { $0() }
+        }
         sessions[record.id] = session
         if isUnavailable {
             session.fail(L("Couldn't start the process that runs the agents."))
@@ -321,6 +334,27 @@ final class AgentStore {
                           : record.runner == nil || runnersToStart.contains(record.id)
         runnersToStart.remove(record.id)
         client.send(.open(id: record.id, cols: size.0, rows: size.1, start: start))
+    }
+
+    /// Shows the session in `viewer`, which `onChange` tells when it changes (the board draws
+    /// through `onSessionChange` instead). The board and the attention deck can show the same one.
+    func observe(_ id: UUID, by viewer: AnyObject, onChange: @escaping () -> Void = {}) {
+        viewers[id, default: [:]][ObjectIdentifier(viewer)] = onChange
+        sessions[id]?.isObserved = true
+    }
+
+    func stopObserving(_ id: UUID, by viewer: AnyObject) {
+        viewers[id]?[ObjectIdentifier(viewer)] = nil
+        if viewers[id]?.isEmpty == true { viewers[id] = nil }
+        sessions[id]?.isObserved = viewers[id] != nil
+    }
+
+    // MARK: Attention
+
+    /// The developer dealt with the agent: its request leaves the queue.
+    func dismissAttention(_ id: UUID) {
+        attention.removeAll { $0.id == id }
+        send(.dismissAttention(id))
     }
 
     /// Starts an agent that ended again.
