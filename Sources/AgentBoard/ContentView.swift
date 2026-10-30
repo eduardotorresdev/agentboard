@@ -65,7 +65,14 @@ struct ContentView: View {
             if old != id { selection = nil }
         }
         .onAppear(perform: restoreSelection)
-        .onChange(of: selection) { _, selection in OpenWorktree.path = selection?.worktree.path }
+        .onChange(of: selection) { _, selection in
+            OpenWorktree.path = selection?.worktree.path
+            dismissAttentionOnScreen()
+        }
+        .onChange(of: agents.attention) { dismissAttentionOnScreen() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            dismissAttentionOnScreen()
+        }
         #if BENCH
         .task { await runBenchScenario() }
         #endif
@@ -163,6 +170,14 @@ struct ContentView: View {
             if let worktree = store.worktrees[project.id]?.first(where: { $0.path == path }) {
                 selection = WorktreeSelection(projectID: project.id, worktree: worktree)
             }
+        }
+    }
+
+    /// An agent in the worktree the developer is looking at doesn't need to call them: they see it.
+    private func dismissAttentionOnScreen() {
+        guard NSApp.isActive, !isNeedsYouOpen, let path = selection?.worktree.path else { return }
+        for request in agents.attention where agents.record(request.id)?.worktree == path {
+            agents.dismissAttention(request.id)
         }
     }
 
