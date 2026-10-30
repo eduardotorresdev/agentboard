@@ -162,7 +162,7 @@ private struct NavigationToolbar: View {
         HStack(spacing: 2) {
             if !board.isZen { zoomControls }
             Button { board.isZen.toggle() } label: {
-                Image(systemName: board.isZen ? "sun.max.fill" : "moon.zzz.fill")
+                Image(systemName: board.isZen ? "figure.walk" : "figure.mind.and.body")
                     .foregroundStyle(board.isZen ? Theme.secondary : Theme.accent)
                     .contentTransition(.symbolEffect(.replace))
             }
