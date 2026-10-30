@@ -87,13 +87,24 @@ public struct ClaudeCode: AgentProvider {
                 "command": "curl -s -m 3 -X POST -H 'Authorization: Bearer \(tools.token)' --data-binary @- '\(url)' || true"]
     }
 
-    /// The attention hooks, and the context hooks when the agent has the board's tools.
+    /// A hook that hands the questions the agent is about to ask (AskUserQuestion) to the board
+    /// and waits for the developer's answers, which it prints for Claude Code to take instead of
+    /// asking in the terminal. When the board is gone, or the developer chooses the terminal, it
+    /// prints nothing and Claude Code asks there as usual.
+    private static func questionHook(_ tools: ToolServerLink) -> [String: Any] {
+        let url = tools.url.absoluteString + "/question"
+        return ["type": "command", "timeout": 86400,
+                "command": "curl -s -m 86400 -X POST -H 'Authorization: Bearer \(tools.token)' --data-binary @- '\(url)' || true"]
+    }
+
+    /// The attention hooks, and the context and question hooks when the agent has the board's tools.
     private static func settings(_ tools: ToolServerLink?) -> String {
         let context = tools.map(contextHook)
         func entry(_ hooks: [[String: Any]?]) -> [[String: Any]] { [["hooks": hooks.compactMap { $0 }]] }
         var hooks: [String: Any] = ["Stop": entry([attentionHook]), "Notification": entry([attentionHook]),
                                     "UserPromptSubmit": entry([attentionHook, context])]
         if let context { hooks["SessionStart"] = entry([context]); hooks["PostToolUse"] = entry([context]) }
+        if let tools { hooks["PreToolUse"] = [["matcher": "AskUserQuestion", "hooks": [questionHook(tools)]]] }
         return String(decoding: try! JSONSerialization.data(withJSONObject: ["hooks": hooks]), as: UTF8.self)
     }
 

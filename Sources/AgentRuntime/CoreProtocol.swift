@@ -39,7 +39,8 @@ public enum CoreProtocol {
     /// (unknown ones are dropped). Anything else raises `oldest` past the versions it breaks.
     /// 3: `takeOver`, and both sides say the oldest version they speak.
     /// 4: the attention queue (`BoardEvent.attention`, `BoardRequest.dismissAttention`).
-    public static let version = 4
+    /// 5: an agent's questions in its attention request, answered with `answerQuestions`.
+    public static let version = 5
     public static let oldest = 2
     public static let versions = Versions(version: version, oldest: oldest)
 

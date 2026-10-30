@@ -195,3 +195,11 @@
 "Finished its turn. Your move." = "Terminou. Sua vez.";
 "Waiting for you." = "Esperando por você.";
 "All clear" = "Tudo em dia";
+"Asks you a question" = "Faz uma pergunta";
+"Asks you %lld questions" = "Faz %lld perguntas";
+"Answer in terminal" = "Responder no terminal";
+"Shows these questions in the agent's terminal, to answer there." = "Mostra estas perguntas no terminal do agente, para responder lá.";
+"Send answers" = "Enviar respostas";
+"Gives the agent your answers; it carries on with them." = "Entrega suas respostas ao agente, que segue com elas.";
+"Pick any that apply." = "Marque quantas quiser.";
+"Something else…" = "Outra resposta…";

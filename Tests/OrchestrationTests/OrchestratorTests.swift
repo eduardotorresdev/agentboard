@@ -277,6 +277,76 @@ struct OrchestratorTests {
         #expect(orchestrator.attention.first?.context == "Said directly")
     }
 
+    /// An agent's questions (AskUserQuestion) reach the queue through its hook, which waits:
+    /// answered on the board, the hook gives Claude Code the answers; sent to the terminal or
+    /// dismissed, it gives nothing, and Claude Code asks there.
+    @Test func questionsAreAnsweredOnTheBoard() async throws {
+        let core = try await MainActor.run { try Core() }
+        let folder = await MainActor.run { core.folder }
+        let a = agent("Ada", in: folder)
+        let client = try await board(core)
+        let inbox = Inbox()
+        client.onService { data in if let event = BoardEvent(data) { inbox.add(event) } }
+        client.send(.addCard(a))
+        try await waitUntil { core.card(named: "Ada") != nil }
+        func queue() -> [AttentionRequest] {
+            inbox.events.compactMap { event -> [AttentionRequest]? in if case .attention(let list) = event { list } else { nil } }.last ?? []
+        }
+        let input: [String: Any] = ["questions": [
+            ["question": "Which layout?", "header": "Layout", "multiSelect": false,
+             "options": [["label": "Wide", "description": "One row"], ["label": "Tall"]]],
+            ["question": "Which pets?", "header": "Pets", "multiSelect": true, "options": [["label": "Cat"], ["label": "Dog"]]],
+        ]]
+        /// Posts the hook's input as Claude Code would, and waits for the hook's output.
+        func ask() -> Task<[String: Any], Error> {
+            Task {
+                let (url, token) = await MainActor.run { (core.orchestrator.toolsEndpoint, core.orchestrator.toolToken(for: a.id)) }
+                var request = URLRequest(url: try #require(url).appendingPathComponent("question"))
+                request.httpMethod = "POST"
+                request.timeoutInterval = 30
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": input,
+                ])
+                let (data, _) = try await URLSession.shared.data(for: request)
+                return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            }
+        }
+
+        let answered = ask()
+        try await waitUntil { queue().first?.questions?.count == 2 }
+        let questions = try #require(queue().first?.questions)
+        #expect(questions.map(\.header) == ["Layout", "Pets"])
+        #expect(questions[0].options == [.init(label: "Wide", description: "One row"), .init(label: "Tall")])
+        #expect(questions.map(\.multiSelect) == [false, true])
+        client.send(.answerQuestions(id: a.id, answers: ["Which layout?": "Tall", "Which pets?": "Cat, a hamster"]))
+        let output = try await answered.value["hookSpecificOutput"] as? [String: Any]
+        #expect(output?["permissionDecision"] as? String == "allow")
+        let updated = output?["updatedInput"] as? [String: Any]
+        #expect(updated?["answers"] as? [String: String] == ["Which layout?": "Tall", "Which pets?": "Cat, a hamster"])
+        #expect((updated?["questions"] as? [Any])?.count == 2)
+        try await waitUntil { queue().isEmpty }
+        #expect(queue().isEmpty)
+
+        // To the terminal: the hook lets go, and the agent stays queued, now without the form.
+        let toTerminal = ask()
+        try await waitUntil { queue().first?.questions != nil }
+        client.send(.answerQuestions(id: a.id, answers: nil))
+        #expect(try await toTerminal.value.isEmpty)
+        try await waitUntil { queue().first?.questions == nil }
+        #expect(queue().map(\.id) == [a.id])
+
+        // Dismissed: the same.
+        client.send(.dismissAttention(a.id))
+        try await waitUntil { queue().isEmpty }
+        let dismissed = ask()
+        try await waitUntil { queue().first?.questions != nil }
+        client.send(.dismissAttention(a.id))
+        #expect(try await dismissed.value.isEmpty)
+        client.disconnect()
+        await MainActor.run { core.stop() }
+    }
+
     /// A newer core carries on the queue, without requests for cards it doesn't have.
     @Test @MainActor func theQueueSurvivesATakeOver() throws {
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")

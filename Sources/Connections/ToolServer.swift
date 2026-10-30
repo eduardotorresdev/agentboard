@@ -31,12 +31,18 @@ public final class ToolServer: @unchecked Sendable {
     private var keepAlive: DispatchSourceTimer?
     /// Each request (`<caller> <method>`) and stream opened, for a log. Set before `start`.
     public var onRequest: (@Sendable (String) -> Void)?
+    /// Answers an agent's questions hook (see `questionPath`): it returns once the developer
+    /// answered, with the hook's output. Set before `start`.
+    public var onQuestion: (@Sendable (Data, UUID) async -> Data?)?
     /// A stream with nothing on it this long is sent a comment, or clients time it out.
     private static let keepAliveInterval = 25.0
 
     public static let path = "/mcp"
     /// Where an agent's hooks fetch what it should have in context (see `ToolCatalog.context`).
     public static let contextPath = path + "/context"
+    /// Where an agent's hook posts the questions it is about to ask (AskUserQuestion) and waits
+    /// for the developer's answers.
+    public static let questionPath = path + "/question"
 
     /// What a server passes to the one replacing it.
     public struct Release: @unchecked Sendable {
@@ -396,7 +402,9 @@ private final class HTTPExchange: @unchecked Sendable {
 
         let method = String(requestLine[0])
         let path = requestLine[1].split(separator: "?").first.map(String.init) ?? ""
-        guard path == ToolServer.path || path == ToolServer.contextPath else { return reply(404, "Not Found", close: close) }
+        guard [ToolServer.path, ToolServer.contextPath, ToolServer.questionPath].contains(path) else {
+            return reply(404, "Not Found", close: close)
+        }
         guard let caller = server.caller(authorization: headers["authorization"]) else {
             return reply(401, "Unauthorized", close: close)
         }
@@ -404,9 +412,10 @@ private final class HTTPExchange: @unchecked Sendable {
         guard method == "POST" else { return reply(405, "Method Not Allowed", headers: ["Allow": "GET, POST"], close: close) }
         isBusy = true
         let server = self.server
-        if path == ToolServer.contextPath {
+        if path == ToolServer.contextPath || path == ToolServer.questionPath {
+            let question = path == ToolServer.questionPath ? server.onQuestion : nil
             Task { [weak self, queue] in
-                let answer = await server.context(hook: body, caller: caller) ?? Data("{}".utf8)
+                let answer = await (question != nil ? question!(body, caller) : server.context(hook: body, caller: caller)) ?? Data("{}".utf8)
                 queue.async { [weak self] in
                     guard let self, !self.closed else { return }
                     self.reply(200, "OK", headers: ["Content-Type": "application/json"], body: answer, close: close)

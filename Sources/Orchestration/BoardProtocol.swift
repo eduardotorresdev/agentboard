@@ -35,6 +35,9 @@ public enum BoardRequest: Codable, Sendable {
     case writePostIt(id: UUID, text: String)
     /// The developer dealt with the agent's attention request.
     case dismissAttention(UUID)
+    /// The developer answered the questions the agent asked, keyed by question text; nil
+    /// leaves them to the agent's terminal.
+    case answerQuestions(id: UUID, answers: [String: String]?)
 }
 
 /// Core → board.

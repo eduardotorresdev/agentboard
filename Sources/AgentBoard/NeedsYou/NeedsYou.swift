@@ -132,7 +132,9 @@ struct NeedsYouDeck: View {
         NeedsYouCard(agents: agents, request: request, record: record, place: place(of: record), size: size, isActive: isTop,
                      isLive: isTop || isLeaving,
                      position: L("\(queue.count) waiting"), showsHint: !hasSwiped, progress: progress,
-                     takesFocus: isTop && focusFollows, onDone: { leave(request.id, direction: 1) }, onEscape: close)
+                     takesFocus: isTop && focusFollows, onDone: { leave(request.id, direction: 1) },
+                     onAnswer: { answers in leave(request.id, direction: 1) { agents.answerQuestions(request.id, answers) } },
+                     onTerminal: { agents.answerQuestions(request.id, nil) }, onEscape: close)
             .frame(width: size.width)
             .frame(maxHeight: size.height)
             .scaleEffect(1 - CGFloat(depth) * 0.04)
@@ -172,7 +174,8 @@ struct NeedsYouDeck: View {
     }
 
     /// Flies the card off toward `direction`, then takes it out of the queue.
-    private func leave(_ id: UUID, direction: CGFloat) {
+    /// `then` runs as it lands, before the request leaves the queue (answering questions).
+    private func leave(_ id: UUID, direction: CGFloat, then: (() -> Void)? = nil) {
         guard !leaving.contains(id) else { return }
         leftByUser.insert(id)
         let current = drags[id] ?? .zero
@@ -183,6 +186,7 @@ struct NeedsYouDeck: View {
         } completion: {
             leaving.remove(id)
             drags[id] = nil
+            then?()
             agents.dismissAttention(id)
         }
     }
@@ -225,7 +229,12 @@ private struct NeedsYouCard: View {
     let progress: CGFloat
     let takesFocus: Bool
     let onDone: () -> Void
+    let onAnswer: ([String: String]) -> Void
+    let onTerminal: () -> Void
     let onEscape: () -> Void
+
+    /// Questions to answer on the card, which then needs no terminal.
+    private var questions: [AgentQuestion]? { request.questions.flatMap { $0.isEmpty ? nil : $0 } }
 
     /// The terminal is wide and short: enough lines to answer in, the rest goes to the context.
     private var terminalHeight: CGFloat { min(320, max(180, size.height * 0.42)) }
@@ -239,15 +248,22 @@ private struct NeedsYouCard: View {
             context
                 .padding(.horizontal, 24)
                 .padding(.bottom, 14)
-            Group {
-                if isLive {
-                    LiveTerminal(store: agents, record: record, onEscape: onEscape, takesFocus: takesFocus)
-                } else {
-                    Color.white
+            if let questions {
+                QuestionForm(questions: questions, maxHeight: max(160, size.height - (request.context == nil ? 190 : 330)),
+                             isActive: isActive, onSend: onAnswer, onTerminal: onTerminal)
+                    .padding(.horizontal, 24)
+                    .id(request.since)
+            } else {
+                Group {
+                    if isLive {
+                        LiveTerminal(store: agents, record: record, onEscape: onEscape, takesFocus: takesFocus)
+                    } else {
+                        Color.white
+                    }
                 }
+                .frame(height: terminalHeight)
+                .padding(.horizontal, 12)
             }
-            .frame(height: terminalHeight)
-            .padding(.horizontal, 12)
             footer
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
@@ -321,7 +337,7 @@ private struct NeedsYouCard: View {
                 body
                 ScrollView { body }
             }
-            .frame(maxHeight: max(80, size.height - terminalHeight - 190))
+            .frame(maxHeight: questions == nil ? max(80, size.height - terminalHeight - 190) : 140)
             .background(Theme.canvas, in: .rect(cornerRadius: 12))
         }
     }
@@ -341,7 +357,7 @@ private struct NeedsYouCard: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.line.opacity(0.5))
             }
-            if isActive {
+            if isActive && questions == nil {
                 Button(L("Done"), action: onDone)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -359,7 +375,8 @@ private struct NeedsYouCard: View {
     }()
 
     private var message: String {
-        switch request.reason {
+        if let questions { return questions.count == 1 ? L("Asks you a question") : L("Asks you \(questions.count) questions") }
+        return switch request.reason {
         case .turnEnded: L("Finished its turn. Your move.")
         case .waiting: L("Waiting for you.")
         case .said(let text): text

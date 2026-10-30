@@ -21,13 +21,64 @@ public struct AttentionRequest: Codable, Equatable, Identifiable, Sendable {
     /// What the developer is asked to decide on: the agent's last words, the question it asked,
     /// or the command it wants to run. Nil when its conversation can't be read.
     public var context: String?
+    /// Questions the agent asked (AskUserQuestion) that wait on the board's answers; nil when
+    /// it waits in its terminal.
+    public var questions: [AgentQuestion]?
 
-    public init(id: UUID, reason: Reason, since: Date = Date(), context: String? = nil) {
+    public init(id: UUID, reason: Reason, since: Date = Date(), context: String? = nil, questions: [AgentQuestion]? = nil) {
         self.id = id
         self.reason = reason
         self.since = since
         self.context = context
+        self.questions = questions
     }
+}
+
+/// One question an agent asks with AskUserQuestion: options to pick one of, or several of, and
+/// always room for an answer of the developer's own.
+public struct AgentQuestion: Codable, Equatable, Sendable {
+    public struct Option: Codable, Equatable, Sendable {
+        public var label: String
+        /// What picking it means.
+        public var description: String?
+
+        public init(label: String, description: String? = nil) {
+            self.label = label
+            self.description = description
+        }
+    }
+
+    public var question: String
+    /// A short tag for it, e.g. `Layout`.
+    public var header: String?
+    public var options: [Option]
+    public var multiSelect: Bool
+
+    public init(question: String, header: String? = nil, options: [Option], multiSelect: Bool = false) {
+        self.question = question
+        self.header = header
+        self.options = options
+        self.multiSelect = multiSelect
+    }
+
+    /// The questions of an AskUserQuestion call's input.
+    static func parse(_ input: [String: Any]) -> [AgentQuestion] {
+        (input["questions"] as? [[String: Any]] ?? []).compactMap { question in
+            guard let text = question["question"] as? String, !text.isEmpty else { return nil }
+            let options = (question["options"] as? [[String: Any]] ?? []).compactMap { option in
+                (option["label"] as? String).map { Option(label: $0, description: option["description"] as? String) }
+            }
+            return AgentQuestion(question: text, header: question["header"] as? String, options: options,
+                                 multiSelect: question["multiSelect"] as? Bool ?? false)
+        }
+    }
+}
+
+/// An agent's questions hook, waiting: what it asked, and how to let it go on.
+struct PendingQuestions {
+    /// The AskUserQuestion call's input, given back with the answers added.
+    let input: [String: Any]
+    let resume: CheckedContinuation<Data, Never>
 }
 
 extension Orchestrator {
@@ -59,20 +110,67 @@ extension Orchestrator {
     }
 
     /// Queues the agent, or updates why it waits while keeping its place.
-    func requestAttention(_ id: UUID, _ reason: AttentionRequest.Reason, context: String? = nil) {
+    func requestAttention(_ id: UUID, _ reason: AttentionRequest.Reason, context: String? = nil, questions: [AgentQuestion]? = nil) {
         guard record(id) != nil else { return }
         if let index = attention.firstIndex(where: { $0.id == id }) {
             let context = context ?? attention[index].context
-            guard attention[index].reason != reason || attention[index].context != context else { return }
+            let questions = pendingQuestions[id] != nil ? questions ?? attention[index].questions : nil
+            guard attention[index].reason != reason || attention[index].context != context
+                    || attention[index].questions != questions else { return }
             attention[index].reason = reason
             attention[index].context = context
+            attention[index].questions = questions
         } else {
-            attention.append(AttentionRequest(id: id, reason: reason, context: context))
+            attention.append(AttentionRequest(id: id, reason: reason, context: context, questions: questions))
         }
         broadcast(.attention(attention))
     }
 
+    // MARK: Questions
+
+    /// The agent's questions hook posted what it is about to ask: queue it with the questions and
+    /// wait for the developer. The hook's output: the call allowed with the answers in its input,
+    /// or nothing (`{}`), which leaves the questions to the agent's terminal.
+    func ask(_ body: Data, caller: UUID) async -> Data {
+        let hook = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
+        let input = hook["tool_input"] as? [String: Any] ?? [:]
+        let questions = AgentQuestion.parse(input)
+        guard record(caller) != nil, !questions.isEmpty else { return Self.noAnswer }
+        // A hook still waiting is from a call that's over.
+        pendingQuestions.removeValue(forKey: caller)?.resume.resume(returning: Self.noAnswer)
+        let context = (hook["transcript_path"] as? String).flatMap { TranscriptContext.lastText(in: URL(fileURLWithPath: $0)) }
+        return await withCheckedContinuation { continuation in
+            pendingQuestions[caller] = PendingQuestions(input: input, resume: continuation)
+            requestAttention(caller, .waiting, context: context, questions: questions)
+        }
+    }
+
+    /// The developer's answers, keyed by question text; nil sends the agent to ask in its terminal.
+    func answerQuestions(_ id: UUID, _ answers: [String: String]?) {
+        guard let pending = pendingQuestions.removeValue(forKey: id) else { return }
+        guard let answers else {
+            pending.resume.resume(returning: Self.noAnswer)
+            // It now waits in its terminal: the card shows it.
+            if let index = attention.firstIndex(where: { $0.id == id }) {
+                attention[index].questions = nil
+                broadcast(.attention(attention))
+            }
+            return
+        }
+        var input = pending.input
+        input["answers"] = answers
+        let output: [String: Any] = ["hookSpecificOutput": [
+            "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": input,
+        ]]
+        pending.resume.resume(returning: (try? JSONSerialization.data(withJSONObject: output)) ?? Self.noAnswer)
+        dismissAttention(id)
+    }
+
+    private static let noAnswer = Data("{}".utf8)
+
     func dismissAttention(_ id: UUID) {
+        // Questions dismissed unanswered go back to the agent's terminal.
+        pendingQuestions.removeValue(forKey: id)?.resume.resume(returning: Self.noAnswer)
         guard attention.contains(where: { $0.id == id }) else { return }
         attention.removeAll { $0.id == id }
         broadcast(.attention(attention))

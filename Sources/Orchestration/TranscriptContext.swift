@@ -8,7 +8,13 @@ enum TranscriptContext {
     static let tailBytes = 512 * 1024
     static let maxLength = 4000
 
-    static func lastRequest(in url: URL) -> String? {
+    /// What the agent last said in its turn, leaving out its tool calls: the words before the
+    /// questions a form shows on their own.
+    static func lastText(in url: URL) -> String? {
+        lastRequest(in: url, textOnly: true)
+    }
+
+    static func lastRequest(in url: URL, textOnly: Bool = false) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         let size = (try? handle.seekToEnd()) ?? 0
@@ -23,6 +29,7 @@ enum TranscriptContext {
             case "assistant":
                 let blocks = message["content"] as? [[String: Any]] ?? []
                 for block in blocks.reversed() {
+                    if textOnly, block["type"] as? String != "text" { continue }
                     if let found = describe(block) { return found }
                 }
             case "user" where !isToolResult(message):

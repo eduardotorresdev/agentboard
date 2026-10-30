@@ -364,6 +364,12 @@ final class AgentStore {
         send(.dismissAttention(id))
     }
 
+    /// Answers the questions the agent asked, keyed by question text; nil leaves them to its
+    /// terminal.
+    func answerQuestions(_ id: UUID, _ answers: [String: String]?) {
+        send(.answerQuestions(id: id, answers: answers))
+    }
+
     /// Starts an agent that ended again.
     func restart(_ record: AgentRecord) {
         send(.restart(id: record.id, command: nil))

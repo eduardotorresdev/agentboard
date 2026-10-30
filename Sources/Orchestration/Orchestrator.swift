@@ -20,6 +20,8 @@ public final class Orchestrator: CoreService {
     private(set) var postIts: [PostItRecord] = []
     /// The agents waiting on the developer, oldest first (see Attention.swift).
     var attention: [AttentionRequest] = []
+    /// Agents whose questions hook waits on the developer's answers (see Attention.swift).
+    var pendingQuestions: [UUID: PendingQuestions] = [:]
     let bus: MessageBus
     let catalog: ToolCatalog
     let toolServer: ToolServer
@@ -73,6 +75,7 @@ public final class Orchestrator: CoreService {
         postIts = savedPostIts
         catalog.add(RunnerTools(store: self))
         catalog.add(PostItTools(store: self))
+        toolServer.onQuestion = { [weak self] body, caller in await self?.ask(body, caller: caller) }
         catalog.add(BrowserRelay(store: self))
         bus.onGraphChange = { [weak self] graph in
             try? self?.database?.saveConnections(graph.connections)
@@ -276,6 +279,8 @@ public final class Orchestrator: CoreService {
             updatePostIt(id, from: board) { $0.write(text, by: nil) }
         case .dismissAttention(let id):
             dismissAttention(id)
+        case .answerQuestions(let id, let answers):
+            answerQuestions(id, answers)
         }
     }
 
