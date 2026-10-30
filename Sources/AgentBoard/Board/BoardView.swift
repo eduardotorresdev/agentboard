@@ -61,6 +61,7 @@ final class BoardController {
 
     func add(_ provider: any AgentProvider) { view?.addAgent(provider) }
     func add(_ device: BrowserDevice) { view?.addBrowser(device) }
+    func addNotes() { view?.addNotes() }
     /// The dialog that asks what a new runner runs is open.
     var addingRunner = false
     func addRunner(command: String, name: String?, directory: String?) { view?.addRunner(command: command, name: name, directory: directory) }
@@ -75,6 +76,8 @@ final class BoardController {
     func zoomOut() { view?.stepZoom(-1) }
     func resetZoom() { view?.animateZoom(to: 1) }
     func fitAgents() { view?.fitAgents() }
+    /// Width of the canvas's leading edge covered by the floating sidebar, kept clear when fitting.
+    var leadingInset: CGFloat = 0
 }
 
 struct DeviceRequest: Identifiable {
@@ -164,6 +167,14 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// The address field shown over a browser card's title bar while its address is edited.
     private var addressField: NSTextField?
     private var editingAddress: UUID?
+    private var notesCards: [UUID: NotesCardLayer] = [:]
+    /// How far each notes card's list is scrolled.
+    fileprivate var notesScroll: [UUID: CGFloat] = [:]
+    /// The notes control under the pointer, and the row it is over.
+    fileprivate var hoveredNotes: (card: UUID, control: NotesControl?, row: UUID?)?
+    /// The field a note is written in, over its notes card: a new note (nil entry) or one being rewritten.
+    fileprivate var noteField: NSTextField?
+    fileprivate var editingNote: (card: UUID, entry: UUID?)?
     private var links: [UUID: LinkLayer] = [:]
     private let router = ConnectorRouter()
     private var routes: [UUID: Route] = [:]
@@ -183,6 +194,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         didSet {
             guard worktree != oldValue else { return }
             endAddressEditing()
+            endNoteEditing(commit: true)
             focusedID = nil
             cameraAnimation = nil
             releaseTerminals()
@@ -399,6 +411,20 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         beginAddressEditing(record.id)
     }
 
+    func addNotes() {
+        let size = NotesRecord.size
+        let count = store.notes(in: worktree).count
+        let cascade = CGFloat(count % 6) * 28
+        let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
+        let top = world(CGPoint(x: 0, y: 72)).y
+        let origin = CGPoint(x: center.x - size.width / 2 + cascade, y: max(top, center.y - size.height / 2) + cascade)
+        let record = store.addNotes(to: worktree, at: origin)
+        appearing.insert(record.id)
+        focusedID = record.id
+        window?.makeFirstResponder(self)
+        syncLayers()
+    }
+
     // MARK: Layers
 
     private func prepareGlyphs() -> GlyphCache? {
@@ -493,6 +519,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 dirty.remove(record.id)
             }
         }
+        syncNotes(scale: renderScale)
         syncBrowsers(onScreen: onScreen, scale: renderScale)
         syncLinks(scale: renderScale)
         // Terminals that got a new place in the surface are drawn there before they show again.
@@ -510,7 +537,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             browserCards[id] = nil
         }
         if let editingAddress, !ids.contains(editingAddress) { endAddressEditing() }
-        let agentCount = CGFloat(store.agents(in: worktree).count)
+        let below = CGFloat(store.agents(in: worktree).count + store.notes(in: worktree).count)
         for (index, record) in records.enumerated() {
             if onScreen { browsers.show(record.id) }
             let card = browserCards[record.id] ?? {
@@ -520,7 +547,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 if appearing.remove(record.id) != nil { card.animateAppearance() }
                 return card
             }()
-            card.zPosition = agentCount + CGFloat(index)
+            card.zPosition = below + CGFloat(index)
             card.update(frame: record.frame, record: record, page: browsers.pages[record.id], status: browsers.status(of: record.id),
                         focused: record.id == focusedID, hovered: hoveredControl?.card == record.id ? hoveredControl?.control : nil,
                         editingAddress: editingAddress == record.id, scale: scale)
@@ -535,9 +562,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         placeAddressField()
     }
 
-    /// Every card of this worktree, agents then browsers: bottom to top.
+    /// Every card of this worktree, agents, notes then browsers: bottom to top.
     private var itemFrames: [(id: UUID, frame: CGRect)] {
-        store.agents(in: worktree).map { ($0.id, $0.frame) } + browsers.browsers(in: worktree).map { ($0.id, $0.frame) }
+        store.agents(in: worktree).map { ($0.id, $0.frame) } + store.notes(in: worktree).map { ($0.id, $0.frame) }
+            + browsers.browsers(in: worktree).map { ($0.id, $0.frame) }
     }
 
     /// The lines of this worktree, between any of its cards.
@@ -746,8 +774,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         let frames = itemFrames.map(\.frame)
         guard let first = frames.first else { return animateCamera(to: Camera(zoom: 1, pan: .zero)) }
         let union = frames.dropFirst().reduce(first) { $0.union($1) }
-        // A margin around the cards, larger at the bottom where the toolbars float.
-        let area = CGRect(x: 48, y: 48, width: bounds.width - 96, height: bounds.height - 48 - 96)
+        // A margin around the cards, larger at the bottom where the toolbars float and clear of the sidebar.
+        let inset = controller?.leadingInset ?? 0
+        let area = CGRect(x: 48 + inset, y: 48, width: bounds.width - 96 - inset, height: bounds.height - 48 - 96)
         guard area.width > 0, area.height > 0 else { return }
         let target = clampZoom(min(area.width / union.width, area.height / union.height, 1))
         animateCamera(to: Camera(zoom: target, pan: CGPoint(x: area.midX - union.midX * target, y: area.midY - union.midY * target)))
@@ -818,9 +847,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     // MARK: Pointer
 
-    /// The topmost agent card under a world point, unless a browser card covers it.
+    /// The topmost agent card under a world point, unless a browser or notes card covers it.
     private func card(at point: CGPoint) -> AgentRecord? {
-        guard browser(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, notesCard(at: point) == nil else { return nil }
         return store.agents(in: worktree).last { $0.frame.contains(point) }
     }
 
@@ -829,13 +858,19 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         browsers.browsers(in: worktree).last { $0.frame.contains(point) }
     }
 
+    /// The topmost notes card under a world point, unless a browser card covers it.
+    fileprivate func notesCard(at point: CGPoint) -> NotesRecord? {
+        guard browser(at: point) == nil else { return nil }
+        return store.notes(in: worktree).last { $0.frame.contains(point) }
+    }
+
     /// The topmost card of any kind under a world point.
     private func item(at point: CGPoint) -> UUID? {
-        browser(at: point)?.id ?? card(at: point)?.id
+        browser(at: point)?.id ?? notesCard(at: point)?.id ?? card(at: point)?.id
     }
 
     private func frame(of id: UUID) -> CGRect? {
-        record(id)?.frame ?? browsers.record(id)?.frame
+        record(id)?.frame ?? store.notesRecord(id)?.frame ?? browsers.record(id)?.frame
     }
 
     private func record(_ id: UUID) -> AgentRecord? {
@@ -929,11 +964,18 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }
         if let browser = browser(at: location) {
             endAddressEditing()
+            endNoteEditing(commit: true)
             browserMouseDown(browser, at: location, event: event)
             syncLayers()
             return
         }
         endAddressEditing()
+        if let notes = notesCard(at: location) {
+            notesMouseDown(notes, at: location, event: event)
+            syncLayers()
+            return
+        }
+        endNoteEditing(commit: true)
         let previousFocus = focusedID
         defer {
             // The cursor shows only on the focused card.
@@ -1094,8 +1136,17 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             let page = pagePoint(point, in: browser)
             browsers.input(browser.id, ["kind": "move", "x": page.x, "y": page.y])
         }
+        let notes = notesCard(at: point)
+        let notesHover = notes.map { record in
+            (card: record.id, control: notesLayout(record).control(at: local(point, in: record.frame), scroll: notesScroll[record.id] ?? 0),
+             row: notesRow(at: point, in: record))
+        }
+        if notesHover?.card != hoveredNotes?.card || notesHover?.control != hoveredNotes?.control || notesHover?.row != hoveredNotes?.row {
+            hoveredNotes = notesHover
+            syncLayers()
+        }
         let handle = handle(at: point)
-        let showing = handle?.card ?? browser?.id ?? card?.id
+        let showing = handle?.card ?? browser?.id ?? notes?.id ?? card?.id
         if control?.0 != hoveredControl?.card || control?.1 != hoveredControl?.control {
             hoveredControl = control.map { (card: $0.0, control: $0.1) }
             syncLayers()
@@ -1116,7 +1167,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     override func mouseExited(with event: NSEvent) {
-        guard hoveredClose != nil || hoveredCard != nil || hoveredLink != nil || hoveredControl != nil || hoveredRunnerControl != nil else { return }
+        guard hoveredClose != nil || hoveredCard != nil || hoveredLink != nil || hoveredControl != nil || hoveredRunnerControl != nil
+                || hoveredNotes != nil else { return }
+        hoveredNotes = nil
         hoveredControl = nil
         hoveredRunnerControl = nil
         hoveredClose = nil
@@ -1146,6 +1199,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                                 "dx": -event.scrollingDeltaX * factor, "dy": -event.scrollingDeltaY * factor])
             return
         }
+        if let notes = notesCard(at: location), scrollNotes(notes, by: event) { return }
         if let id = focusedID, let record = record(id), card(at: location)?.id == id,
            CardMetrics.terminal(of: record).contains(location),
            store.sessions[id]?.withTerminal({ $0.wantsMouse }) == true {
@@ -1367,6 +1421,8 @@ extension BoardView {
     fileprivate func setFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
         if browsers.record(id) != nil {
             browsers.setFrame(frame, for: id, persist: persist)
+        } else if store.notesRecord(id) != nil {
+            store.setNotesFrame(frame, for: id, persist: persist)
         } else {
             store.setFrame(frame, for: id, persist: persist)
         }
@@ -1611,6 +1667,7 @@ extension BoardView {
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if control === noteField { return noteField(doCommandBy: selector) }
         guard let id = editingAddress else { return false }
         if selector == #selector(NSResponder.insertNewline(_:)) {
             let address = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1623,6 +1680,200 @@ extension BoardView {
             return true
         }
         return false
+    }
+}
+
+// MARK: Notes
+
+extension BoardView {
+    fileprivate func notesLayout(_ record: NotesRecord) -> NotesCardLayout {
+        let adding = editingNote.map { $0.card == record.id && $0.entry == nil } ?? false
+        return NotesCardLayout(size: record.frame.size, record: record, adding: adding)
+    }
+
+    /// A world point in a card's own coordinates.
+    fileprivate func local(_ point: CGPoint, in frame: CGRect) -> CGPoint {
+        CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+    }
+
+    /// The entry whose row is under a world point.
+    fileprivate func notesRow(at point: CGPoint, in record: NotesRecord) -> UUID? {
+        let layout = notesLayout(record)
+        let card = local(point, in: record.frame)
+        guard layout.content.contains(card) else { return nil }
+        let list = CGPoint(x: card.x - layout.content.minX, y: card.y - layout.content.minY + (notesScroll[record.id] ?? 0))
+        return layout.rows.first { $0.frame.contains(list) }?.entry.id
+    }
+
+    /// Notes cards sit above the agents and below the browsers, in their own stacking order.
+    fileprivate func syncNotes(scale: CGFloat) {
+        let records = store.notes(in: worktree)
+        let ids = Set(records.map(\.id))
+        for (id, card) in notesCards where !ids.contains(id) {
+            card.removeFromSuperlayer()
+            notesCards[id] = nil
+            notesScroll[id] = nil
+        }
+        if let editing = editingNote, store.notesRecord(editing.card) == nil { endNoteEditing(commit: false) }
+        let agentCount = CGFloat(store.agents(in: worktree).count)
+        for (index, record) in records.enumerated() {
+            let card = notesCards[record.id] ?? {
+                let card = NotesCardLayer()
+                notesCards[record.id] = card
+                cardsLayer.addSublayer(card)
+                if appearing.remove(record.id) != nil { card.animateAppearance() }
+                return card
+            }()
+            let layout = notesLayout(record)
+            let scroll = min(notesScroll[record.id] ?? 0, layout.maxScroll)
+            notesScroll[record.id] = scroll
+            let hover = hoveredNotes?.card == record.id ? hoveredNotes : nil
+            card.zPosition = agentCount + CGFloat(index)
+            card.update(frame: record.frame, record: record, layout: layout, scroll: scroll, focused: record.id == focusedID,
+                        hovered: hover?.control, hoveredRow: hover?.row,
+                        editing: editingNote?.card == record.id ? editingNote?.entry : nil,
+                        adding: editingNote.map { $0.card == record.id && $0.entry == nil } ?? false, scale: scale)
+            let showsHandles = linkDrag != nil || record.id == hoveredCard
+            let lit: Int? = if let linkDrag {
+                linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
+            } else {
+                record.id == hoveredCard ? hoveredHandle : nil
+            }
+            card.updateHandles(visible: showsHandles, hovered: lit, linkTarget: linkDrag?.target == record.id)
+        }
+        placeNoteField()
+    }
+
+    fileprivate func notesMouseDown(_ record: NotesRecord, at location: CGPoint, event: NSEvent) {
+        let frame = record.frame
+        let layout = notesLayout(record)
+        let point = local(location, in: frame)
+        focusedID = record.id
+        store.raiseNotes(record.id)
+        let handle = CardMetrics.resizeHandle / zoom
+        let control = layout.control(at: point, scroll: notesScroll[record.id] ?? 0)
+        // Clicking anywhere but the field being written in keeps what was written.
+        if control != .add || editingNote?.card != record.id { endNoteEditing(commit: true) }
+        switch control {
+        case .close:
+            store.removeNotes(record.id)
+            focusedID = nil
+            hoveredNotes = nil
+        case .add:
+            beginNoteEditing(on: record.id, entry: nil)
+        case .delete(let entry):
+            store.deleteNote(entry, on: record.id)
+            hoveredNotes = nil
+        case .entry(let entry):
+            beginNoteEditing(on: record.id, entry: entry)
+        case nil:
+            if location.x > frame.maxX - handle && location.y > frame.maxY - handle {
+                interaction = Interaction(id: record.id, kind: .resize, start: convert(event.locationInWindow, from: nil), frame: frame)
+            } else if !layout.content.contains(point) || notesRow(at: location, in: record) == nil {
+                // The title bar and the space around the list move the card.
+                interaction = Interaction(id: record.id, kind: .move, start: convert(event.locationInWindow, from: nil), frame: frame)
+            }
+        }
+    }
+
+    /// Scrolls a notes card's list when it overflows; false when it doesn't, so the board pans.
+    fileprivate func scrollNotes(_ record: NotesRecord, by event: NSEvent) -> Bool {
+        let layout = notesLayout(record)
+        let location = world(convert(event.locationInWindow, from: nil))
+        guard layout.maxScroll > 0, layout.content.contains(local(location, in: record.frame)) else { return false }
+        let factor: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
+        let current = notesScroll[record.id] ?? 0
+        notesScroll[record.id] = min(max(current - event.scrollingDeltaY * factor / zoom, 0), layout.maxScroll)
+        syncLayers()
+        return true
+    }
+
+    // MARK: Writing a note
+
+    fileprivate func beginNoteEditing(on card: UUID, entry: UUID?) {
+        guard let record = store.notesRecord(card) else { return }
+        let field = noteField ?? {
+            let field = NSTextField()
+            field.isBezeled = false
+            field.drawsBackground = true
+            field.backgroundColor = .white
+            field.focusRingType = .none
+            field.usesSingleLineMode = false
+            field.cell?.wraps = true
+            field.cell?.isScrollable = false
+            field.lineBreakMode = .byWordWrapping
+            field.delegate = self
+            // A field reads as one with a thin ring; the board draws no other borders.
+            field.wantsLayer = true
+            field.layer?.cornerRadius = 8
+            field.layer?.borderWidth = 1
+            field.layer?.borderColor = BoardPalette.rgb(BoardPalette.accent, 0.5)
+            noteField = field
+            return field
+        }()
+        editingNote = (card, entry)
+        field.placeholderString = L("Write a note…")
+        field.stringValue = entry.flatMap { id in record.entries.first { $0.id == id }?.text } ?? ""
+        if field.superview == nil { addSubview(field) }
+        syncLayers()
+        window?.makeFirstResponder(field)
+        field.currentEditor()?.moveToEndOfDocument(nil)
+    }
+
+    fileprivate func placeNoteField() {
+        guard let field = noteField, let editing = editingNote, let record = store.notesRecord(editing.card) else { return }
+        let layout = notesLayout(record)
+        var rect: CGRect
+        if let entry = editing.entry {
+            guard let text = layout.textFrame(of: entry, scroll: notesScroll[record.id] ?? 0) else { return }
+            rect = text.insetBy(dx: -6, dy: -4)
+            rect.size.height = max(rect.height, 28)
+        } else {
+            rect = layout.add
+        }
+        field.font = NSFont.systemFont(ofSize: NotesCardLayout.textFont.pointSize * zoom)
+        field.frame = screen(rect.offsetBy(dx: record.frame.minX, dy: record.frame.minY))
+    }
+
+    /// Closes the field; `commit` keeps what was written (an emptied note is removed).
+    fileprivate func endNoteEditing(commit: Bool) {
+        guard let field = noteField, let editing = editingNote else { return }
+        editingNote = nil
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        field.removeFromSuperview()
+        if commit, let record = store.notesRecord(editing.card) {
+            if let id = editing.entry, var entry = record.entries.first(where: { $0.id == id }) {
+                if text.isEmpty {
+                    store.deleteNote(id, on: record.id)
+                } else if text != entry.text {
+                    entry.text = text
+                    entry.author = nil
+                    entry.authorName = ""
+                    entry.updated = Date()
+                    store.writeNote(entry, on: record.id)
+                }
+            } else if editing.entry == nil, !text.isEmpty {
+                store.writeNote(NoteEntry(kind: .note, author: nil, authorName: "", text: text), on: record.id)
+                // The new note is last: show it.
+                notesScroll[record.id] = .greatestFiniteMagnitude
+            }
+        }
+        if window?.firstResponder === field.currentEditor() || window?.firstResponder === field { window?.makeFirstResponder(self) }
+        syncLayers()
+    }
+
+    /// Enter keeps the note, Option-Enter starts a new line, Escape drops the change.
+    fileprivate func noteField(doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)):
+            endNoteEditing(commit: true)
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            endNoteEditing(commit: false)
+            return true
+        default:
+            return false
+        }
     }
 }
 

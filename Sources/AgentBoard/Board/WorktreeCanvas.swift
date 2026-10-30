@@ -14,6 +14,7 @@ struct WorktreeCanvas: View {
             Board(store: agents, browsers: browsers, worktree: worktree.path, controller: board)
             if let notice {
                 EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
+                    .padding(.leading, board.leadingInset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
                     .transition(.opacity)
@@ -23,18 +24,22 @@ struct WorktreeCanvas: View {
                     title: L("No agents yet"),
                     message: L("Add an agent from the bar below. It starts in this worktree's folder.")
                 ) { EmptyView() }
+                .padding(.leading, board.leadingInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
             CanvasToolbar(board: board)
                 .padding(.bottom, 16)
+                .padding(.leading, board.leadingInset)
             NavigationToolbar(board: board)
                 .padding([.bottom, .trailing], 16)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .animation(.smooth(duration: 0.3), value: isEmpty)
         .animation(.smooth(duration: 0.3), value: notice)
+        // Content centers on the canvas the sidebar leaves uncovered, following it as it slides.
+        .animation(.snappy(duration: 0.32), value: board.leadingInset)
         .clipped()
         .sheet(item: Binding(get: { board.deviceRequest }, set: { board.deviceRequest = $0 })) { request in
             let current: BrowserDevice? = if case .browser(let id) = request.target { browsers.record(id)?.device } else { nil }
@@ -59,7 +64,8 @@ struct WorktreeCanvas: View {
     }
 
     private var isEmpty: Bool {
-        agents.isLoaded && agents.agents(in: worktree.path).isEmpty && browsers.browsers(in: worktree.path).isEmpty
+        agents.isLoaded && agents.agents(in: worktree.path).isEmpty && agents.notes(in: worktree.path).isEmpty
+            && browsers.browsers(in: worktree.path).isEmpty
     }
 }
 
@@ -83,6 +89,11 @@ private struct CanvasToolbar: View {
                 .fixedSize()
                 .accessibilityLabel(L("Add runner"))
                 .help(L("Keeps a command running, such as a dev server."))
+            Button { board.addNotes() } label: { Image(systemName: "note.text") }
+                .buttonStyle(ToolbarButtonStyle(icon: true))
+                .fixedSize()
+                .accessibilityLabel(L("Add notes"))
+                .help(L("Shared notes: connected agents say what they're working on and where, and keep what to remember."))
         }
         .font(.system(size: 18, weight: .medium))
         .padding(5)

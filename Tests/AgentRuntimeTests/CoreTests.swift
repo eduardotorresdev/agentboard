@@ -44,6 +44,9 @@ private final class OldCore {
         listener = try UnixSocket.listen(at: path)
         let listener = self.listener
         Thread.detachNewThread { [weak self] in
+            // The listener doesn't block: wait for the board to connect before accepting it.
+            var ready = pollfd(fd: listener, events: Int16(POLLIN), revents: 0)
+            guard poll(&ready, 1, 5000) > 0 else { return }
             let fd = accept(listener, nil, nil)
             guard fd >= 0, let self else { return }
             let socket = CoreSocket(fd: fd, queue: self.queue)

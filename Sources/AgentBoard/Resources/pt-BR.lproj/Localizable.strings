@@ -157,3 +157,15 @@
 "Import from a cookie file…" = "Importar de um arquivo de cookies…";
 "Imported %lld cookies from %@." = "Importados %lld cookies do %@.";
 "Left out %lld Google sign-in cookies so %@ stays signed in." = "Deixei de fora %lld cookies de login do Google para o %@ continuar logado.";
+"Collapsed" = "Recolhido";
+"Expanded" = "Expandido";
+
+/* Notes */
+"Add notes" = "Adicionar notas";
+"Shared notes: connected agents say what they're working on and where, and keep what to remember." = "Notas compartilhadas: os agentes conectados dizem no que estão trabalhando e onde, e guardam o que vale lembrar.";
+"Notes" = "Notas";
+"Working on" = "Trabalhando em";
+"Nothing here yet." = "Nada aqui ainda.";
+"Add note" = "Adicionar nota";
+"You" = "Você";
+"Write a note…" = "Escreva uma nota…";

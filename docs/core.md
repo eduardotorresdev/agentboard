@@ -57,8 +57,8 @@ Status: in progress, see `GOAL.md`.
   the new core takes the agents over and the app relaunches onto them, so an agent working in
   the installed app can run it to update the app it runs in. The settings of the builds before
   (project folder, open worktree) carry over at the first install.
-- `./run` builds of the checkout use a data folder of their own (`AgentBoard Dev`, titled so in
-  the window), so trying a change never touches the installed app's agents. Programs the core
+- `./run` builds of the checkout use a data folder of their own (`AgentBoard Dev`; its window's
+  toolbar is violet), so trying a change never touches the installed app's agents. Programs the core
   starts get no `AGENTBOARD_*` settings: a `./run` in one of them never reaches its core.
 
 - `./run --watch` builds on every change and only then swaps the app (a failed build leaves

@@ -144,9 +144,21 @@ extension BoardState {
                 state.cards.append(record)
             case .updateCard(let record):
                 if let index = state.cards.firstIndex(where: { $0.id == record.id }) { state.cards[index] = record }
-            case .removeCard(let id):
+            case .removeCard(let id), .removeNotes(let id):
                 state.cards.removeAll { $0.id == id }
+                state.notes?.removeAll { $0.id == id }
                 state.connections.removeAll { $0.touches(id) }
+            case .addNotes(let record) where state.notes?.contains { $0.id == record.id } != true:
+                state.notes = (state.notes ?? []) + [record]
+            case .updateNotes(let record):
+                if let index = state.notes?.firstIndex(where: { $0.id == record.id }) {
+                    state.notes?[index].name = record.name
+                    state.notes?[index].frame = record.frame
+                }
+            case .writeNote(let notes, let entry):
+                if let index = state.notes?.firstIndex(where: { $0.id == notes }) { state.notes?[index].write(entry) }
+            case .deleteNote(let notes, let entry):
+                if let index = state.notes?.firstIndex(where: { $0.id == notes }) { state.notes?[index].entries.removeAll { $0.id == entry } }
             case .connect(let connection) where !state.connections.contains { $0.joins(connection.a, connection.b) }:
                 state.connections.append(connection)
             case .disconnect(let id):

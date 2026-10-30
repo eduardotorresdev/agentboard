@@ -21,11 +21,28 @@ struct AgentBoardApp: App {
     }
 
     var body: some Scene {
-        // The title tells the installed app from a build of the checkout (`./run`) beside it.
-        WindowGroup(Bundle.main.bundleURL.pathExtension == "app" ? "AgentBoard" : "AgentBoard Dev") {
+        WindowGroup("AgentBoard") {
             ContentView(store: store, agents: agents, browsers: browsers)
                 .preferredColorScheme(.light)
                 .tint(Theme.accent)
+                .modifier(DevBuildToolbar())
+        }
+    }
+}
+
+/// A build of the checkout (`./run`) paints the window's toolbar violet, so it reads apart from
+/// the installed app beside it while keeping the same title and layout.
+private struct DevBuildToolbar: ViewModifier {
+    private let isDevBuild = Bundle.main.bundleURL.pathExtension != "app"
+
+    func body(content: Content) -> some View {
+        if isDevBuild {
+            content
+                .toolbarBackground(Theme.accent, for: .windowToolbar)
+                .toolbarBackground(.visible, for: .windowToolbar)
+                .toolbarColorScheme(.dark, for: .windowToolbar)
+        } else {
+            content
         }
     }
 }

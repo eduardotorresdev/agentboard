@@ -232,6 +232,67 @@ struct OrchestratorTests {
         #expect(await core.card(named: "Ada") == nil)
         client.disconnect()
     }
+
+    /// Agents connected to a notes block say what they work on and keep notes there; the board
+    /// hears each change, the user's notes reach the agents, and the block outlives the core.
+    @Test func agentsShareNotes() async throws {
+        let core = try await MainActor.run { try Core() }
+        let folder = await MainActor.run { core.folder }
+        let a = agent("Ada", in: folder), b = agent("Bob", in: folder)
+        let notes = NotesRecord(id: UUID(), worktree: folder.path, name: "Notes", frame: CGRect(origin: .zero, size: NotesRecord.size))
+        let client = try await board(core)
+        let inbox = Inbox()
+        client.onService { data in if let event = BoardEvent(data) { inbox.add(event) } }
+        client.send(.addCard(a))
+        client.send(.addCard(b))
+        client.send(.addNotes(notes))
+        client.send(.connect(Connection(a: a.id, b: notes.id)))
+        try await waitUntil { core.orchestrator.bus.graph.connections.count == 1 }
+
+        let unconnected = try await call("notes_read", as: b.id, on: core)
+        #expect(unconnected.isError)
+        let peers = try await call("list_peers", as: a.id, on: core)
+        #expect(peers.text.contains("Notes (notes"), "\(peers.text)")
+
+        let status = try await call("notes_status", ["doing": "Adding the export button", "where": "Sources/Export"], as: a.id, on: core)
+        #expect(!status.isError, "\(status.text)")
+        // A new status replaces the old one.
+        _ = try await call("notes_status", ["doing": "Writing the export tests", "where": "Tests/Export"], as: a.id, on: core)
+        let written = try await call("notes_write", ["text": "CSV export uses semicolons for pt-BR."], as: a.id, on: core)
+        #expect(written.text.hasPrefix("Added note"), "\(written.text)")
+        client.send(.writeNote(notes: notes.id, entry: NoteEntry(kind: .note, author: nil, authorName: "", text: "Ship on Friday.")))
+        try await waitUntil { core.orchestrator.notesRecord(notes.id)?.notes.count == 2 }
+
+        let page = try await call("notes_read", as: a.id, on: core)
+        #expect(page.text.contains("Ada: Writing the export tests (where: Tests/Export)"), "\(page.text)")
+        #expect(!page.text.contains("Adding the export button"))
+        #expect(page.text.contains("CSV export uses semicolons"))
+        #expect(page.text.contains("the user"), "\(page.text)")
+        #expect(inbox.events.contains { if case .notesUpdated(let record) = $0 { record.statuses.count == 1 } else { false } })
+
+        // Rewriting and deleting by the id notes_read shows.
+        let noteID = try #require(await core.orchestrator.notesRecord(notes.id)?.notes.first?.shortID)
+        let rewritten = try await call("notes_write", ["id": noteID, "text": "CSV export uses commas."], as: a.id, on: core)
+        #expect(!rewritten.isError, "\(rewritten.text)")
+        #expect(await core.orchestrator.notesRecord(notes.id)?.notes.first?.text == "CSV export uses commas.")
+        let userNote = try #require(await core.orchestrator.notesRecord(notes.id)?.notes.last?.shortID)
+        let deleted = try await call("notes_delete", ["id": userNote], as: a.id, on: core)
+        #expect(!deleted.isError, "\(deleted.text)")
+        #expect(await core.orchestrator.notesRecord(notes.id)?.notes.count == 1)
+
+        // A status goes away with its agent; the notes stay, on disk too.
+        client.send(.removeCard(a.id))
+        try await waitUntil { core.orchestrator.notesRecord(notes.id)?.statuses.isEmpty == true }
+        #expect(await core.orchestrator.notesRecord(notes.id)?.statuses.isEmpty == true)
+        client.disconnect()
+        await MainActor.run { core.stop() }
+        let reloaded = await MainActor.run { () -> [NotesRecord] in
+            let server = CoreServer(socketPath: NSTemporaryDirectory() + "abcore-unused.sock", queue: .main)
+            return Orchestrator(server: server, dataFolder: folder, providers: [EchoAgent()], searchPath: "/usr/bin:/bin").notes
+        }
+        #expect(reloaded.map(\.name) == ["Notes"])
+        #expect(reloaded.first?.notes.map(\.text) == ["CSV export uses commas."])
+    }
 }
 
 /// The real core binary, in a data folder of its own: with the board gone, a runner's logs still

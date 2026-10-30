@@ -16,6 +16,8 @@ public final class Orchestrator: CoreService {
     private let providers: [any AgentProvider]
     private let dataFolder: URL
     private(set) var cards: [AgentRecord] = []
+    /// The notes blocks (see NotesTools).
+    private(set) var notes: [NotesRecord] = []
     let bus: MessageBus
     let catalog: ToolCatalog
     let toolServer: ToolServer
@@ -56,7 +58,8 @@ public final class Orchestrator: CoreService {
             saved[index].name = AgentRecord.uniqueName(base, among: saved.filter { $0.worktree == saved[index].worktree })
             try? database?.saveAgent(saved[index])
         }
-        let ids = Set(saved.map(\.id)).union(database?.browserIDs() ?? [])
+        let savedNotes = (try? database?.notes()) ?? []
+        let ids = Set(saved.map(\.id)).union(savedNotes.map(\.id)).union(database?.browserIDs() ?? [])
         let stored = ((try? database?.connections()) ?? []).filter { ids.contains($0.a) && ids.contains($0.b) }
         bus = MessageBus(graph: ConnectionGraph(stored))
         catalog = ToolCatalog([MessagingTools(bus: bus)])
@@ -65,7 +68,9 @@ public final class Orchestrator: CoreService {
             toolServer.onRequest = { log("tools: \($0)") }
         }
         cards = saved
+        notes = savedNotes
         catalog.add(RunnerTools(store: self))
+        catalog.add(NotesTools(store: self))
         catalog.add(BrowserRelay(store: self))
         bus.onGraphChange = { [weak self] graph in
             try? self?.database?.saveConnections(graph.connections)
@@ -73,6 +78,7 @@ public final class Orchestrator: CoreService {
         }
         bus.onMessage = { [weak self] message in self?.broadcast(.message(message)) }
         for record in cards { register(record) }
+        for record in notes { bus.register(NotesElement(id: record.id, store: self)) }
         let inherited = inheriting.flatMap { try? JSONDecoder().decode(Inherited.self, from: $0) }
         if let inherited {
             runnerStarts = inherited.runnerStarts.filter { server.session($0.key)?.processID != nil }
@@ -129,10 +135,13 @@ public final class Orchestrator: CoreService {
 
     func cards(in worktree: String) -> [AgentRecord] { cards.filter { $0.worktree == worktree } }
 
-    /// The frames of everything on `worktree`'s canvas: cards and the boards' other elements.
+    /// The frames of everything on `worktree`'s canvas: cards, notes and the boards' other elements.
     func frames(in worktree: String) -> [CGRect] {
-        cards(in: worktree).map(\.frame) + elements.values.filter { $0.worktree == worktree }.map(\.frame)
+        cards(in: worktree).map(\.frame) + notes.filter { $0.worktree == worktree }.map(\.frame)
+            + elements.values.filter { $0.worktree == worktree }.map(\.frame)
     }
+
+    func notesRecord(_ id: UUID) -> NotesRecord? { notes.first { $0.id == id } }
 
     func session(_ id: UUID) -> AgentSession? { server.session(id) }
 
@@ -188,7 +197,7 @@ public final class Orchestrator: CoreService {
 
     public func boardConnected(_ board: CoreBoard) -> Data? {
         boards.insert(board)
-        return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners).encoded
+        return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, notes: notes).encoded
     }
 
     public func boardDisconnected(_ board: CoreBoard) {
@@ -246,6 +255,20 @@ public final class Orchestrator: CoreService {
             stopRunner(id)
         case .toolResult(let call, let result):
             toolCalls.removeValue(forKey: call)?.done.resume(returning: result.result)
+        case .addNotes(let record):
+            guard notesRecord(record.id) == nil else { return }
+            insertNotes(record, from: board)
+        case .updateNotes(let record):
+            updateNotes(record.id, from: board) {
+                $0.name = record.name
+                $0.frame = record.frame
+            }
+        case .removeNotes(let id):
+            removeNotes(id, from: board)
+        case .writeNote(let id, let entry):
+            updateNotes(id, from: board) { $0.write(entry) }
+        case .deleteNote(let id, let entry):
+            updateNotes(id, from: board) { $0.entries.removeAll { $0.id == entry } }
         }
     }
 
@@ -294,6 +317,39 @@ public final class Orchestrator: CoreService {
         cards.removeAll { $0.id == id }
         try? database?.deleteAgent(id: id)
         broadcast(.cardRemoved(id), except: sender)
+        // What it was working on no longer holds.
+        for block in notes where block.entries.contains(where: { $0.kind == .status && $0.author == id }) {
+            updateNotes(block.id) { $0.entries.removeAll { $0.kind == .status && $0.author == id } }
+        }
+    }
+
+    // MARK: Notes
+
+    /// Adds a notes block and saves it; boards other than `sender` hear of it.
+    func insertNotes(_ record: NotesRecord, from sender: CoreBoard? = nil) {
+        notes.append(record)
+        bus.register(NotesElement(id: record.id, store: self))
+        try? database?.saveNotes(record)
+        broadcast(.notesAdded(record), except: sender)
+    }
+
+    /// Changes a notes block in place and saves it. Every board hears of it, `sender` too
+    /// unless only the name or frame changed: entries written meanwhile reach it that way.
+    func updateNotes(_ id: UUID, from sender: CoreBoard? = nil, _ change: (inout NotesRecord) -> Void) {
+        guard let index = notes.firstIndex(where: { $0.id == id }) else { return }
+        let before = notes[index]
+        change(&notes[index])
+        guard notes[index] != before else { return }
+        try? database?.saveNotes(notes[index])
+        broadcast(.notesUpdated(notes[index]), except: notes[index].entries == before.entries ? sender : nil)
+    }
+
+    func removeNotes(_ id: UUID, from sender: CoreBoard? = nil) {
+        guard notesRecord(id) != nil else { return }
+        bus.remove(element: id)
+        notes.removeAll { $0.id == id }
+        try? database?.deleteNotes(id: id)
+        broadcast(.notesRemoved(id), except: sender)
     }
 
     // MARK: Launching
@@ -442,6 +498,27 @@ final class RunnerElement: BoardElement {
     var detail: String? {
         guard let command = store?.record(id)?.runner?.command else { return nil }
         return "runs `\(command)`"
+    }
+}
+
+/// A notes block as the message bus sees it: reachable along lines, read and written with the
+/// notes tools.
+@MainActor
+private final class NotesElement: BoardElement {
+    let id: UUID
+    private weak var store: Orchestrator?
+
+    init(id: UUID, store: Orchestrator) {
+        self.id = id
+        self.store = store
+    }
+
+    var name: String { store?.notesRecord(id)?.name ?? "" }
+    var kind: ElementKind { .notes }
+
+    var detail: String? {
+        guard let record = store?.notesRecord(id) else { return nil }
+        return "shared notes: \(record.statuses.count) status\(record.statuses.count == 1 ? "" : "es"), \(record.notes.count) note\(record.notes.count == 1 ? "" : "s"); read with notes_read"
     }
 }
 

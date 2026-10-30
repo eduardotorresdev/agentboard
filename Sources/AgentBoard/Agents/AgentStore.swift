@@ -17,6 +17,8 @@ final class AgentStore {
     private(set) var agents: [AgentRecord] = []
     /// Lines between elements, in the order they were drawn.
     private(set) var connections: [Connection] = []
+    /// Notes blocks (see AgentStore+Notes.swift).
+    var notes: [NotesRecord] = []
     /// False until the core has said which cards there are.
     private(set) var isLoaded = false
     /// Why the cards can't be shown, when the core runs another build this one can't talk to.
@@ -129,6 +131,7 @@ final class AgentStore {
         notice = nil
         replacedCore = false
         agents = state.cards
+        notes = state.notes ?? []
         connections = state.connections
         runnerReport = state.runners
         isLoaded = true
@@ -172,6 +175,15 @@ final class AgentStore {
         case .runners(let report):
             runnerReport = report
             onRunnersChange?()
+        case .notesAdded(let record):
+            guard notesRecord(record.id) == nil else { return }
+            notes.append(record)
+        case .notesUpdated(let record):
+            guard let index = notes.firstIndex(where: { $0.id == record.id }) else { return }
+            notes[index] = record
+        case .notesRemoved(let id):
+            notes.removeAll { $0.id == id }
+            connections.removeAll { $0.touches(id) }
         case .toolCall(let call, let name, let arguments, let caller):
             let parsed = (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]
             Task {
@@ -241,7 +253,7 @@ final class AgentStore {
 
     /// The lines between cards of `worktree`; `elements` are its other cards (browsers…).
     func connections(in worktree: String, elements: Set<UUID> = []) -> [Connection] {
-        let ids = Set(agents(in: worktree).map(\.id)).union(elements)
+        let ids = Set(agents(in: worktree).map(\.id)).union(notes(in: worktree).map(\.id)).union(elements)
         return connections.filter { ids.contains($0.a) && ids.contains($0.b) }
     }
 

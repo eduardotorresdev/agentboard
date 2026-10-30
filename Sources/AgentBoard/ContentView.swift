@@ -29,11 +29,6 @@ struct ContentView: View {
     /// Set in code per screen; not a user-facing toggle.
     var canvasMode: CanvasMode = .canvas
 
-    private let sidebarWidth: CGFloat = 260
-
-    // A hand-rolled split instead of NavigationSplitView: on macOS the native split snaps the
-    // detail column to its final width when the sidebar expands, so content jumps. Animating a
-    // plain frame width keeps both columns moving together in both directions.
     var body: some View {
         Group {
             if store.projects.isEmpty {
@@ -63,14 +58,9 @@ struct ContentView: View {
         }
     }
 
+    /// The canvas spans the whole window; the sidebar floats over its leading edge.
     private var board: some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: sidebarWidth)
-                .frame(width: isSidebarVisible ? sidebarWidth : 0, alignment: .trailing)
-                .clipped()
-            Divider()
-                .opacity(isSidebarVisible ? 1 : 0)
+        ZStack(alignment: .leading) {
             Group {
                 if selection == nil {
                     CanvasView(mode: canvasMode) { detail }
@@ -79,6 +69,16 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Always in the tree and slid off-screen when hidden: removing it from the ZStack drops
+            // it behind the board while it leaves, so the slide never shows.
+            Sidebar(store: store, selection: $selection, renaming: $renaming)
+                // Past its width, so the shadow leaves with it.
+                .offset(x: isSidebarVisible ? 0 : -(Sidebar.width + 32))
+                .allowsHitTesting(isSidebarVisible)
+                .accessibilityHidden(!isSidebarVisible)
+        }
+        .onChange(of: isSidebarVisible, initial: true) { _, visible in
+            boardController.leadingInset = visible ? sidebarInset : 0
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -92,35 +92,8 @@ struct ContentView: View {
         }
     }
 
-    private var sidebar: some View {
-        List(selection: $selection) {
-                ForEach(store.projects) { project in
-                    Section(project.name) {
-                        if let worktrees = store.worktrees[project.id] {
-                            ForEach(worktrees) { worktree in
-                                WorktreeRow(worktree: worktree, name: store.displayName(of: worktree),
-                                            isRenaming: renaming == worktree,
-                                            onRename: { name in
-                                                store.rename(worktree, to: name)
-                                                renaming = nil
-                                            })
-                                    .tag(WorktreeSelection(projectID: project.id, worktree: worktree))
-                                    .contextMenu {
-                                        Button(L("Rename")) { renaming = worktree }
-                                    }
-                            }
-                        } else {
-                            Label(L("Not a git repository"), systemImage: "exclamationmark.triangle")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .contextMenu {
-                        Button(L("Remove Project"), role: .destructive) { store.removeProject(project) }
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-    }
+    /// How much of the canvas's leading edge the sidebar covers.
+    private var sidebarInset: CGFloat { Sidebar.width }
 
     @ViewBuilder
     private var detail: some View {
@@ -132,11 +105,13 @@ struct ContentView: View {
                 title: L("Select a worktree"),
                 message: L("Pick a worktree in the sidebar to open it on the canvas.")
             ) { EmptyView() }
+            // Centered on the canvas the sidebar leaves uncovered.
+            .padding(.leading, isSidebarVisible ? sidebarInset : 0)
         }
     }
 
     private func toggleSidebar() {
-        withAnimation(.smooth(duration: 0.3)) { isSidebarVisible.toggle() }
+        withAnimation(.snappy(duration: 0.32)) { isSidebarVisible.toggle() }
     }
 
     private func addProject() {
@@ -190,42 +165,4 @@ struct ContentView: View {
         }
     }
     #endif
-}
-
-/// A worktree in the sidebar: its name (alias or folder) first, the branch it is on underneath.
-private struct WorktreeRow: View {
-    let worktree: Worktree
-    let name: String
-    let isRenaming: Bool
-    let onRename: (String) -> Void
-    @State private var draft = ""
-    @FocusState private var fieldFocused: Bool
-
-    var body: some View {
-        Label {
-            VStack(alignment: .leading, spacing: 1) {
-                if isRenaming {
-                    TextField(L("Name"), text: $draft, prompt: Text(worktree.name))
-                        .textFieldStyle(.plain)
-                        .focused($fieldFocused)
-                        .onAppear {
-                            draft = name
-                            fieldFocused = true
-                        }
-                        .onSubmit { onRename(draft) }
-                        .onExitCommand { onRename(name) }
-                        .onChange(of: fieldFocused) { _, focused in if !focused { onRename(draft) } }
-                } else {
-                    Text(name)
-                        .lineLimit(1)
-                }
-                Text(worktree.branch ?? L("Detached HEAD"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        } icon: {
-            Image(systemName: worktree.branch == nil ? "questionmark.folder" : "arrow.triangle.branch")
-        }
-    }
 }

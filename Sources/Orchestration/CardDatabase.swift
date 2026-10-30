@@ -32,6 +32,14 @@ final class CardDatabase {
                 id TEXT PRIMARY KEY,
                 a TEXT NOT NULL,
                 b TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS notes (
+                id TEXT PRIMARY KEY,
+                worktree TEXT NOT NULL,
+                name TEXT NOT NULL,
+                x REAL NOT NULL, y REAL NOT NULL,
+                width REAL NOT NULL, height REAL NOT NULL,
+                entries TEXT NOT NULL
             )
             """)
         if try !columns(of: "agents").contains("name") {
@@ -102,6 +110,45 @@ final class CardDatabase {
 
     func deleteAgent(id: UUID) throws {
         let stmt = try prepare("DELETE FROM agents WHERE id = ?")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// Notes blocks, in the order they were added; entries are kept as JSON.
+    func notes() throws -> [NotesRecord] {
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, entries FROM notes ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [NotesRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            let entries = (try? JSONDecoder().decode([NoteEntry].self, from: Data(String(cString: sqlite3_column_text(stmt, 7)).utf8))) ?? []
+            result.append(NotesRecord(
+                id: id,
+                worktree: String(cString: sqlite3_column_text(stmt, 1)),
+                name: String(cString: sqlite3_column_text(stmt, 2)),
+                frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
+                              width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
+                entries: entries))
+        }
+        return result
+    }
+
+    func saveNotes(_ notes: NotesRecord) throws {
+        let stmt = try prepare("INSERT OR REPLACE INTO notes (id, worktree, name, x, y, width, height, entries) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, notes.id.uuidString)
+        bind(stmt, 2, notes.worktree)
+        bind(stmt, 3, notes.name)
+        for (index, value) in [notes.frame.minX, notes.frame.minY, notes.frame.width, notes.frame.height].enumerated() {
+            sqlite3_bind_double(stmt, Int32(index + 4), value)
+        }
+        bind(stmt, 8, String(decoding: (try? JSONEncoder().encode(notes.entries)) ?? Data("[]".utf8), as: UTF8.self))
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func deleteNotes(id: UUID) throws {
+        let stmt = try prepare("DELETE FROM notes WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }

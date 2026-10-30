@@ -27,6 +27,13 @@ public enum BoardRequest: Codable, Sendable {
     case startRunner(UUID)
     case stopRunner(UUID)
     case toolResult(call: UUID, result: WireToolResult)
+    case addNotes(NotesRecord)
+    /// Its name or frame changed; the core keeps its entries.
+    case updateNotes(NotesRecord)
+    case removeNotes(UUID)
+    /// Adds the entry to the block, or replaces the one with its id.
+    case writeNote(notes: UUID, entry: NoteEntry)
+    case deleteNote(notes: UUID, entry: UUID)
 }
 
 /// Core → board.
@@ -41,6 +48,10 @@ public enum BoardEvent: Codable, Sendable {
     case runners(RunnerReport)
     /// A tool only the board can run (the browser tools): answer with `toolResult`.
     case toolCall(call: UUID, name: String, arguments: Data, caller: UUID)
+    case notesAdded(NotesRecord)
+    /// Its name, frame or entries changed.
+    case notesUpdated(NotesRecord)
+    case notesRemoved(UUID)
 }
 
 /// What a board gets with its welcome.
@@ -48,11 +59,14 @@ public struct BoardState: Codable, Sendable {
     public var cards: [AgentRecord]
     public var connections: [Connection]
     public var runners: RunnerReport
+    /// The notes blocks; nil from a core that predates them.
+    public var notes: [NotesRecord]?
 
-    public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport) {
+    public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, notes: [NotesRecord] = []) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
+        self.notes = notes
     }
 }
 
