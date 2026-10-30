@@ -24,7 +24,8 @@ extension AgentStore {
         let record = AgentRecord(id: UUID(), worktree: worktree, providerID: AgentRecord.runnerProviderID,
                                  name: AgentRecord.uniqueName(base, among: agents(in: worktree)),
                                  frame: CGRect(origin: origin, size: AgentRecord.runnerSize),
-                                 runner: RunnerSpec(command: command, directory: directory ?? worktree, owner: nil))
+                                 runner: RunnerSpec(command: command, directory: directory ?? worktree, owner: nil),
+                                 organization: organizationID)
         runnersToStart.insert(record.id)
         insert(record)
         return record

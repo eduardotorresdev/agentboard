@@ -60,3 +60,7 @@ many lines it has.
 - Renaming a post-it from the board.
 - Merging concurrent edits: the last text sent wins.
 - Images in markdown (their alt text shows).
+
+Agents add post-its themselves with `postit_create` (optional `name` and first `text`): it lands
+right of the agent's card, below other cards in the way, in the agent's organization, connected
+to it. The core runs it, so it works with no board open.

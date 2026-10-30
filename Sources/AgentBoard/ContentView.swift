@@ -43,6 +43,14 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        // On every screen, the first run of a new organization included.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
+        }
+        .onChange(of: store.organizationID, initial: true) { old, id in
+            agents.organizationID = id
+            if old != id { selection = nil }
+        }
         .onAppear(perform: restoreSelection)
         .onChange(of: selection) { _, selection in OpenWorktree.path = selection?.worktree.path }
         #if BENCH

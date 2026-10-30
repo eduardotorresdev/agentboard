@@ -23,6 +23,8 @@ final class AgentStore {
     private(set) var isLoaded = false
     /// Why the cards can't be shown, when the core runs another build this one can't talk to.
     private(set) var notice: String?
+    /// The organization shown: only its cards are on the canvas, and new ones join it.
+    var organizationID: UUID = OrganizationHome.defaultID
     @ObservationIgnored private(set) var sessions: [UUID: AgentSession] = [:]
     /// Called with the card's id when an observed session changes, so the board redraws it.
     @ObservationIgnored var onSessionChange: ((UUID) -> Void)?
@@ -213,7 +215,7 @@ final class AgentStore {
     }
 
     func agents(in worktree: String) -> [AgentRecord] {
-        agents.filter { $0.worktree == worktree }
+        agents.filter { $0.worktree == worktree && $0.organizationID == organizationID }
     }
 
     func record(_ id: UUID) -> AgentRecord? {
@@ -224,7 +226,8 @@ final class AgentStore {
     func add(_ provider: any AgentProvider, to worktree: String, at origin: CGPoint) -> AgentRecord {
         let record = AgentRecord(id: UUID(), worktree: worktree, providerID: provider.id,
                                  name: AgentRecord.uniqueName(provider.title, among: agents(in: worktree)),
-                                 frame: CGRect(origin: origin, size: CGSize(width: 640, height: 420)))
+                                 frame: CGRect(origin: origin, size: CGSize(width: 640, height: 420)),
+                                 organization: organizationID)
         insert(record)
         return record
     }

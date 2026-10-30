@@ -1,3 +1,4 @@
+import AgentRuntime
 import Connections
 import Foundation
 import Observation
@@ -95,6 +96,8 @@ struct BrowserRecord: Identifiable, Hashable {
     var frame: CGRect
     /// The profile it browses with (its logins); `BrowserProfile.defaultID` unless changed.
     var profile: UUID = BrowserProfile.defaultID
+    /// The organization it was added in; older cards are in the default one.
+    var organization: UUID = OrganizationHome.defaultID
 }
 
 /// A browser card's live page in the sidecar.
@@ -295,7 +298,8 @@ final class BrowserStore {
     }
 
     func browsers(in worktree: String) -> [BrowserRecord] {
-        browsers.filter { $0.worktree == worktree }
+        let organization = agents?.organizationID ?? OrganizationHome.defaultID
+        return browsers.filter { $0.worktree == worktree && $0.organization == organization }
     }
 
     func record(_ id: UUID) -> BrowserRecord? {
@@ -320,11 +324,16 @@ final class BrowserStore {
     }
 
     @discardableResult
-    func add(_ device: BrowserDevice, to worktree: String, at origin: CGPoint) -> BrowserRecord {
+    func add(_ device: BrowserDevice, to worktree: String, at origin: CGPoint, organization: UUID? = nil,
+             named name: String? = nil) -> BrowserRecord {
+        let organization = organization ?? agents?.organizationID ?? OrganizationHome.defaultID
+        let trimmed = name?.trimmingCharacters(in: .whitespaces) ?? ""
+        let siblings = browsers.filter { $0.worktree == worktree && $0.organization == organization }
         let record = BrowserRecord(id: UUID(), worktree: worktree,
-                                   name: Self.uniqueName(device.title, among: browsers(in: worktree)),
+                                   name: Self.uniqueName(trimmed.isEmpty ? device.title : trimmed, among: siblings),
                                    device: device, url: "",
-                                   frame: Self.frame(for: device, at: origin, scale: Self.initialScale(for: device)))
+                                   frame: Self.frame(for: device, at: origin, scale: Self.initialScale(for: device)),
+                                   organization: organization)
         browsers.append(record)
         try? database?.saveBrowser(record)
         agents?.elementsChanged()

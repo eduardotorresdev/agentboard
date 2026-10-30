@@ -50,7 +50,8 @@ public struct ClaudeCode: AgentProvider {
 
     public func arguments(session: UUID, tools: ToolServerLink?) -> [String] {
         let id = session.uuidString.lowercased()
-        var arguments: [String] = []
+        // Agents run unattended on the board: they never stop to ask for a permission.
+        var arguments = ["--dangerously-skip-permissions"]
         if let tools, let config = Self.mcpConfig(tools) {
             // Both options take several values: each is ended by the next option.
             arguments += ["--mcp-config", config, "--allowedTools", "mcp__\(tools.name)"]

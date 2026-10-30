@@ -6,7 +6,7 @@ import Orchestration
 /// writes.
 extension AgentStore {
     func postIts(in worktree: String) -> [PostItRecord] {
-        postIts.filter { $0.worktree == worktree }
+        postIts.filter { $0.worktree == worktree && $0.organizationID == organizationID }
     }
 
     func postIt(_ id: UUID) -> PostItRecord? {
@@ -16,7 +16,7 @@ extension AgentStore {
     @discardableResult
     func addPostIt(to worktree: String, at origin: CGPoint) -> PostItRecord {
         let record = PostItRecord(id: UUID(), worktree: worktree, name: PostItRecord.uniqueName(L("Post-it"), among: postIts(in: worktree)),
-                                  frame: CGRect(origin: origin, size: PostItRecord.size))
+                                  frame: CGRect(origin: origin, size: PostItRecord.size), organization: organizationID)
         postIts.append(record)
         send(.addPostIt(record))
         return record

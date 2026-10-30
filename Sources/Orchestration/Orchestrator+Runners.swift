@@ -19,7 +19,9 @@ extension Orchestrator {
         let record = AgentRecord(id: UUID(), worktree: worktree, providerID: AgentRecord.runnerProviderID,
                                  name: AgentRecord.uniqueName(base, among: cards(in: worktree)),
                                  frame: CGRect(origin: origin, size: AgentRecord.runnerSize),
-                                 runner: RunnerSpec(command: command, directory: directory ?? worktree, owner: owner))
+                                 runner: RunnerSpec(command: command, directory: directory ?? worktree, owner: owner),
+                                 // Shown with the agent that started it.
+                                 organization: owner.flatMap { self.record($0)?.organization })
         insert(record)
         if let owner { bus.connect(owner, record.id) }
         startRunner(record.id)
@@ -58,7 +60,12 @@ extension Orchestrator {
 
     /// Where an agent's new runner goes: right of its card, below other cards in the way.
     func runnerOrigin(near caller: AgentRecord) -> CGPoint {
-        var frame = CGRect(origin: CGPoint(x: caller.frame.maxX + 64, y: caller.frame.minY), size: AgentRecord.runnerSize)
+        origin(near: caller, size: AgentRecord.runnerSize)
+    }
+
+    /// Where a card of `size` an agent adds goes: right of its card, below other cards in the way.
+    func origin(near caller: AgentRecord, size: CGSize) -> CGPoint {
+        var frame = CGRect(origin: CGPoint(x: caller.frame.maxX + 64, y: caller.frame.minY), size: size)
         let others = frames(in: caller.worktree)
         for _ in 0..<12 where others.contains(where: { $0.insetBy(dx: -16, dy: -16).intersects(frame) }) {
             frame.origin.y += frame.height + 32

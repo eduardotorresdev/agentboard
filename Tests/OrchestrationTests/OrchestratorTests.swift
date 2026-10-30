@@ -291,6 +291,27 @@ struct OrchestratorTests {
 
     /// The notes blocks of the build before come back as post-its: same id, so their lines hold,
     /// and their notes as a markdown list.
+    /// An agent adds a post-it of its own: next to its card, in its organization, connected to it.
+    @Test func agentsAddPostIts() async throws {
+        let core = try await MainActor.run { try Core() }
+        let folder = await MainActor.run { core.folder }
+        var a = agent("Ada", in: folder)
+        a.organization = UUID()
+        let client = try await board(core)
+        client.send(.addCard(a))
+        try await waitUntil { core.orchestrator.record(a.id) != nil }
+
+        let created = try await call("postit_create", ["name": "Plan", "text": "- Ship"], as: a.id, on: core)
+        #expect(!created.isError, "\(created.text)")
+        let record = try #require(await core.orchestrator.postIts.first)
+        #expect(record.name == "Plan")
+        #expect(record.organization == a.organization)
+        #expect(record.frame.minX > a.frame.maxX)
+        let page = try await call("postit_read", as: a.id, on: core)
+        #expect(page.text.contains("- Ship"), "\(page.text)")
+        client.disconnect()
+    }
+
     @Test func notesBlocksBecomePostIts() async throws {
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

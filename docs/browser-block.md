@@ -421,3 +421,7 @@ Open trace from the card, the cursor mirrored over cards.
    WebKit into the shared Playwright cache (`BrowserHost.swift`).
 3. **Profiles persist per browser** (logins survive relaunches); Clear site data on the card.
 4. **Agents may close only the browsers they opened.**
+
+Agents add browsers themselves with `browser_open` (`device`: desktop, phone or tablet; optional
+`name` and `url`): the card lands right of the agent's card, in its organization, connected to
+it, and opens `url` when given. Browsers live in the board, so it needs the board open.

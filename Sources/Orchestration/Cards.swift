@@ -13,15 +13,23 @@ public struct AgentRecord: Identifiable, Hashable, Codable, Sendable {
     public var frame: CGRect
     /// What the card runs when it is a runner; nil for agents.
     public var runner: RunnerSpec?
+    /// The organization the card was added in; nil for cards made before organizations, which
+    /// belong to the default one. Agents run signed in as it (see `OrganizationHome`).
+    public var organization: UUID?
 
-    public init(id: UUID, worktree: String, providerID: String, name: String, frame: CGRect, runner: RunnerSpec? = nil) {
+    public init(id: UUID, worktree: String, providerID: String, name: String, frame: CGRect, runner: RunnerSpec? = nil,
+                organization: UUID? = nil) {
         self.id = id
         self.worktree = worktree
         self.providerID = providerID
         self.name = name
         self.frame = frame
         self.runner = runner
+        self.organization = organization
     }
+
+    /// The organization the card belongs to, with older cards in the default one.
+    public var organizationID: UUID { organization ?? OrganizationHome.defaultID }
 
     public var provider: (any AgentProvider)? { AgentCatalog.provider(id: providerID) }
 

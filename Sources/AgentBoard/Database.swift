@@ -8,6 +8,19 @@ struct Project: Identifiable, Hashable {
     var path: String
 }
 
+/// A separate set of projects whose agents sign in to Claude Code on their own (see
+/// `OrganizationHome`). Shown as a round avatar: its initial on `color`, or its own image.
+struct Organization: Identifiable, Hashable {
+    let id: UUID
+    var name: String
+    /// Index into `OrganizationAvatar.palette`.
+    var color: Int
+    /// An image file the user picked, copied into the organization's folder.
+    var icon: String?
+
+    var isDefault: Bool { id == OrganizationHome.defaultID }
+}
+
 enum DatabaseError: Error {
     case sqlite(String)
 }
@@ -36,6 +49,12 @@ final class Database {
                 name TEXT NOT NULL,
                 path TEXT NOT NULL UNIQUE
             );
+            CREATE TABLE IF NOT EXISTS organizations (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                color INTEGER NOT NULL,
+                icon TEXT
+            );
             CREATE TABLE IF NOT EXISTS worktree_aliases (
                 path TEXT PRIMARY KEY,
                 alias TEXT NOT NULL
@@ -54,8 +73,33 @@ final class Database {
                 name TEXT NOT NULL
             )
             """)
+        if try !columns(of: "projects").contains("organization") {
+            // A path may now be in several organizations, once in each: rebuild the table
+            // without the old uniqueness, with every project in the default organization.
+            try execute("""
+                BEGIN;
+                CREATE TABLE projects_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    organization TEXT NOT NULL,
+                    UNIQUE (organization, path)
+                );
+                INSERT INTO projects_new (id, name, path, organization)
+                    SELECT id, name, path, '\(OrganizationHome.defaultID.uuidString)' FROM projects;
+                DROP TABLE projects;
+                ALTER TABLE projects_new RENAME TO projects;
+                COMMIT;
+                """)
+        }
+        try execute("""
+            INSERT OR IGNORE INTO organizations (id, name, color) VALUES ('\(OrganizationHome.defaultID.uuidString)', 'Default', 0)
+            """)
         if try !columns(of: "browsers").contains("profile") {
             try execute("ALTER TABLE browsers ADD COLUMN profile TEXT")
+        }
+        if try !columns(of: "browsers").contains("organization") {
+            try execute("ALTER TABLE browsers ADD COLUMN organization TEXT")
         }
     }
 
@@ -69,9 +113,10 @@ final class Database {
 
     deinit { sqlite3_close(db) }
 
-    func projects() throws -> [Project] {
-        let stmt = try prepare("SELECT id, name, path FROM projects ORDER BY name COLLATE NOCASE")
+    func projects(in organization: UUID) throws -> [Project] {
+        let stmt = try prepare("SELECT id, name, path FROM projects WHERE organization = ? ORDER BY name COLLATE NOCASE")
         defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, organization.uuidString)
         var result: [Project] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             result.append(Project(
@@ -82,11 +127,12 @@ final class Database {
         return result
     }
 
-    func insertProject(name: String, path: String) throws {
-        let stmt = try prepare("INSERT OR IGNORE INTO projects (name, path) VALUES (?, ?)")
+    func insertProject(name: String, path: String, organization: UUID) throws {
+        let stmt = try prepare("INSERT OR IGNORE INTO projects (name, path, organization) VALUES (?, ?, ?)")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, name)
         bind(stmt, 2, path)
+        bind(stmt, 3, organization.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 
@@ -95,6 +141,39 @@ final class Database {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, id)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func organizations() throws -> [Organization] {
+        let stmt = try prepare("SELECT id, name, color, icon FROM organizations ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [Organization] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            result.append(Organization(id: id, name: String(cString: sqlite3_column_text(stmt, 1)),
+                                       color: Int(sqlite3_column_int64(stmt, 2)),
+                                       icon: sqlite3_column_text(stmt, 3).map { String(cString: $0) }))
+        }
+        return result
+    }
+
+    func saveOrganization(_ organization: Organization) throws {
+        let stmt = try prepare("INSERT OR REPLACE INTO organizations (id, name, color, icon) VALUES (?, ?, ?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, organization.id.uuidString)
+        bind(stmt, 2, organization.name)
+        sqlite3_bind_int64(stmt, 3, Int64(organization.color))
+        if let icon = organization.icon { bind(stmt, 4, icon) } else { sqlite3_bind_null(stmt, 4) }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// Removes the organization and its projects.
+    func deleteOrganization(id: UUID) throws {
+        for sql in ["DELETE FROM projects WHERE organization = ?", "DELETE FROM organizations WHERE id = ?"] {
+            let stmt = try prepare(sql)
+            defer { sqlite3_finalize(stmt) }
+            bind(stmt, 1, id.uuidString)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+        }
     }
 
     func aliases() throws -> [String: String] {
@@ -119,7 +198,7 @@ final class Database {
     }
 
     func browsers() throws -> [BrowserRecord] {
-        let stmt = try prepare("SELECT id, worktree, name, device, url, x, y, width, height, profile FROM browsers ORDER BY rowid")
+        let stmt = try prepare("SELECT id, worktree, name, device, url, x, y, width, height, profile, organization FROM browsers ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
         var result: [BrowserRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -133,14 +212,15 @@ final class Database {
                 url: String(cString: sqlite3_column_text(stmt, 4)),
                 frame: CGRect(x: sqlite3_column_double(stmt, 5), y: sqlite3_column_double(stmt, 6),
                               width: sqlite3_column_double(stmt, 7), height: sqlite3_column_double(stmt, 8)),
-                profile: profile ?? BrowserProfile.defaultID))
+                profile: profile ?? BrowserProfile.defaultID,
+                organization: sqlite3_column_text(stmt, 10).flatMap { UUID(uuidString: String(cString: $0)) } ?? OrganizationHome.defaultID))
         }
         return result
     }
 
     func saveBrowser(_ browser: BrowserRecord) throws {
         let stmt = try prepare("""
-            INSERT OR REPLACE INTO browsers (id, worktree, name, device, url, x, y, width, height, profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO browsers (id, worktree, name, device, url, x, y, width, height, profile, organization) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
         defer { sqlite3_finalize(stmt) }
         for (index, value) in [browser.id.uuidString, browser.worktree, browser.name, browser.device.stored, browser.url].enumerated() {
@@ -150,6 +230,7 @@ final class Database {
             sqlite3_bind_double(stmt, Int32(index + 6), value)
         }
         bind(stmt, 10, browser.profile.uuidString)
+        bind(stmt, 11, browser.organization.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 

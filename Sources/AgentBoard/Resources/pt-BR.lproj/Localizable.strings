@@ -168,3 +168,19 @@
 "Code" = "Código";
 "Empty. Double-click to write." = "Vazio. Clique duas vezes para escrever.";
 "Write in markdown…" = "Escreva em markdown…";
+
+/* Organizations */
+"Default" = "Padrão";
+"New Organization" = "Nova organização";
+"New organization: its own projects and its own Claude login" = "Nova organização: projetos e login do Claude próprios";
+"Organization %@" = "Organização %@";
+"Edit Organization…" = "Editar organização…";
+"%@ — hold to edit" = "%@ — segure para editar";
+"Color" = "Cor";
+"Choose Image…" = "Escolher imagem…";
+"Use Initial" = "Usar inicial";
+"Use Image" = "Usar imagem";
+"An image replaces the initial and color." = "Uma imagem substitui a inicial e a cor.";
+"Remove Organization" = "Remover organização";
+"Its project list goes; the folders and its Claude login stay on disk." = "A lista de projetos sai; as pastas e o login do Claude ficam no disco.";
+"That file isn't an image." = "Esse arquivo não é uma imagem.";

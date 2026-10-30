@@ -39,6 +39,14 @@ final class BrowserRelay: ToolProvider {
     func tools(for caller: UUID) -> [ToolDefinition] {
         [
             ToolDefinition(
+                name: "browser_open",
+                description: "Adds a browser card to the board next to you, connected to you, and opens a URL in it when given. Needs the board open.",
+                inputSchema: ["type": "object", "properties": [
+                    "device": ["type": "string", "enum": ["desktop", "phone", "tablet"], "description": "Screen it emulates: desktop (1280 × 720, default), phone (iPhone 17) or tablet (iPad Pro 11)."],
+                    "name": ["type": "string", "description": "Card name. Named after the device when left out."],
+                    "url": ["type": "string", "description": "Page to open. A bare host gets https:// (http:// for localhost)."],
+                ] as [String: Any], "required": [String]()]),
+            ToolDefinition(
                 name: "browser_list",
                 description: "Lists the browsers connected to you: name, device and screen size, and the page each shows."),
             ToolDefinition(

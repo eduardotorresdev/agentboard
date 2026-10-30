@@ -45,6 +45,10 @@ final class CardDatabase {
                 edited REAL
             )
             """)
+        // Before migrating notes blocks, which saves post-its with it.
+        if try !columns(of: "postits").contains("organization") {
+            try execute("ALTER TABLE postits ADD COLUMN organization TEXT")
+        }
         try migrateNotesBlocks()
         if try !columns(of: "agents").contains("name") {
             try execute("ALTER TABLE agents ADD COLUMN name TEXT")
@@ -52,6 +56,9 @@ final class CardDatabase {
         if try !columns(of: "agents").contains("command") {
             // Runner cards: what they run, where, and the agent that started them.
             try execute("ALTER TABLE agents ADD COLUMN command TEXT; ALTER TABLE agents ADD COLUMN directory TEXT; ALTER TABLE agents ADD COLUMN owner TEXT")
+        }
+        if try !columns(of: "agents").contains("organization") {
+            try execute("ALTER TABLE agents ADD COLUMN organization TEXT")
         }
         if try !columns(of: "connections").contains("a_side") {
             try execute("ALTER TABLE connections ADD COLUMN a_side INTEGER; ALTER TABLE connections ADD COLUMN b_side INTEGER")
@@ -69,7 +76,7 @@ final class CardDatabase {
     }
 
     func agents() throws -> [AgentRecord] {
-        let stmt = try prepare("SELECT id, worktree, kind, x, y, width, height, name, command, directory, owner FROM agents ORDER BY rowid")
+        let stmt = try prepare("SELECT id, worktree, kind, x, y, width, height, name, command, directory, owner, organization FROM agents ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
         var result: [AgentRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -88,15 +95,16 @@ final class CardDatabase {
                 name: sqlite3_column_text(stmt, 7).map { String(cString: $0) } ?? "",
                 frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
                               width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
-                runner: runner))
+                runner: runner,
+                organization: sqlite3_column_text(stmt, 11).flatMap { UUID(uuidString: String(cString: $0)) }))
         }
         return result
     }
 
     func saveAgent(_ agent: AgentRecord) throws {
         let stmt = try prepare("""
-            INSERT OR REPLACE INTO agents (id, worktree, kind, x, y, width, height, name, command, directory, owner)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO agents (id, worktree, kind, x, y, width, height, name, command, directory, owner, organization)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, agent.id.uuidString)
@@ -106,7 +114,7 @@ final class CardDatabase {
             sqlite3_bind_double(stmt, Int32(index + 4), value)
         }
         bind(stmt, 8, agent.name)
-        for (column, value) in [(Int32(9), agent.runner?.command), (10, agent.runner?.directory), (11, agent.runner?.owner?.uuidString)] {
+        for (column, value) in [(Int32(9), agent.runner?.command), (10, agent.runner?.directory), (11, agent.runner?.owner?.uuidString), (12, agent.organization?.uuidString)] {
             if let value { bind(stmt, column, value) } else { sqlite3_bind_null(stmt, column) }
         }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
@@ -121,7 +129,7 @@ final class CardDatabase {
 
     /// Post-its, in the order they were added.
     func postIts() throws -> [PostItRecord] {
-        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, text, editor, editor_name, edited FROM postits ORDER BY rowid")
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, text, editor, editor_name, edited, organization FROM postits ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
         var result: [PostItRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -135,15 +143,16 @@ final class CardDatabase {
                 text: String(cString: sqlite3_column_text(stmt, 7)),
                 editor: sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : UUID(uuidString: String(cString: sqlite3_column_text(stmt, 8))),
                 editorName: String(cString: sqlite3_column_text(stmt, 9)),
-                edited: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : Date(timeIntervalSinceReferenceDate: sqlite3_column_double(stmt, 10))))
+                edited: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : Date(timeIntervalSinceReferenceDate: sqlite3_column_double(stmt, 10)),
+                organization: sqlite3_column_text(stmt, 11).flatMap { UUID(uuidString: String(cString: $0)) }))
         }
         return result
     }
 
     func savePostIt(_ postIt: PostItRecord) throws {
         let stmt = try prepare("""
-            INSERT OR REPLACE INTO postits (id, worktree, name, x, y, width, height, text, editor, editor_name, edited)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO postits (id, worktree, name, x, y, width, height, text, editor, editor_name, edited, organization)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, postIt.id.uuidString)
@@ -156,6 +165,7 @@ final class CardDatabase {
         if let editor = postIt.editor { bind(stmt, 9, editor.uuidString) } else { sqlite3_bind_null(stmt, 9) }
         bind(stmt, 10, postIt.editorName)
         if let edited = postIt.edited { sqlite3_bind_double(stmt, 11, edited.timeIntervalSinceReferenceDate) } else { sqlite3_bind_null(stmt, 11) }
+        if let organization = postIt.organization { bind(stmt, 12, organization.uuidString) } else { sqlite3_bind_null(stmt, 12) }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 

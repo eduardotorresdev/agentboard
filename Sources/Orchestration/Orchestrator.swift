@@ -385,6 +385,8 @@ public final class Orchestrator: CoreService {
         // The core's own settings aren't the agent's business: an agent running a build of
         // the board (`./run`) must not reach this core, or its data folder.
         for key in environment.keys where key.hasPrefix("AGENTBOARD_") { environment[key] = nil }
+        // Signed in as the card's organization; `/login` in the terminal signs that one in.
+        environment["CLAUDE_CONFIG_DIR"] = OrganizationHome.prepare(record.organization)?.path
         let tools = toolsURL.map { ToolServerLink(name: ToolCatalog.serverName, url: $0, token: toolServer.token(for: record.id)) }
         session.start(LaunchSpec(executable: executable, arguments: provider.arguments(session: record.id, tools: tools),
                                  environment: environment, directory: record.worktree))
