@@ -2,6 +2,7 @@ import AgentRuntime
 import CryptoKit
 import Connections
 import Foundation
+import SQLite3
 import Testing
 @testable import Orchestration
 
@@ -233,65 +234,92 @@ struct OrchestratorTests {
         client.disconnect()
     }
 
-    /// Agents connected to a notes block say what they work on and keep notes there; the board
-    /// hears each change, the user's notes reach the agents, and the block outlives the core.
-    @Test func agentsShareNotes() async throws {
+    /// Several agents connected to one post-it read and write its markdown with the user; an
+    /// agent not connected to it can't, the board hears each change, and it outlives the core.
+    @Test func agentsSharePostIts() async throws {
         let core = try await MainActor.run { try Core() }
         let folder = await MainActor.run { core.folder }
-        let a = agent("Ada", in: folder), b = agent("Bob", in: folder)
-        let notes = NotesRecord(id: UUID(), worktree: folder.path, name: "Notes", frame: CGRect(origin: .zero, size: NotesRecord.size))
+        let a = agent("Ada", in: folder), b = agent("Bob", in: folder), c = agent("Cy", in: folder)
+        let postIt = PostItRecord(id: UUID(), worktree: folder.path, name: "Post-it", frame: CGRect(origin: .zero, size: PostItRecord.size))
         let client = try await board(core)
         let inbox = Inbox()
         client.onService { data in if let event = BoardEvent(data) { inbox.add(event) } }
-        client.send(.addCard(a))
-        client.send(.addCard(b))
-        client.send(.addNotes(notes))
-        client.send(.connect(Connection(a: a.id, b: notes.id)))
-        try await waitUntil { core.orchestrator.bus.graph.connections.count == 1 }
+        for card in [a, b, c] { client.send(.addCard(card)) }
+        client.send(.addPostIt(postIt))
+        client.send(.connect(Connection(a: a.id, b: postIt.id)))
+        client.send(.connect(Connection(a: b.id, b: postIt.id)))
+        try await waitUntil { core.orchestrator.bus.graph.connections.count == 2 }
 
-        let unconnected = try await call("notes_read", as: b.id, on: core)
+        let unconnected = try await call("postit_read", as: c.id, on: core)
         #expect(unconnected.isError)
         let peers = try await call("list_peers", as: a.id, on: core)
-        #expect(peers.text.contains("Notes (notes"), "\(peers.text)")
+        #expect(peers.text.contains("Post-it (postit, shared markdown note, empty"), "\(peers.text)")
 
-        let status = try await call("notes_status", ["doing": "Adding the export button", "where": "Sources/Export"], as: a.id, on: core)
-        #expect(!status.isError, "\(status.text)")
-        // A new status replaces the old one.
-        _ = try await call("notes_status", ["doing": "Writing the export tests", "where": "Tests/Export"], as: a.id, on: core)
-        let written = try await call("notes_write", ["text": "CSV export uses semicolons for pt-BR."], as: a.id, on: core)
-        #expect(written.text.hasPrefix("Added note"), "\(written.text)")
-        client.send(.writeNote(notes: notes.id, entry: NoteEntry(kind: .note, author: nil, authorName: "", text: "Ship on Friday.")))
-        try await waitUntil { core.orchestrator.notesRecord(notes.id)?.notes.count == 2 }
+        let written = try await call("postit_write", ["text": "# Export\n- CSV uses semicolons"], as: a.id, on: core)
+        #expect(!written.isError, "\(written.text)")
+        let appended = try await call("postit_write", ["text": "- Bob owns the tests", "append": true], as: b.id, on: core)
+        #expect(!appended.isError, "\(appended.text)")
+        let page = try await call("postit_read", as: a.id, on: core)
+        #expect(page.text.contains("# Export\n- CSV uses semicolons\n- Bob owns the tests"), "\(page.text)")
+        #expect(page.text.contains("last written by Bob"), "\(page.text)")
+        #expect(inbox.events.contains { if case .postItUpdated(let record) = $0 { record.editorName == "Bob" } else { false } })
 
-        let page = try await call("notes_read", as: a.id, on: core)
-        #expect(page.text.contains("Ada: Writing the export tests (where: Tests/Export)"), "\(page.text)")
-        #expect(!page.text.contains("Adding the export button"))
-        #expect(page.text.contains("CSV export uses semicolons"))
-        #expect(page.text.contains("the user"), "\(page.text)")
-        #expect(inbox.events.contains { if case .notesUpdated(let record) = $0 { record.statuses.count == 1 } else { false } })
+        // An edit changes one passage and leaves what others wrote.
+        let edited = try await call("postit_edit", ["old_text": "semicolons", "new_text": "commas"], as: a.id, on: core)
+        #expect(!edited.isError, "\(edited.text)")
+        let missing = try await call("postit_edit", ["old_text": "tabs", "new_text": "spaces"], as: a.id, on: core)
+        #expect(missing.isError)
+        #expect(await core.orchestrator.postIt(postIt.id)?.text == "# Export\n- CSV uses commas\n- Bob owns the tests")
 
-        // Rewriting and deleting by the id notes_read shows.
-        let noteID = try #require(await core.orchestrator.notesRecord(notes.id)?.notes.first?.shortID)
-        let rewritten = try await call("notes_write", ["id": noteID, "text": "CSV export uses commas."], as: a.id, on: core)
-        #expect(!rewritten.isError, "\(rewritten.text)")
-        #expect(await core.orchestrator.notesRecord(notes.id)?.notes.first?.text == "CSV export uses commas.")
-        let userNote = try #require(await core.orchestrator.notesRecord(notes.id)?.notes.last?.shortID)
-        let deleted = try await call("notes_delete", ["id": userNote], as: a.id, on: core)
-        #expect(!deleted.isError, "\(deleted.text)")
-        #expect(await core.orchestrator.notesRecord(notes.id)?.notes.count == 1)
+        // What the user writes reaches the agents.
+        client.send(.writePostIt(id: postIt.id, text: "Ship on Friday."))
+        try await waitUntil { core.orchestrator.postIt(postIt.id)?.text == "Ship on Friday." }
+        let fromUser = try await call("postit_read", as: b.id, on: core)
+        #expect(fromUser.text.contains("last written by the user"), "\(fromUser.text)")
+        #expect(fromUser.text.hasSuffix("Ship on Friday."))
 
-        // A status goes away with its agent; the notes stay, on disk too.
-        client.send(.removeCard(a.id))
-        try await waitUntil { core.orchestrator.notesRecord(notes.id)?.statuses.isEmpty == true }
-        #expect(await core.orchestrator.notesRecord(notes.id)?.statuses.isEmpty == true)
         client.disconnect()
         await MainActor.run { core.stop() }
-        let reloaded = await MainActor.run { () -> [NotesRecord] in
+        let reloaded = await MainActor.run { () -> [PostItRecord] in
             let server = CoreServer(socketPath: NSTemporaryDirectory() + "abcore-unused.sock", queue: .main)
-            return Orchestrator(server: server, dataFolder: folder, providers: [EchoAgent()], searchPath: "/usr/bin:/bin").notes
+            return Orchestrator(server: server, dataFolder: folder, providers: [EchoAgent()], searchPath: "/usr/bin:/bin").postIts
         }
-        #expect(reloaded.map(\.name) == ["Notes"])
-        #expect(reloaded.first?.notes.map(\.text) == ["CSV export uses commas."])
+        #expect(reloaded.map(\.name) == ["Post-it"])
+        #expect(reloaded.first?.text == "Ship on Friday.")
+        #expect(reloaded.first?.editor == nil)
+    }
+
+    /// The notes blocks of the build before come back as post-its: same id, so their lines hold,
+    /// and their notes as a markdown list.
+    @Test func notesBlocksBecomePostIts() async throws {
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let id = UUID(), agentID = UUID()
+        let entries = #"[{"kind":"status","text":"Working"},{"kind":"note","text":"Use commas"},{"kind":"note","text":"Ship\nFriday"}]"#
+        var db: OpaquePointer?
+        try #require(sqlite3_open(folder.appendingPathComponent("agentboard.sqlite").path, &db) == SQLITE_OK)
+        let sql = """
+            CREATE TABLE notes (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, name TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL,
+                width REAL NOT NULL, height REAL NOT NULL, entries TEXT NOT NULL);
+            INSERT INTO notes VALUES ('\(id.uuidString)', '\(folder.path)', 'Notes', 10, 20, 380, 440, '\(entries)');
+            CREATE TABLE connections (id TEXT PRIMARY KEY, a TEXT NOT NULL, b TEXT NOT NULL);
+            CREATE TABLE agents (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, kind TEXT NOT NULL, x REAL NOT NULL, y REAL NOT NULL,
+                width REAL NOT NULL, height REAL NOT NULL);
+            INSERT INTO agents VALUES ('\(agentID.uuidString)', '\(folder.path)', 'echo', 0, 0, 640, 420);
+            INSERT INTO connections VALUES ('\(UUID().uuidString)', '\(agentID.uuidString)', '\(id.uuidString)');
+            """
+        try #require(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+
+        let (postIts, connections) = await MainActor.run { () -> ([PostItRecord], [Connection]) in
+            let server = CoreServer(socketPath: NSTemporaryDirectory() + "abcore-unused.sock", queue: .main)
+            let orchestrator = Orchestrator(server: server, dataFolder: folder, providers: [EchoAgent()], searchPath: "/usr/bin:/bin")
+            return (orchestrator.postIts, orchestrator.bus.graph.connections)
+        }
+        #expect(postIts.map(\.id) == [id])
+        #expect(postIts.first?.frame == CGRect(x: 10, y: 20, width: 380, height: 440))
+        #expect(postIts.first?.text == "- Use commas\n- Ship\n  Friday")
+        #expect(connections.count == 1)
     }
 }
 

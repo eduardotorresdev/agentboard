@@ -160,12 +160,11 @@
 "Collapsed" = "Recolhido";
 "Expanded" = "Expandido";
 
-/* Notes */
-"Add notes" = "Adicionar notas";
-"Shared notes: connected agents say what they're working on and where, and keep what to remember." = "Notas compartilhadas: os agentes conectados dizem no que estão trabalhando e onde, e guardam o que vale lembrar.";
-"Notes" = "Notas";
-"Working on" = "Trabalhando em";
-"Nothing here yet." = "Nada aqui ainda.";
-"Add note" = "Adicionar nota";
-"You" = "Você";
-"Write a note…" = "Escreva uma nota…";
+/* Post-its */
+"Add post-it" = "Adicionar post-it";
+"A new post-it in markdown: you and every agent connected to it read and write it." = "Um post-it novo em markdown: você e todo agente conectado a ele leem e escrevem nele.";
+"Post-it" = "Post-it";
+"View" = "Ver";
+"Code" = "Código";
+"Empty. Double-click to write." = "Vazio. Clique duas vezes para escrever.";
+"Write in markdown…" = "Escreva em markdown…";

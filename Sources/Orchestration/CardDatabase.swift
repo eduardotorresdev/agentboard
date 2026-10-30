@@ -33,15 +33,19 @@ final class CardDatabase {
                 a TEXT NOT NULL,
                 b TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS notes (
+            CREATE TABLE IF NOT EXISTS postits (
                 id TEXT PRIMARY KEY,
                 worktree TEXT NOT NULL,
                 name TEXT NOT NULL,
                 x REAL NOT NULL, y REAL NOT NULL,
                 width REAL NOT NULL, height REAL NOT NULL,
-                entries TEXT NOT NULL
+                text TEXT NOT NULL,
+                editor TEXT,
+                editor_name TEXT NOT NULL,
+                edited REAL
             )
             """)
+        try migrateNotesBlocks()
         if try !columns(of: "agents").contains("name") {
             try execute("ALTER TABLE agents ADD COLUMN name TEXT")
         }
@@ -115,43 +119,78 @@ final class CardDatabase {
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 
-    /// Notes blocks, in the order they were added; entries are kept as JSON.
-    func notes() throws -> [NotesRecord] {
-        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, entries FROM notes ORDER BY rowid")
+    /// Post-its, in the order they were added.
+    func postIts() throws -> [PostItRecord] {
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, text, editor, editor_name, edited FROM postits ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
-        var result: [NotesRecord] = []
+        var result: [PostItRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
-            let entries = (try? JSONDecoder().decode([NoteEntry].self, from: Data(String(cString: sqlite3_column_text(stmt, 7)).utf8))) ?? []
-            result.append(NotesRecord(
+            result.append(PostItRecord(
                 id: id,
                 worktree: String(cString: sqlite3_column_text(stmt, 1)),
                 name: String(cString: sqlite3_column_text(stmt, 2)),
                 frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
                               width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
-                entries: entries))
+                text: String(cString: sqlite3_column_text(stmt, 7)),
+                editor: sqlite3_column_type(stmt, 8) == SQLITE_NULL ? nil : UUID(uuidString: String(cString: sqlite3_column_text(stmt, 8))),
+                editorName: String(cString: sqlite3_column_text(stmt, 9)),
+                edited: sqlite3_column_type(stmt, 10) == SQLITE_NULL ? nil : Date(timeIntervalSinceReferenceDate: sqlite3_column_double(stmt, 10))))
         }
         return result
     }
 
-    func saveNotes(_ notes: NotesRecord) throws {
-        let stmt = try prepare("INSERT OR REPLACE INTO notes (id, worktree, name, x, y, width, height, entries) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    func savePostIt(_ postIt: PostItRecord) throws {
+        let stmt = try prepare("""
+            INSERT OR REPLACE INTO postits (id, worktree, name, x, y, width, height, text, editor, editor_name, edited)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
         defer { sqlite3_finalize(stmt) }
-        bind(stmt, 1, notes.id.uuidString)
-        bind(stmt, 2, notes.worktree)
-        bind(stmt, 3, notes.name)
-        for (index, value) in [notes.frame.minX, notes.frame.minY, notes.frame.width, notes.frame.height].enumerated() {
+        bind(stmt, 1, postIt.id.uuidString)
+        bind(stmt, 2, postIt.worktree)
+        bind(stmt, 3, postIt.name)
+        for (index, value) in [postIt.frame.minX, postIt.frame.minY, postIt.frame.width, postIt.frame.height].enumerated() {
             sqlite3_bind_double(stmt, Int32(index + 4), value)
         }
-        bind(stmt, 8, String(decoding: (try? JSONEncoder().encode(notes.entries)) ?? Data("[]".utf8), as: UTF8.self))
+        bind(stmt, 8, postIt.text)
+        if let editor = postIt.editor { bind(stmt, 9, editor.uuidString) } else { sqlite3_bind_null(stmt, 9) }
+        bind(stmt, 10, postIt.editorName)
+        if let edited = postIt.edited { sqlite3_bind_double(stmt, 11, edited.timeIntervalSinceReferenceDate) } else { sqlite3_bind_null(stmt, 11) }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 
-    func deleteNotes(id: UUID) throws {
-        let stmt = try prepare("DELETE FROM notes WHERE id = ?")
+    func deletePostIt(id: UUID) throws {
+        let stmt = try prepare("DELETE FROM postits WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// The notes blocks of the build before become post-its with the same ids (so their lines
+    /// hold), their notes as a markdown list; their statuses are dropped.
+    private func migrateNotesBlocks() throws {
+        guard try !columns(of: "notes").isEmpty else { return }
+        struct Entry: Decodable {
+            let kind: String
+            let text: String
+        }
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, entries FROM notes ORDER BY rowid")
+        var blocks: [PostItRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            let entries = (try? JSONDecoder().decode([Entry].self, from: Data(String(cString: sqlite3_column_text(stmt, 7)).utf8))) ?? []
+            let text = entries.filter { $0.kind == "note" }.map { "- " + $0.text.replacingOccurrences(of: "\n", with: "\n  ") }
+            blocks.append(PostItRecord(
+                id: id,
+                worktree: String(cString: sqlite3_column_text(stmt, 1)),
+                name: String(cString: sqlite3_column_text(stmt, 2)),
+                frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
+                              width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
+                text: text.joined(separator: "\n")))
+        }
+        sqlite3_finalize(stmt)
+        for block in blocks { try savePostIt(block) }
+        try execute("DROP TABLE notes")
     }
 
     /// Ids of the browser cards the board stored, so lines to them survive loading before any

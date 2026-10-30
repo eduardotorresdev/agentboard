@@ -64,7 +64,7 @@ struct WorktreeCanvas: View {
     }
 
     private var isEmpty: Bool {
-        agents.isLoaded && agents.agents(in: worktree.path).isEmpty && agents.notes(in: worktree.path).isEmpty
+        agents.isLoaded && agents.agents(in: worktree.path).isEmpty && agents.postIts(in: worktree.path).isEmpty
             && browsers.browsers(in: worktree.path).isEmpty
     }
 }
@@ -89,11 +89,11 @@ private struct CanvasToolbar: View {
                 .fixedSize()
                 .accessibilityLabel(L("Add runner"))
                 .help(L("Keeps a command running, such as a dev server."))
-            Button { board.addNotes() } label: { Image(systemName: "note.text") }
+            Button { board.addPostIt() } label: { Image(systemName: "note.text") }
                 .buttonStyle(ToolbarButtonStyle(icon: true))
                 .fixedSize()
-                .accessibilityLabel(L("Add notes"))
-                .help(L("Shared notes: connected agents say what they're working on and where, and keep what to remember."))
+                .accessibilityLabel(L("Add post-it"))
+                .help(L("A new post-it in markdown: you and every agent connected to it read and write it."))
         }
         .font(.system(size: 18, weight: .medium))
         .padding(5)

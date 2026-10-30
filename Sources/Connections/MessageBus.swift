@@ -8,10 +8,10 @@ public struct ElementKind: RawRepresentable, Hashable, Sendable {
     public static let agent = ElementKind(rawValue: "agent")
     public static let browser = ElementKind(rawValue: "browser")
     public static let runner = ElementKind(rawValue: "runner")
-    public static let notes = ElementKind(rawValue: "notes")
+    public static let postIt = ElementKind(rawValue: "postit")
 }
 
-/// Anything on the board a line can reach: an agent's terminal, a browser, a notes block and more.
+/// Anything on the board a line can reach: an agent's terminal, a browser, a post-it and more.
 @MainActor
 public protocol BoardElement: AnyObject {
     var id: UUID { get }
