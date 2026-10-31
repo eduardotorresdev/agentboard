@@ -174,6 +174,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// Above the cards: the line being drawn from a handle.
     private let overlayLayer = CALayer()
     private let linkPreview = CAShapeLayer()
+    /// The box dragged out on the empty canvas, and the glow behind the cards it selected.
+    private let marqueeLayer = CAShapeLayer()
+    private let selectionLayer = CAShapeLayer()
+    /// Cards picked with the box; Delete removes them after asking.
+    private var selection: Set<UUID> = []
+    /// Where the box started and where the pointer is, in world points, and the selection it adds to.
+    private var marquee: (start: CGPoint, current: CGPoint, base: Set<UUID>)?
     private var cards: [UUID: CardLayer] = [:]
     /// Runner cards' buttons, addresses and metrics, drawn over their `CardLayer`.
     private var runnerChrome: [UUID: RunnerChromeLayer] = [:]
@@ -313,6 +320,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         linkPreview.lineDashPattern = [5, 5]
         linkPreview.isHidden = true
         overlayLayer.addSublayer(linkPreview)
+        marqueeLayer.fillColor = BoardPalette.rgb(BoardPalette.accent, 0.1)
+        marqueeLayer.strokeColor = nil
+        marqueeLayer.isHidden = true
+        overlayLayer.addSublayer(marqueeLayer)
+        selectionLayer.fillColor = BoardPalette.rgb(BoardPalette.accent, 0.35)
+        selectionLayer.strokeColor = nil
+        linksLayer.addSublayer(selectionLayer)
         layer = root
         wantsLayer = true
         store.onSessionChange = { [weak self] id in self?.sessionChanged(id) }
@@ -563,6 +577,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         syncBrowsers(onScreen: onScreen, scale: renderScale)
         syncFileTrees(scale: renderScale)
         syncLinks(scale: renderScale)
+        syncSelection()
         // Terminals that got a new place in the surface are drawn there before they show again.
         if let surface { dirty.formUnion(surface.arrange(sizes)) }
         observe(visible)
@@ -1008,6 +1023,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         let point = convert(event.locationInWindow, from: nil)
         let location = world(point)
         window?.makeFirstResponder(self)
+        if item(at: location) != nil, !selection.isEmpty {
+            // Clicking a card ends the box selection.
+            selection = []
+        }
         if let hoveredCard, let (id, index) = handle(at: location), id == hoveredCard,
            let frame = frame(of: id) {
             // Drawing a line from this card.
@@ -1052,9 +1071,16 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             if !dirty.isEmpty { displayLink?.isPaused = false }
         }
         guard let record = card(at: location) else {
-            // Dragging the empty canvas pans it.
             focusedID = nil
-            beginPanDrag(at: point)
+            if event.modifierFlags.contains(.option) {
+                // Option-dragging the empty canvas pans it.
+                beginPanDrag(at: point)
+            } else {
+                // Dragging the empty canvas draws a selection box; Shift adds to the selection.
+                let base = event.modifierFlags.contains(.shift) ? selection : []
+                selection = base
+                marquee = (location, location, base)
+            }
             syncLayers()
             return
         }
@@ -1103,6 +1129,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return
         }
         if panDrag != nil { return continuePanDrag(to: point) }
+        if var box = marquee {
+            box.current = world(point)
+            marquee = box
+            let rect = Self.rect(box.start, box.current)
+            selection = box.base.union(itemFrames.filter { $0.frame.intersects(rect) }.map(\.id))
+            return syncLayers()
+        }
         if var drag = linkDrag {
             let location = world(point)
             let snap = snapHandle(near: location, excluding: drag.from)
@@ -1147,6 +1180,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return
         }
         if panDrag != nil { return endPanDrag() }
+        if marquee != nil {
+            marquee = nil
+            return syncLayers()
+        }
         if let drag = linkDrag {
             linkDrag = nil
             NSCursor.pop()
@@ -1293,6 +1330,77 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         syncLayers()
     }
 
+    // MARK: Selection
+
+    private static func rect(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+        CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
+    }
+
+    /// Draws the box being dragged and a glow behind each selected card.
+    private func syncSelection() {
+        let frames = itemFrames
+        let ids = Set(frames.map(\.id))
+        if !selection.isSubset(of: ids) { selection.formIntersection(ids) }
+        let selectionPath = CGMutablePath()
+        let outset = 6 / zoom
+        for item in frames where selection.contains(item.id) {
+            let rect = item.frame.insetBy(dx: -outset, dy: -outset)
+            selectionPath.addRoundedRect(in: rect, cornerWidth: CardMetrics.radius + outset, cornerHeight: CardMetrics.radius + outset)
+        }
+        selectionLayer.path = selectionPath
+        if let marquee {
+            let rect = Self.rect(marquee.start, marquee.current)
+            let corner = min(4 / zoom, rect.width / 2, rect.height / 2)
+            marqueeLayer.path = CGPath(roundedRect: rect, cornerWidth: corner, cornerHeight: corner, transform: nil)
+            marqueeLayer.isHidden = false
+        } else {
+            marqueeLayer.isHidden = true
+        }
+    }
+
+    /// Asks before removing the selected cards; agents and runners stop with their card.
+    private func confirmDeleteSelection() {
+        let ids = selection
+        guard !ids.isEmpty, let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = ids.count == 1 ? L("Delete the selected card?") : L("Delete \(ids.count) selected cards?")
+        alert.informativeText = L("Agents and runners in the selection stop. This can't be undone.")
+        alert.addButton(withTitle: L("Delete"))
+        alert.addButton(withTitle: L("Cancel"))
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.deleteCards(ids)
+        }
+    }
+
+    private func deleteCards(_ ids: Set<UUID>) {
+        endPostItEditing()
+        endAddressEditing()
+        endCardRename()
+        for id in ids {
+            if record(id) != nil {
+                store.remove(id)
+                observed.remove(id)
+            } else if store.postIt(id) != nil {
+                store.removePostIt(id)
+            } else if browsers.record(id) != nil {
+                browsers.remove(id)
+            } else if fileTrees.record(id) != nil {
+                fileTrees.remove(id)
+            }
+        }
+        if let focusedID, ids.contains(focusedID) { self.focusedID = nil }
+        hoveredClose = nil
+        hoveredCard = nil
+        hoveredControl = nil
+        hoveredPostIt = nil
+        selection.subtract(ids)
+        syncLayers()
+        window?.makeFirstResponder(self)
+    }
+
     // MARK: Keyboard
 
     private var focusedSession: AgentSession? {
@@ -1305,6 +1413,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     override func keyDown(with event: NSEvent) {
+        if !selection.isEmpty, focusedID == nil {
+            switch event.keyCode {
+            case 51, 117: return confirmDeleteSelection()  // Delete, Forward Delete
+            case 53: selection = []; return syncLayers()  // Escape
+            default: break
+            }
+        }
         if let id = focusedBrowser { return browserKeyDown(event, to: id) }
         guard let session = focusedSession else { return super.keyDown(with: event) }
         interacted()

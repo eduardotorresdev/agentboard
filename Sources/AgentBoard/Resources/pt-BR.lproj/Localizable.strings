@@ -255,3 +255,7 @@
 "Agent name" = "Nome do agente";
 "CPU and memory the board uses, without its agents." = "CPU e memória que o quadro usa, sem os agentes.";
 "Back to the board (Esc)" = "Voltar ao quadro (Esc)";
+"Delete the selected card?" = "Apagar o card selecionado?";
+"Delete %lld selected cards?" = "Apagar os %lld cards selecionados?";
+"Agents and runners in the selection stop. This can't be undone." = "Agentes e runners da seleção serão encerrados. Não dá para desfazer.";
+"Delete" = "Apagar";
