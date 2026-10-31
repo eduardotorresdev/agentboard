@@ -36,6 +36,13 @@ struct WorktreeCanvas: View {
                 CanvasToolbar(board: board)
                     .padding(.bottom, 16)
                     .padding(.leading, board.leadingInset)
+                if !board.isZen {
+                    ClaudeUsageToolbar()
+                        .padding(.bottom, 16)
+                        .padding(.leading, board.leadingInset + 16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
+                }
                 VStack(alignment: .trailing, spacing: 8) {
                     AppUsage()
                     NavigationToolbar(board: board)
@@ -285,5 +292,62 @@ private struct AppUsage: View {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+}
+
+/// What is left of the Claude plan's 5-hour session and week, and when each resets, floating
+/// at the bottom-left corner. Refreshed every minute.
+private struct ClaudeUsageToolbar: View {
+    @State private var usage: ClaudeUsage?
+
+    var body: some View {
+        Group {
+            if let usage {
+                HStack(spacing: 2) {
+                    item(L("5h"), usage.session, help: L("Left of the current 5-hour session. With none open, the next message starts a full one."), relative: true)
+                    item(L("Week"), usage.week, help: L("Left of this week's limit across every model."), relative: false)
+                }
+                .font(.callout.weight(.medium))
+                .padding(4)
+                .modifier(GlassCapsule())
+                .transition(.opacity)
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                if let fresh = try? await ClaudeUsageClient.fetch() {
+                    withAnimation(.smooth(duration: 0.3)) { usage = fresh }
+                }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    private func item(_ title: String, _ window: ClaudeUsage.Window?, help: String, relative: Bool) -> some View {
+        let remaining = window?.remaining ?? 100
+        return HStack(spacing: 6) {
+            Text(title).foregroundStyle(.black.opacity(0.5))
+            Text(remaining / 100, format: .percent.precision(.fractionLength(0)))
+                .monospacedDigit()
+                .foregroundStyle(remaining < 20 ? Theme.secondary : .black.opacity(0.85))
+                .contentTransition(.numericText())
+            if let reset = window?.resetsAt {
+                Text(resetText(reset, relative: relative))
+                    .monospacedDigit()
+                    .foregroundStyle(.black.opacity(0.5))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .help(help)
+    }
+
+    /// The session counts down; the week names the day and time.
+    private func resetText(_ date: Date, relative: Bool) -> String {
+        if relative {
+            let minutes = max(0, Int(date.timeIntervalSinceNow / 60))
+            return minutes >= 60 ? L("resets in \(minutes / 60)h \(minutes % 60)m") : L("resets in \(minutes)m")
+        }
+        return L("resets \(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))")
     }
 }
