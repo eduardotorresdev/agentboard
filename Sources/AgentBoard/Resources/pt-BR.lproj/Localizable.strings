@@ -1,7 +1,268 @@
-3 matches in 1F:
+/* Welcome */
+"Start something epic." = "Comece algo épico.";
+"What's the next big thing?" = "Qual é a próxima grande ideia?";
+"From zero to epic." = "Do zero ao épico.";
+"Start from scratch" = "Criar do zero";
+"Clone a repository" = "Clonar repositório";
+"Open a folder" = "Abrir pasta";
+"An empty repository with a first commit on main." = "Um repositório vazio com o primeiro commit na main.";
+"Copy a repository from GitHub, GitLab, or any remote." = "Copie um repositório do GitHub, GitLab ou outro remoto.";
 
-[file] Sources/.../pt-BR.lproj/Localizable.strings (3):
-   258: "Orchestrator" = "Orquestrador";
-   259: "%@ · Orchestrator" = "%@ · Orquestrador";
-   261: "Via %@" = "Via %@";
+/* Add Project dialog */
+"Add Project" = "Adicionar projeto";
+"Start from a remote repository, a new one, or a folder on this Mac." = "Comece de um repositório remoto, de um novo ou de uma pasta deste Mac.";
+"Clone from URL" = "Clonar de URL";
+"Copy a git repository from GitHub, GitLab, or any remote." = "Copie um repositório git do GitHub, GitLab ou outro remoto.";
+"Create New" = "Criar novo";
+"Start an empty repository with a first commit on main." = "Repositório vazio com um primeiro commit na main.";
+"Open Folder" = "Abrir pasta";
+"Add a project that already exists on this Mac." = "Adicione um projeto que já existe neste Mac.";
+"Cancel" = "Cancelar";
+"URL" = "URL";
+"Stop" = "Parar";
+"Clone" = "Clonar";
+"Create New Project" = "Criar novo projeto";
+"Create" = "Criar";
+"Name" = "Nome";
+"Location" = "Local";
+"Creates %@" = "Cria %@";
+"Change…" = "Alterar…";
+"Starting…" = "Iniciando…";
+"Back" = "Voltar";
+"Name can't contain “/”." = "O nome não pode conter “/”.";
+"A folder with this name already exists here. Pick another name or location." = "Já existe uma pasta com esse nome aqui. Escolha outro nome ou local.";
+"Choose" = "Escolher";
 
+/* Main window */
+"Error" = "Erro";
+"OK" = "OK";
+"Toggle Sidebar" = "Mostrar/ocultar barra lateral";
+"Refresh" = "Atualizar";
+"Not a git repository" = "Não é um repositório git";
+"Remove Project" = "Remover projeto";
+"Detached HEAD" = "HEAD destacado";
+"Select a worktree" = "Selecione uma worktree";
+"Pick a worktree in the sidebar to open it on the canvas." = "Escolha uma worktree na barra lateral para abri-la no canvas.";
+"Failed to open database: %@" = "Não foi possível abrir o banco de dados: %@";
+
+/* Worktree canvas */
+"Rename" = "Renomear";
+"Name" = "Nome";
+"Add agent" = "Adicionar agente";
+"No agents yet" = "Nenhum agente ainda";
+"Add an agent from the bar below. It starts in this worktree's folder." = "Adicione um agente pela barra abaixo. Ele começa na pasta desta worktree.";
+"Fits every agent on screen." = "Enquadra todos os agentes na tela.";
+"Zoom out (⌘−)" = "Diminuir zoom (⌘−)";
+"Zoom in (⌘+)" = "Aumentar zoom (⌘+)";
+"Back to actual size (⌘0)" = "Voltar ao tamanho real (⌘0)";
+"Agent exited. Click to restart." = "Agente encerrado. Clique para reiniciar.";
+"This worktree no longer exists on disk." = "Esta worktree não existe mais no disco.";
+"Couldn't start the process that runs the agents." = "Não consegui iniciar o processo que roda os agentes.";
+"Lost the process that runs the agents. Reconnecting…" = "Perdi o processo que roda os agentes. Reconectando…";
+"Your agents can't be shown" = "Não dá para mostrar seus agentes";
+"Your agents run on a newer build. Open that build to see them." = "Seus agentes rodam numa versão mais nova. Abra essa versão para vê-los.";
+"Your agents run on an older build that can't hand them over to this one. Open that build to carry on with them." = "Seus agentes rodam numa versão mais antiga, que não consegue passá-los para esta. Abra aquela versão para continuar com eles.";
+"Could not find “%@” in your PATH." = "Não encontrei “%@” no seu PATH.";
+"Starting %@…" = "Iniciando %@…";
+"Unknown agent “%@”." = "Agente desconhecido “%@”.";
+
+/* Browser cards */
+"Add browser" = "Adicionar navegador";
+"Apply" = "Aplicar";
+"Change device" = "Trocar dispositivo";
+"Checking WebKit…" = "Verificando o WebKit…";
+"Choose the size, density, touch, and user agent." = "Escolha tamanho, densidade, toque e user agent.";
+"Clicks become taps and dragging scrolls; nothing hovers." = "Cliques viram toques e arrastar rola a página; nada reage ao hover.";
+"Custom…" = "Personalizado…";
+"Density" = "Densidade";
+"Desktop Safari window, 1280 × 720." = "Janela do Safari no desktop, 1280 × 720.";
+"Device pixels per CSS pixel: 2× and 3× are Retina screens." = "Pixels do aparelho por pixel CSS: 2× e 3× são telas Retina.";
+"Downloading Node…" = "Baixando o Node…";
+"Enter an address" = "Digite um endereço";
+"Fills in everything below with that device's values." = "Preenche tudo abaixo com os valores desse dispositivo.";
+"Follows the page's viewport meta tag, like a phone's browser." = "Segue a meta tag viewport da página, como o navegador de um celular.";
+"Installing Playwright…" = "Instalando o Playwright…";
+"iPad Pro 11″ screen with touch, 834 × 1194." = "Tela do iPad Pro 11″ com toque, 834 × 1194.";
+"iPhone 17 screen with touch, 402 × 681." = "Tela do iPhone 17 com toque, 402 × 681.";
+"Loading devices…" = "Carregando dispositivos…";
+"Mobile browser" = "Navegador mobile";
+"Mobile" = "Mobile";
+"New custom browser" = "Novo navegador personalizado";
+"Opening…" = "Abrindo…";
+"Preparing the browser…" = "Preparando o navegador…";
+"Search or enter an address" = "Busque ou digite um endereço";
+"Size" = "Tamanho";
+"Start from a device, then change what you need." = "Parta de um dispositivo e mude o que precisar.";
+"Start from" = "Partir de";
+"The browser stopped (status %lld). Click to start it again." = "O navegador parou (status %lld). Clique para iniciá-lo de novo.";
+"The page crashed. Click to reload it." = "A página travou. Clique para recarregá-la.";
+"Touch screen" = "Tela de toque";
+"touch" = "toque";
+"Touch" = "Toque";
+"User agent" = "User agent";
+"Viewport in CSS pixels, width × height." = "Viewport em pixels CSS, largura × altura.";
+"What pages see in navigator.userAgent." = "O que as páginas veem em navigator.userAgent.";
+"Width and height go from 200 to 3840." = "Largura e altura vão de 200 a 3840.";
+"Phone" = "Celular";
+"Tablet" = "Tablet";
+"Desktop" = "Desktop";
+
+/* Runners */
+"Add runner" = "Adicionar runner";
+"Keeps a command running, such as a dev server." = "Mantém um comando rodando, como um servidor de desenvolvimento.";
+"New runner" = "Novo runner";
+"Command" = "Comando";
+"Folder" = "Pasta";
+"Start runner" = "Iniciar runner";
+"This folder no longer exists on disk." = "Esta pasta não existe mais no disco.";
+"Not running. Click to start." = "Parado. Clique para iniciar.";
+"Running" = "Rodando";
+"Finished" = "Terminou";
+"Exited with code %lld" = "Saiu com código %lld";
+"Failed to start" = "Falhou ao iniciar";
+"Stopped" = "Parado";
+"restarted" = "reiniciado";
+"Back to the worktree's folder" = "Voltar para a pasta da worktree";
+"Script" = "Script";
+"Choose a script" = "Escolha um script";
+
+/* Profiles and import */
+"Profile" = "Perfil";
+"New profile…" = "Novo perfil…";
+"Import data…" = "Importar dados…";
+"Bring logins from Chrome, Arc, Edge…" = "Traga logins do Chrome, Arc, Edge…";
+"Bring logins from your browser into a profile." = "Traga logins do seu navegador para um perfil.";
+"Import data" = "Importar dados";
+"Bring your logins into a profile so cards on it start signed in." = "Traga seus logins para um perfil, e os cards nele já abrem logados.";
+"Into" = "Para";
+"Cards on this profile share these logins." = "Cards neste perfil compartilham estes logins.";
+"Profile name" = "Nome do perfil";
+"Add" = "Adicionar";
+"From" = "De";
+"A cookie file exported from your browser (JSON). On a site you're signed in to, export with a cookie-export extension." = "Um arquivo de cookies exportado do seu navegador (JSON). Num site onde você está logado, exporte com uma extensão de exportar cookies.";
+"Choose a cookie file…" = "Escolha um arquivo de cookies…";
+"Cards on this profile browse with these logins, and so do the agents connected to them." = "Cards neste perfil navegam com estes logins, e os agentes conectados a eles também.";
+"Done" = "Concluir";
+"Import" = "Importar";
+"Choose a cookie file to import into this profile." = "Escolha um arquivo de cookies para importar neste perfil.";
+"Imported %lld cookies and %lld sites' data." = "Importados %lld cookies e dados de %lld sites.";
+"Imported %lld cookies." = "Importados %lld cookies.";
+"That file isn't a cookie export AgentBoard can read." = "Esse arquivo não é uma exportação de cookies que o AgentBoard saiba ler.";
+"No cookies were found in that file." = "Nenhum cookie foi encontrado nesse arquivo.";
+"%@ has no cookie key in the Keychain yet; open it once." = "%@ ainda não tem a chave de cookies no Keychain; abra-o uma vez.";
+"Couldn't read %@'s cookie database." = "Não consegui ler o banco de cookies do %@.";
+"macOS didn't allow reading %@'s cookies." = "O macOS não permitiu ler os cookies do %@.";
+"Pick an installed browser to copy its logins, or import a cookie file (JSON)." = "Escolha um navegador instalado para copiar os logins, ou importe um arquivo de cookies (JSON).";
+"No Chromium browser (Chrome, Arc, Edge…) found on this Mac." = "Nenhum navegador Chromium (Chrome, Arc, Edge…) encontrado neste Mac.";
+"Import from a cookie file…" = "Importar de um arquivo de cookies…";
+"Imported %lld cookies from %@." = "Importados %lld cookies do %@.";
+"Left out %lld Google sign-in cookies so %@ stays signed in." = "Deixei de fora %lld cookies de login do Google para o %@ continuar logado.";
+"Collapsed" = "Recolhido";
+"Expanded" = "Expandido";
+
+/* Post-its */
+"Add post-it" = "Adicionar post-it";
+"A new post-it in markdown: you and every agent connected to it read and write it." = "Um post-it novo em markdown: você e todo agente conectado a ele leem e escrevem nele.";
+"Post-it" = "Post-it";
+"View" = "Ver";
+"Code" = "Código";
+"Empty. Double-click to write." = "Vazio. Clique duas vezes para escrever.";
+"Write in markdown…" = "Escreva em markdown…";
+
+/* Organizations */
+"Default" = "Padrão";
+"New Organization" = "Nova organização";
+"New organization: its own projects and its own Claude login" = "Nova organização: projetos e login do Claude próprios";
+"Organization %@" = "Organização %@";
+"Edit Organization…" = "Editar organização…";
+"%@ — hold to edit" = "%@ — segure para editar";
+"Color" = "Cor";
+"Choose Image…" = "Escolher imagem…";
+"Use Initial" = "Usar inicial";
+"Use Image" = "Usar imagem";
+"An image replaces the initial and color." = "Uma imagem substitui a inicial e a cor.";
+"Remove Organization" = "Remover organização";
+"Its project list goes; the folders and its Claude login stay on disk." = "A lista de projetos sai; as pastas e o login do Claude ficam no disco.";
+"That file isn't an image." = "Esse arquivo não é uma imagem.";
+
+/* Needs you */
+"Needs you" = "Precisa de você";
+"Agents waiting on you, across every organization" = "Agentes esperando por você, em todas as organizações";
+"%lld waiting" = "%lld esperando";
+"Drag aside when you're done" = "Arraste para o lado quando terminar";
+"Done" = "Feito";
+"Marks this one as handled and shows the next. ⌥Esc sends Esc to the agent." = "Marca este como resolvido e mostra o próximo. ⌥Esc envia Esc ao agente.";
+"Finished its turn. Your move." = "Terminou. Sua vez.";
+"Waiting for you." = "Esperando por você.";
+"All clear" = "Tudo em dia";
+"Nobody is waiting on you" = "Ninguém está esperando por você";
+"An agent shows up here when it finishes its turn or asks you something." = "Um agente aparece aqui quando termina a vez dele ou te pergunta algo.";
+"Asks you a question" = "Faz uma pergunta";
+"Asks you %lld questions" = "Faz %lld perguntas";
+"Answer in terminal" = "Responder no terminal";
+"Shows these questions in the agent's terminal, to answer there." = "Mostra estas perguntas no terminal do agente, para responder lá.";
+"Send answers" = "Enviar respostas";
+"Gives the agent your answers; it carries on with them." = "Entrega suas respostas ao agente, que segue com elas.";
+"Pick any that apply." = "Marque quantas quiser.";
+"Something else…" = "Outra resposta…";
+"Next" = "Próxima";
+"Keeps this answer and shows the next question." = "Guarda esta resposta e mostra a próxima pergunta.";
+"Shows the previous question, to change its answer." = "Mostra a pergunta anterior, para mudar a resposta.";
+"%lld of %lld" = "%1$lld de %2$lld";
+"Commit and Push" = "Commitar e dar push";
+"Remove %@?" = "Remover %@?";
+"%lld files with uncommitted changes" = "%lld arquivos com mudanças não commitadas";
+"%lld commits not pushed" = "%lld commits sem push";
+"Commit and Push saves this work to the remote, then removes the worktree. Remove deletes its folder and loses it." = "Commitar e dar push salva esse trabalho no remoto e depois remove a worktree. Remover apaga a pasta dela e perde esse trabalho.";
+"Remove" = "Remover";
+
+/* Top bar */
+"Clone, create, or open a project." = "Clone, crie ou abra um projeto.";
+"Reloads the projects and their worktrees." = "Recarrega os projetos e suas worktrees.";
+
+/* File tree */
+"Files" = "Arquivos";
+"Add file tree" = "Adicionar árvore de arquivos";
+"Browse the worktree's files and leave notes on their lines for the connected agents." = "Navegue pelos arquivos da worktree e deixe anotações nas linhas para os agentes conectados.";
+"Search files" = "Buscar arquivos";
+"Reads the folders and the git status again." = "Lê de novo as pastas e o status do git.";
+"This file is binary and can't be shown." = "Este arquivo é binário e não pode ser exibido.";
+"This file is too large to show." = "Este arquivo é grande demais para exibir.";
+"This file can't be read." = "Não foi possível ler este arquivo.";
+"Pick a file to read it and annotate its lines." = "Escolha um arquivo para ler e anotar suas linhas.";
+"Closes the file." = "Fecha o arquivo.";
+"Drag over lines to annotate them; Command-drag adds more lines, Shift extends the selection." = "Arraste sobre as linhas para anotá-las; com Command adiciona mais linhas, com Shift estende a seleção.";
+"Line %@" = "Linha %@";
+"Lines %@" = "Linhas %@";
+"Add a note for the agents…" = "Adicione uma anotação para os agentes…";
+"Keeps the note; send every note at once from below the card." = "Guarda a anotação; envie todas de uma vez pelo botão abaixo do card.";
+"Removes the note." = "Remove a anotação.";
+"Send 1 note" = "Enviar 1 anotação";
+"Send %lld notes" = "Enviar %lld anotações";
+"Connect an agent to this card to send it the notes." = "Conecte um agente a este card para enviar as anotações.";
+"Sends every note to %@." = "Envia todas as anotações para %@.";
+"Discards the notes." = "Descarta as anotações.";
+
+/* Zen mode */
+"Zen mode" = "Modo zen";
+"Leave zen mode" = "Sair do modo zen";
+"Zen mode: hides everything but the canvas, its tools, and Needs you." = "Modo zen: oculta tudo menos o canvas, a barra de ferramentas e o Precisa de você.";
+"Leave zen mode: bring back the sidebar and the bars." = "Sair do modo zen: traz de volta a sidebar e as barras.";
+"Agent: %@" = "Agente: %@";
+"Go to Agent" = "Ir para o agente";
+"Opens its worktree with its card in focus, and takes it off this list." = "Abre a worktree dele com o card em foco e tira ele desta lista.";
+
+"Agent name" = "Nome do agente";
+"CPU and memory the board uses, without its agents." = "CPU e memória que o quadro usa, sem os agentes.";
+"Back to the board (Esc)" = "Voltar ao quadro (Esc)";
+"Delete the selected card?" = "Apagar o card selecionado?";
+"Delete %lld selected cards?" = "Apagar os %lld cards selecionados?";
+"Agents and runners in the selection stop. This can't be undone." = "Agentes e runners da seleção serão encerrados. Não dá para desfazer.";
+"Delete" = "Apagar";
+"5h" = "5h";
+"Week" = "Semana";
+"Left of the current 5-hour session. With none open, the next message starts a full one." = "O que resta da sessão de 5 horas. Sem sessão aberta, a próxima mensagem começa uma cheia.";
+"Left of this week's limit across every model." = "O que resta do limite da semana, somando todos os modelos.";
+"resets in %lldh %lldm" = "reinicia em %lldh %lldm";
+"resets in %lldm" = "reinicia em %lldm";
+"resets %@" = "reinicia %@";
