@@ -3,7 +3,8 @@ import Orchestration
 import SwiftUI
 
 /// Asks what a new runner runs: its name, the command (which the folder's package scripts can
-/// fill in), and the folder it runs in, the worktree unless changed.
+/// fill in), and the folder it runs in, the worktree unless changed. Without a command it opens
+/// the login shell, to use as an ordinary terminal.
 struct RunnerDialog: View {
     let worktree: String
     let onDone: (_ command: String, _ name: String?, _ directory: String?) -> Void
@@ -18,14 +19,14 @@ struct RunnerDialog: View {
         AppDialog(title: L("New runner")) {
             VStack(alignment: .leading, spacing: 14) {
                 FormRow(label: L("Name")) {
-                    TextField("", text: $name, prompt: Text(command.isEmpty ? "web" : AgentRecord.runnerName(for: command)))
+                    TextField("", text: $name, prompt: Text(AgentRecord.runnerName(for: trimmedCommand)))
                 }
                 if !scripts.isEmpty {
                     FormRow(label: L("Script")) {
                         ScriptSelect(scripts: scripts, command: $command)
                     }
                 }
-                FormRow(label: L("Command")) {
+                FormRow(label: L("Command"), message: trimmedCommand.isEmpty ? L("Empty: opens a plain shell to type into.") : nil) {
                     TextField("", text: $command, prompt: Text("npm run dev"))
                         .font(.callout.monospaced())
                 }
@@ -34,12 +35,11 @@ struct RunnerDialog: View {
         } footer: {
             Button(L("Cancel"), role: .cancel) { dismiss() }
                 .keyboardShortcut(.cancelAction)
-            Button(L("Start runner")) {
+            Button(trimmedCommand.isEmpty ? L("Open terminal") : L("Start runner")) {
                 onDone(trimmedCommand, name.trimmingCharacters(in: .whitespaces), folder)
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
-            .disabled(trimmedCommand.isEmpty)
         }
         .onAppear { folder = worktree }
         .onChange(of: folder) { _, folder in loadScripts(in: folder) }

@@ -102,7 +102,7 @@ private struct CanvasToolbar: View {
                 .buttonStyle(ToolbarButtonStyle(icon: true))
                 .fixedSize()
                 .accessibilityLabel(L("Add runner"))
-                .help(L("Keeps a command running, such as a dev server."))
+                .help(L("Keeps a command running, such as a dev server, or opens a plain terminal."))
             Button { board.addPostIt() } label: { Image(systemName: "note.text") }
                 .buttonStyle(ToolbarButtonStyle(icon: true))
                 .fixedSize()

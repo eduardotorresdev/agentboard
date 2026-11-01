@@ -51,10 +51,11 @@ public struct AgentRecord: Identifiable, Hashable, Codable, Sendable {
         return "\(base) \(number)"
     }
 
-    /// A card name from a command: the script of `npm run dev` (dev), else the program's name.
+    /// A card name from a command: the script of `npm run dev` (dev), else the program's name;
+    /// `terminal` for a runner without a command, which is a plain shell.
     public static func runnerName(for command: String) -> String {
         let words = command.split(separator: " ").map(String.init).filter { !$0.contains("=") }
-        guard let first = words.first.map({ ($0 as NSString).lastPathComponent }) else { return "Runner" }
+        guard let first = words.first.map({ ($0 as NSString).lastPathComponent }) else { return "terminal" }
         if ["npm", "pnpm", "yarn", "bun", "deno"].contains(first), words.count > 1 {
             let rest = words.dropFirst().filter { !$0.hasPrefix("-") }
             return (rest.first == "run" ? rest.dropFirst().first : rest.first) ?? first
@@ -65,7 +66,8 @@ public struct AgentRecord: Identifiable, Hashable, Codable, Sendable {
 
 /// What a runner card runs.
 public struct RunnerSpec: Hashable, Codable, Sendable {
-    /// A shell command line, run with the user's login shell.
+    /// A shell command line, run with the user's login shell. Empty: the shell itself, to use
+    /// as an ordinary terminal.
     public var command: String
     /// The folder it runs in: the worktree or a folder inside it.
     public var directory: String
@@ -76,6 +78,14 @@ public struct RunnerSpec: Hashable, Codable, Sendable {
         self.command = command
         self.directory = directory
         self.owner = owner
+    }
+
+    /// Whether it runs no command: the login shell, interactive.
+    public var isShell: Bool { command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// What the card shows it runs: the command, or the shell's name (`zsh`).
+    public var shownCommand: String {
+        isShell ? ((ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh") as NSString).lastPathComponent : command
     }
 }
 

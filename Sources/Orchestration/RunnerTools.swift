@@ -208,7 +208,7 @@ final class RunnerTools: ToolProvider {
         case .failed(let reason): state = "failed to start: \(reason)"
         case .stopped, nil: state = "stopped"
         }
-        var lines = ["\(record.name): \(state)", "command: \(runner.command)", "folder: \(runner.directory)"]
+        var lines = ["\(record.name): \(state)", runner.isShell ? "command: none (a plain shell)" : "command: \(runner.command)", "folder: \(runner.directory)"]
         let urls = store.urls(of: id)
         if !urls.isEmpty {
             lines.append("URLs: " + urls.map { url in url.network.map { "\(url.local) (network: \($0))" } ?? url.local }.joined(separator: ", "))

@@ -1560,7 +1560,7 @@ extension BoardView {
                 links.append(.init(label: network.replacingOccurrences(of: "http://", with: ""), url: network, network: true))
             }
         }
-        let layout = RunnerChromeLayout(bounds: CGRect(origin: .zero, size: record.frame.size), command: record.runner?.command ?? "",
+        let layout = RunnerChromeLayout(bounds: CGRect(origin: .zero, size: record.frame.size), command: record.runner?.shownCommand ?? "",
                                         links: links, metricsWidth: RunnerChromeLayer.metricsWidth(metrics.text))
         return (layout, metrics)
     }
@@ -1576,7 +1576,7 @@ extension BoardView {
         }()
         let (layout, metrics) = runnerLayout(record, state: state)
         let running = state == .running || state == .starting
-        chrome.update(bounds: CGRect(origin: .zero, size: record.frame.size), layout: layout, command: runner.command, running: running,
+        chrome.update(bounds: CGRect(origin: .zero, size: record.frame.size), layout: layout, command: runner.shownCommand, running: running,
                       metrics: metrics, hovered: hoveredRunnerControl?.card == record.id ? hoveredRunnerControl?.control : nil, scale: scale)
     }
 

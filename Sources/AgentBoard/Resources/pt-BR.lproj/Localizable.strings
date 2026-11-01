@@ -119,11 +119,13 @@
 
 /* Runners */
 "Add runner" = "Adicionar runner";
-"Keeps a command running, such as a dev server." = "Mantém um comando rodando, como um servidor de desenvolvimento.";
+"Keeps a command running, such as a dev server, or opens a plain terminal." = "Mantém um comando rodando, como um servidor de desenvolvimento, ou abre um terminal comum.";
 "New runner" = "Novo runner";
 "Command" = "Comando";
 "Folder" = "Pasta";
 "Start runner" = "Iniciar runner";
+"Open terminal" = "Abrir terminal";
+"Empty: opens a plain shell to type into." = "Vazio: abre um shell comum para digitar.";
 "This folder no longer exists on disk." = "Esta pasta não existe mais no disco.";
 "Not running. Click to start." = "Parado. Clique para iniciar.";
 "Running" = "Rodando";

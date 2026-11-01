@@ -109,7 +109,7 @@ extension Orchestrator {
         // What the last run served and cost no longer applies.
         clearStats(record.id)
         runnerStarts[record.id] = Date()
-        session.start(LaunchSpec(executable: shell, arguments: ["-l", "-c", runner.command], environment: environment,
+        session.start(LaunchSpec(executable: shell, arguments: runner.isShell ? ["-l", "-i"] : ["-l", "-c", runner.command], environment: environment,
                                  directory: runner.directory))
         startMonitoring()
         runnersChanged()

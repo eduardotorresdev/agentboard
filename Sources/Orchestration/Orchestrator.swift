@@ -515,8 +515,8 @@ final class RunnerElement: BoardElement {
     var kind: ElementKind { .runner }
 
     var detail: String? {
-        guard let command = store?.record(id)?.runner?.command else { return nil }
-        return "runs `\(command)`"
+        guard let runner = store?.record(id)?.runner else { return nil }
+        return runner.isShell ? "a terminal the user types into" : "runs `\(runner.command)`"
     }
 }
 
