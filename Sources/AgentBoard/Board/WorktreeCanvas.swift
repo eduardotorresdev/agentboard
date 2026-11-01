@@ -297,6 +297,11 @@ private struct ClaudeUsageToolbar: View {
         ZStack {
             if let usage {
                 HStack(spacing: 2) {
+                    ClaudeMark()
+                        .stroke(Color(red: 0.85, green: 0.47, blue: 0.34), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                        .frame(width: 16, height: 16)
+                        .padding(.leading, 8)
+                        .accessibilityLabel("Claude")
                     // Plans without a 5-hour limit get no session from the API: only the week shows.
                     if let session = usage.session {
                         item(L("5h"), session, help: L("Left of the current 5-hour session."), relative: true)
@@ -348,5 +353,23 @@ private struct ClaudeUsageToolbar: View {
             return minutes >= 60 ? L("resets in \(minutes / 60)h \(minutes % 60)m") : L("resets in \(minutes)m")
         }
         return L("resets \(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))")
+    }
+}
+
+/// Claude's spark: rays of uneven length around a center.
+private struct ClaudeMark: Shape {
+    private static let rays: [CGFloat] = [1, 0.78, 0.92, 0.7, 1, 0.82, 0.9, 0.72, 0.98, 0.8, 0.88, 0.74]
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        var path = Path()
+        for (index, length) in Self.rays.enumerated() {
+            let angle = CGFloat(index) / CGFloat(Self.rays.count) * 2 * .pi - .pi / 2
+            let direction = CGPoint(x: cos(angle), y: sin(angle))
+            path.move(to: CGPoint(x: center.x + direction.x * radius * 0.22, y: center.y + direction.y * radius * 0.22))
+            path.addLine(to: CGPoint(x: center.x + direction.x * radius * length, y: center.y + direction.y * radius * length))
+        }
+        return path
     }
 }
