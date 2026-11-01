@@ -294,7 +294,7 @@ private struct ClaudeUsageToolbar: View {
     @State private var usage: ClaudeUsage?
 
     var body: some View {
-        Group {
+        ZStack {
             if let usage {
                 HStack(spacing: 2) {
                     item(L("5h"), usage.session, help: L("Left of the current 5-hour session. With none open, the next message starts a full one."), relative: true)
@@ -308,8 +308,11 @@ private struct ClaudeUsageToolbar: View {
         }
         .task {
             while !Task.isCancelled {
-                if let fresh = try? await ClaudeUsageClient.fetch() {
+                do {
+                    let fresh = try await ClaudeUsageClient.fetch()
                     withAnimation(.smooth(duration: 0.3)) { usage = fresh }
+                } catch {
+                    NSLog("Claude usage unavailable: %@", String(describing: error))
                 }
                 try? await Task.sleep(for: .seconds(60))
             }
