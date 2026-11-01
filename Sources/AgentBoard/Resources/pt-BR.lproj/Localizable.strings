@@ -265,7 +265,7 @@
 "Delete" = "Apagar";
 "5h" = "5h";
 "Week" = "Semana";
-"Left of the current 5-hour session. With none open, the next message starts a full one." = "O que resta da sessão de 5 horas. Sem sessão aberta, a próxima mensagem começa uma cheia.";
+"Left of the current 5-hour session." = "O que resta da sessão de 5 horas.";
 "Left of this week's limit across every model." = "O que resta do limite da semana, somando todos os modelos.";
 "resets in %lldh %lldm" = "reinicia em %lldh %lldm";
 "resets in %lldm" = "reinicia em %lldm";

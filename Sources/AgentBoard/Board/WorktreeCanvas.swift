@@ -297,7 +297,10 @@ private struct ClaudeUsageToolbar: View {
         ZStack {
             if let usage {
                 HStack(spacing: 2) {
-                    item(L("5h"), usage.session, help: L("Left of the current 5-hour session. With none open, the next message starts a full one."), relative: true)
+                    // Plans without a 5-hour limit get no session from the API: only the week shows.
+                    if let session = usage.session {
+                        item(L("5h"), session, help: L("Left of the current 5-hour session."), relative: true)
+                    }
                     item(L("Week"), usage.week, help: L("Left of this week's limit across every model."), relative: false)
                 }
                 .font(.callout.weight(.medium))
