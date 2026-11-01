@@ -61,6 +61,17 @@ final class ProjectStore {
         worktrees[project.id]?.first == worktree
     }
 
+    /// Adds a worktree on `branch` to the project and returns it.
+    func addWorktree(branch: String, to project: Project) throws -> Worktree? {
+        let path = try Git.addWorktree(branch: branch, to: project.path)
+        reload()
+        // git reports the path resolved (e.g. /private/var for /var): match on the folder.
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        return worktrees[project.id]?.first {
+            URL(fileURLWithPath: $0.path).resolvingSymlinksInPath().path == resolved
+        }
+    }
+
     func removeWorktree(_ worktree: Worktree, from project: Project, force: Bool) {
         do {
             try Git.removeWorktree(at: worktree.path, from: project.path, force: force)

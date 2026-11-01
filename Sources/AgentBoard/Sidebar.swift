@@ -10,6 +10,8 @@ struct Sidebar: View {
     @Binding var renaming: Worktree?
     @State private var collapsed: Set<Project.ID> = []
     @State private var pendingRemoval: PendingRemoval?
+    /// The project a worktree is being added to.
+    @State private var addingWorktreeTo: Project?
     @Namespace private var selectionSpace
 
     static let width: CGFloat = 264
@@ -41,6 +43,14 @@ struct Sidebar: View {
         } message: { removal in
             Text(removal.warning)
         }
+        .sheet(item: $addingWorktreeTo) { project in
+            NewWorktreeDialog(store: store, project: project) { worktree in
+                collapsed.remove(project.id)
+                withAnimation(.snappy(duration: 0.3)) {
+                    selection = WorktreeSelection(projectID: project.id, worktree: worktree)
+                }
+            }
+        }
     }
 
     /// Removes right away when nothing would be lost; otherwise asks first.
@@ -58,12 +68,17 @@ struct Sidebar: View {
         let isCollapsed = collapsed.contains(project.id)
         let worktrees = store.worktrees[project.id]
         return VStack(alignment: .leading, spacing: 2) {
-            ProjectHeader(name: project.name, count: worktrees?.count, isCollapsed: isCollapsed) {
+            ProjectHeader(name: project.name, count: worktrees?.count, isCollapsed: isCollapsed,
+                          onAddWorktree: worktrees == nil ? nil : { addingWorktreeTo = project }) {
                 withAnimation(.snappy(duration: 0.28)) {
                     if isCollapsed { collapsed.remove(project.id) } else { collapsed.insert(project.id) }
                 }
             }
             .contextMenu {
+                if worktrees != nil {
+                    Button(L("New Worktree…")) { addingWorktreeTo = project }
+                    Divider()
+                }
                 Button(L("Remove Project"), role: .destructive) { store.removeProject(project) }
             }
             if !isCollapsed {
@@ -135,6 +150,8 @@ private struct ProjectHeader: View {
     /// Worktrees in the project, nil when it isn't a git repository.
     let count: Int?
     let isCollapsed: Bool
+    /// Adds a worktree; nil when the project can't have one.
+    let onAddWorktree: (() -> Void)?
     let onToggle: () -> Void
     @State private var isHovered = false
 
@@ -145,6 +162,29 @@ private struct ProjectHeader: View {
     static let contentInset = padding + badgeSize + spacing
 
     var body: some View {
+        HStack(spacing: 2) {
+            toggle
+            if let onAddWorktree, isHovered {
+                Button(action: onAddWorktree) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help(L("New Worktree…"))
+                .accessibilityLabel(L("New Worktree…"))
+                .transition(.opacity)
+            }
+        }
+        .padding(.trailing, isHovered && onAddWorktree != nil ? 4 : 0)
+        .background(.black.opacity(isHovered ? 0.045 : 0), in: .rect(cornerRadius: 9, style: .continuous))
+        .onHover { isHovered = $0 }
+        .animation(.snappy(duration: 0.2), value: isHovered)
+    }
+
+    private var toggle: some View {
         Button(action: onToggle) {
             HStack(spacing: Self.spacing) {
                 Text(monogram)
@@ -173,12 +213,9 @@ private struct ProjectHeader: View {
             }
             .padding(.horizontal, Self.padding)
             .frame(height: 32)
-            .background(.black.opacity(isHovered ? 0.045 : 0), in: .rect(cornerRadius: 9, style: .continuous))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .animation(.snappy(duration: 0.2), value: isHovered)
         .accessibilityLabel(name)
         .accessibilityValue(isCollapsed ? L("Collapsed") : L("Expanded"))
     }

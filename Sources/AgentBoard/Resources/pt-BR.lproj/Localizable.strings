@@ -40,6 +40,16 @@
 "Refresh" = "Atualizar";
 "Not a git repository" = "Não é um repositório git";
 "Remove Project" = "Remover projeto";
+"New Worktree…" = "Nova worktree…";
+
+/* New Worktree dialog */
+"New Worktree" = "Nova worktree";
+"Branch" = "Branch";
+"Git doesn't accept this as a branch name." = "O git não aceita isso como nome de branch.";
+"%@ already exists. Pick another branch name." = "%@ já existe. Escolha outro nome de branch.";
+"Checks out the existing branch." = "Usa a branch que já existe.";
+"Starts a new branch from %@." = "Cria uma branch nova a partir de %@.";
+"Starts a new branch from the current commit." = "Cria uma branch nova a partir do commit atual.";
 "Detached HEAD" = "HEAD destacado";
 "Select a worktree" = "Selecione uma worktree";
 "Pick a worktree in the sidebar to open it on the canvas." = "Escolha uma worktree na barra lateral para abri-la no canvas.";

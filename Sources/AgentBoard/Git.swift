@@ -69,6 +69,53 @@ enum Git {
         try run(["-C", repository, "worktree", "remove"] + (force ? ["--force"] : []) + [path])
     }
 
+    /// Whether git accepts `name` as a branch name.
+    static func isValidBranchName(_ name: String) -> Bool {
+        !name.isEmpty && (try? run(["check-ref-format", "--branch", name])) != nil
+    }
+
+    /// What creating a worktree for `branch` checks out: the branch itself when the repository
+    /// already has it (locally, or on exactly one remote), otherwise a new branch from HEAD.
+    enum WorktreeStart: Equatable {
+        case existingBranch
+        case newBranch(from: String?)
+    }
+
+    static func worktreeStart(for branch: String, in repository: String) -> WorktreeStart {
+        if (try? run(["-C", repository, "rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"])) != nil {
+            return .existingBranch
+        }
+        let remotes = (try? run(["-C", repository, "for-each-ref", "--format=%(refname)", "refs/remotes/*/\(branch)"])) ?? ""
+        if remotes.split(separator: "\n").count == 1 { return .existingBranch }
+        let head = try? run(["-C", repository, "symbolic-ref", "--quiet", "--short", "HEAD"])
+        return .newBranch(from: head?.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// Where a new worktree for `branch` goes: `<repository>-worktrees/<branch>` beside the
+    /// repository, with the branch's slashes turned into dashes.
+    static func worktreeLocation(for branch: String, in repository: String) -> URL {
+        let repository = URL(fileURLWithPath: repository)
+        return repository.deletingLastPathComponent()
+            .appendingPathComponent(repository.lastPathComponent + "-worktrees")
+            .appendingPathComponent(branch.replacingOccurrences(of: "/", with: "-"))
+    }
+
+    /// Adds a worktree on `branch` to the repository at `repository`, at `worktreeLocation`, and
+    /// returns its path.
+    @discardableResult
+    static func addWorktree(branch: String, to repository: String) throws -> String {
+        let location = worktreeLocation(for: branch, in: repository)
+        try FileManager.default.createDirectory(at: location.deletingLastPathComponent(), withIntermediateDirectories: true)
+        switch worktreeStart(for: branch, in: repository) {
+        case .existingBranch:
+            // A branch only a remote has gets a local one tracking it.
+            try run(["-C", repository, "worktree", "add", location.path, branch])
+        case .newBranch:
+            try run(["-C", repository, "worktree", "add", "-b", branch, location.path])
+        }
+        return location.path
+    }
+
     /// Creates `directory`, initializes a repository on `main`, and makes an empty first commit
     /// so the main worktree has a real branch.
     static func createRepository(at directory: URL) throws {
