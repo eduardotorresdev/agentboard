@@ -14,7 +14,6 @@ struct WorktreeCanvas: View {
         ZStack(alignment: .bottom) {
             Theme.canvas
             Board(store: agents, browsers: browsers, fileTrees: fileTrees, worktree: worktree.path, controller: board)
-                .opacity(board.isCovered ? 0.25 : 1)
             if let notice {
                 EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
                     .padding(.leading, board.leadingInset)
@@ -32,29 +31,23 @@ struct WorktreeCanvas: View {
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
-            Group {
-                CanvasToolbar(board: board)
+            CanvasToolbar(board: board)
+                .padding(.bottom, 16)
+                .padding(.leading, board.leadingInset)
+            if !board.isZen {
+                ClaudeUsageToolbar()
                     .padding(.bottom, 16)
-                    .padding(.leading, board.leadingInset)
-                if !board.isZen {
-                    ClaudeUsageToolbar()
-                        .padding(.bottom, 16)
-                        .padding(.leading, board.leadingInset + 16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .transition(.opacity)
-                }
-                VStack(alignment: .trailing, spacing: 8) {
-                    AppUsage()
-                    NavigationToolbar(board: board)
-                }
-                .padding([.bottom, .trailing], 16)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.leading, board.leadingInset + 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.opacity)
             }
-            // They sink below the edge while Needs you covers the board.
-            .offset(y: board.isCovered ? 90 : 0)
-            .opacity(board.isCovered ? 0 : 1)
+            VStack(alignment: .trailing, spacing: 8) {
+                AppUsage()
+                NavigationToolbar(board: board)
+            }
+            .padding([.bottom, .trailing], 16)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .animation(.snappy(duration: 0.45), value: board.isCovered)
         .animation(.smooth(duration: 0.3), value: isEmpty)
         .animation(.snappy(duration: 0.32), value: board.isZen)
         .animation(.smooth(duration: 0.3), value: notice)

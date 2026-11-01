@@ -24,13 +24,18 @@ public struct AttentionRequest: Codable, Equatable, Identifiable, Sendable {
     /// Questions the agent asked (AskUserQuestion) that wait on the board's answers; nil when
     /// it waits in its terminal.
     public var questions: [AgentQuestion]?
+    /// The orchestrators coordinating the agent, when it waits on what only the developer can
+    /// give (a permission prompt); nil for an agent no orchestrator coordinates.
+    public var orchestrators: [String]?
 
-    public init(id: UUID, reason: Reason, since: Date = Date(), context: String? = nil, questions: [AgentQuestion]? = nil) {
+    public init(id: UUID, reason: Reason, since: Date = Date(), context: String? = nil, questions: [AgentQuestion]? = nil,
+                orchestrators: [String]? = nil) {
         self.id = id
         self.reason = reason
         self.since = since
         self.context = context
         self.questions = questions
+        self.orchestrators = orchestrators
     }
 }
 
@@ -111,19 +116,35 @@ extension Orchestrator {
 
     /// Queues the agent, or updates why it waits while keeping its place.
     func requestAttention(_ id: UUID, _ reason: AttentionRequest.Reason, context: String? = nil, questions: [AgentQuestion]? = nil) {
-        guard record(id) != nil else { return }
+        guard let record = record(id) else { return }
+        let orchestrators = orchestrators(of: record)
+        if !orchestrators.isEmpty, reason == .turnEnded, questions == nil {
+            // A finished turn goes to its orchestrators, which decide whether it needs the developer.
+            let report = context.map { "I finished my turn. My last words:\n\n\($0)" } ?? "I finished my turn."
+            for orchestrator in orchestrators { _ = try? bus.deliver(report, from: id, to: orchestrator.id) }
+            return dismissAttention(id)
+        }
+        let via = orchestrators.isEmpty ? nil : orchestrators.map(\.name)
         if let index = attention.firstIndex(where: { $0.id == id }) {
             let context = context ?? attention[index].context
             let questions = pendingQuestions[id] != nil ? questions ?? attention[index].questions : nil
             guard attention[index].reason != reason || attention[index].context != context
-                    || attention[index].questions != questions else { return }
+                    || attention[index].questions != questions || attention[index].orchestrators != via else { return }
             attention[index].reason = reason
             attention[index].context = context
             attention[index].questions = questions
+            attention[index].orchestrators = via
         } else {
-            attention.append(AttentionRequest(id: id, reason: reason, context: context, questions: questions))
+            attention.append(AttentionRequest(id: id, reason: reason, context: context, questions: questions, orchestrators: via))
         }
         broadcast(.attention(attention))
+    }
+
+    /// The orchestrators connected to an agent that isn't one itself: an orchestrator answers
+    /// to the developer, so two connected ones never pass turns back and forth.
+    func orchestrators(of record: AgentRecord) -> [AgentRecord] {
+        guard !record.isOrchestrator else { return [] }
+        return bus.peers(of: record.id).compactMap { self.record($0.id) }.filter(\.isOrchestrator)
     }
 
     // MARK: Questions

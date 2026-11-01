@@ -255,6 +255,10 @@
 "Agent name" = "Nome do agente";
 "CPU and memory the board uses, without its agents." = "CPU e memória que o quadro usa, sem os agentes.";
 "Back to the board (Esc)" = "Voltar ao quadro (Esc)";
+"Orchestrator" = "Orquestrador";
+"%@ · Orchestrator" = "%@ · Orquestrador";
+"Agents connected to it report their finished turns to it instead of to Needs you." = "Os agentes ligados a ele avisam a ele quando terminam a vez, em vez de ir para Precisa de você.";
+"Via %@" = "Via %@";
 "Delete the selected card?" = "Apagar o card selecionado?";
 "Delete %lld selected cards?" = "Apagar os %lld cards selecionados?";
 "Agents and runners in the selection stop. This can't be undone." = "Agentes e runners da seleção serão encerrados. Não dá para desfazer.";

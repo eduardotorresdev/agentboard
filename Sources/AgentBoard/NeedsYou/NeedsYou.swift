@@ -25,9 +25,19 @@ struct NeedsYouButton: View {
             HStack(spacing: 8) {
                 Text(L("Needs you"))
                     .font(.system(size: 13, weight: .semibold))
-                Text(count, format: .number)
-                    .font(.system(size: 12, weight: .bold).monospacedDigit())
-                    .contentTransition(.numericText(value: Double(count)))
+                Group {
+                    // Open, the badge closes the screen; the cards show how many wait.
+                    if isOpen {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .heavy))
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    } else {
+                        Text(count, format: .number)
+                            .font(.system(size: 12, weight: .bold).monospacedDigit())
+                            .contentTransition(.numericText(value: Double(count)))
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                    }
+                }
                     .padding(.horizontal, 7)
                     .frame(minWidth: 22, minHeight: 20)
                     .background(count > 0 ? .white : Theme.line.opacity(0.08), in: .capsule)
@@ -45,29 +55,9 @@ struct NeedsYouButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        // Floats to the right of the button, leaving the toolbar's layout alone.
-        .overlay(alignment: .trailing) {
-            if isOpen {
-                Button {
-                    withAnimation(.snappy(duration: 0.35)) { isOpen = false }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Theme.line.opacity(0.6))
-                        .frame(width: 30, height: 30)
-                        .background(Theme.line.opacity(0.06), in: .circle)
-                        .contentShape(.circle)
-                }
-                .buttonStyle(.plain)
-                .help(L("Back to the board (Esc)"))
-                .fixedSize()
-                .alignmentGuide(.trailing) { $0[.leading] - 8 }
-                .transition(.scale(scale: 0.6).combined(with: .opacity))
-            }
-        }
         .animation(.bouncy(duration: 0.4), value: isOpen)
         .keyboardShortcut("j", modifiers: .command)
-        .help(L("Agents waiting on you, across every organization"))
+        .help(isOpen ? L("Back to the board (Esc)") : L("Agents waiting on you, across every organization"))
         .animation(.bouncy(duration: 0.4), value: count == 0)
         .animation(.snappy(duration: 0.3), value: count)
         .animation(.snappy(duration: 0.2), value: isHovered)
@@ -114,19 +104,9 @@ struct NeedsYouDeck: View {
             let inset: CGFloat = proxy.size.height < 640 ? 40 : 96
             let size = CGSize(width: proxy.size.width - inset, height: min(820, proxy.size.height - inset))
             ZStack {
-                // The board blurs away behind a faint grid of its own.
-                ZStack {
-                    Rectangle().fill(.ultraThinMaterial)
-                    Theme.canvas.opacity(0.6)
-                    ZStack {
-                        CanvasGrid(strength: CanvasMode.offCanvas.gridStrength)
-                        if !reduceMotion { GridPulses() }
-                    }
-                    // Softened behind the cards, so they stand out.
-                    .blur(radius: 10)
-                }
-                .opacity(stage >= 1 ? 1 : 0)
-                .ignoresSafeArea()
+                // A blurred surface over the board, its pulses running underneath.
+                Rectangle().fill(.ultraThinMaterial)
+                    .opacity(stage >= 1 ? 1 : 0)
                 .contentShape(.rect)
                 ZStack {
                     // One list, so a card keeps its identity (and its terminal) as it flies off.
@@ -145,10 +125,9 @@ struct NeedsYouDeck: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
-            // The cards rise in once the board has blurred away.
+            // The cards come in once the board has blurred.
             .opacity(stage >= 2 ? 1 : 0)
-            .scaleEffect(stage >= 2 ? 1 : 0.92)
-            .offset(y: stage >= 2 ? 0 : 60)
+            .scaleEffect(stage >= 2 ? 1 : 0.97)
             .animation(.snappy(duration: 0.4), value: queue.isEmpty && leaving.isEmpty)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -156,7 +135,7 @@ struct NeedsYouDeck: View {
         .onAppear {
             previousResponder = NSApp.keyWindow?.firstResponder
             withAnimation(.smooth(duration: 0.45)) { stage = 1 }
-            withAnimation(.bouncy(duration: 0.6, extraBounce: 0.05).delay(0.25)) { stage = 2 }
+            withAnimation(.smooth(duration: 0.5).delay(0.2)) { stage = 2 }
         }
         .onChange(of: queue.first?.id) { old, _ in
             guard let old else { return }
@@ -382,6 +361,12 @@ private struct NeedsYouCard: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.accent)
                     .padding(.top, 6)
+                if let orchestrators = request.orchestrators {
+                    // Its orchestrator can't give this one: it waits on the developer directly.
+                    Label(L("Via \(orchestrators.joined(separator: ", "))"), systemImage: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.secondary)
+                }
             }
             .lineLimit(1)
             .truncationMode(.middle)

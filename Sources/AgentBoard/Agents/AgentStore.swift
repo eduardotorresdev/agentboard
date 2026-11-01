@@ -315,6 +315,13 @@ final class AgentStore {
         send(.updateCard(agents[index]))
     }
 
+    /// Makes the agent coordinate the ones connected to it, or stop.
+    func setOrchestrator(_ id: UUID, _ orchestrates: Bool) {
+        guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
+        agents[index].orchestrates = orchestrates
+        send(.updateCard(agents[index]))
+    }
+
     func setFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
         guard let index = agents.firstIndex(where: { $0.id == id }) else { return }
         agents[index].frame = frame

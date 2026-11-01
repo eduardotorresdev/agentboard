@@ -55,7 +55,13 @@ struct ContentView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
+            if #available(macOS 26, *) {
+                // The button is its own capsule: no toolbar glass around it.
+                ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
+                    .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
+            }
             if !boardController.isZen {
                 ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
             }

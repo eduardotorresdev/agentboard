@@ -16,9 +16,12 @@ public struct AgentRecord: Identifiable, Hashable, Codable, Sendable {
     /// The organization the card was added in; nil for cards made before organizations, which
     /// belong to the default one. Agents run signed in as it (see `OrganizationHome`).
     public var organization: UUID?
+    /// Coordinates the agents connected to it: their finished turns go to it, not to Needs you.
+    /// Nil for cards from before orchestrators, which aren't.
+    public var orchestrates: Bool?
 
     public init(id: UUID, worktree: String, providerID: String, name: String, frame: CGRect, runner: RunnerSpec? = nil,
-                organization: UUID? = nil) {
+                organization: UUID? = nil, orchestrates: Bool? = nil) {
         self.id = id
         self.worktree = worktree
         self.providerID = providerID
@@ -26,7 +29,10 @@ public struct AgentRecord: Identifiable, Hashable, Codable, Sendable {
         self.frame = frame
         self.runner = runner
         self.organization = organization
+        self.orchestrates = orchestrates
     }
+
+    public var isOrchestrator: Bool { orchestrates == true && runner == nil }
 
     /// The organization the card belongs to, with older cards in the default one.
     public var organizationID: UUID { organization ?? OrganizationHome.defaultID }

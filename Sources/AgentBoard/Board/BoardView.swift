@@ -89,8 +89,8 @@ final class BoardController {
     var leadingInset: CGFloat = 0
     /// Only the canvas and the Needs you button show: no sidebar, bars or zoom controls.
     var isZen = false
-    /// The Needs you screen covers the board: its elements and tools step away.
-    var isCovered = false
+    /// The Needs you screen covers the board: energy pulses run up its grid underneath.
+    var isCovered = false { didSet { view?.setPulsing(isCovered) } }
 }
 
 struct DeviceRequest: Identifiable {
@@ -547,7 +547,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }
             card.contentTop = content.minY - record.frame.minY
             card.titleReserve = record.runner == nil ? 0 : RunnerChromeLayout.titleReserve
-            card.update(frame: record.frame, title: record.name, state: state, focused: record.id == focusedID,
+            card.update(frame: record.frame, title: record.isOrchestrator ? L("\(record.name) · Orchestrator") : record.name, state: state, focused: record.id == focusedID,
                         closeHovered: record.id == hoveredClose, starting: record.runner == nil ? L("Starting \(record.name)…") : "",
                         message: message, scale: renderScale)
             syncRunnerChrome(record, on: card, state: state, scale: renderScale)
@@ -1858,6 +1858,36 @@ extension BoardView {
         syncLayers()
     }
 
+    fileprivate func setPulsing(_ pulsing: Bool) { grid.pulsing = pulsing }
+
+    // MARK: Card menu
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let location = world(convert(event.locationInWindow, from: nil))
+        guard let record = card(at: location), record.runner == nil else { return super.menu(for: event) }
+        let menu = NSMenu()
+        let rename = NSMenuItem(title: L("Rename"), action: #selector(renameFromMenu(_:)), keyEquivalent: "")
+        rename.representedObject = record.id
+        rename.target = self
+        menu.addItem(rename)
+        let orchestrator = NSMenuItem(title: L("Orchestrator"), action: #selector(toggleOrchestrator(_:)), keyEquivalent: "")
+        orchestrator.representedObject = record.id
+        orchestrator.target = self
+        orchestrator.state = record.isOrchestrator ? .on : .off
+        orchestrator.toolTip = L("Agents connected to it report their finished turns to it instead of to Needs you.")
+        menu.addItem(orchestrator)
+        return menu
+    }
+
+    @objc fileprivate func renameFromMenu(_ item: NSMenuItem) {
+        if let id = item.representedObject as? UUID { beginCardRename(id) }
+    }
+
+    @objc fileprivate func toggleOrchestrator(_ item: NSMenuItem) {
+        guard let id = item.representedObject as? UUID, let record = record(id) else { return }
+        store.setOrchestrator(id, !record.isOrchestrator)
+    }
+
     // MARK: Card name
 
     fileprivate func beginCardRename(_ id: UUID) {
@@ -2164,6 +2194,22 @@ private final class GridLayer: CALayer {
     private var builtSize: CGSize?
     private var builtScale: CGFloat?
     private var builtZoom: CGFloat?
+    /// A violet copy of the lines, shown only through `band`: the pulses.
+    private let pulse = CALayer()
+    private let band = CAGradientLayer()
+    /// How tall a pulse's lit band is, fading out above and below its middle.
+    private static let bandHeight: CGFloat = 320
+    /// A pulse rises every `pulsePeriod` seconds.
+    private static let pulsePeriod: CFTimeInterval = 7
+
+    /// Energy pulses rising up the lines, one every few seconds.
+    var pulsing = false {
+        didSet {
+            guard pulsing != oldValue else { return }
+            pulse.isHidden = !pulsing
+            if pulsing { animatePulse() } else { band.removeAnimation(forKey: "pulse") }
+        }
+    }
 
     func update(bounds: CGRect, pan: CGPoint, zoom: CGFloat, scale: CGFloat) {
         let period = Self.spacing * 5 * zoom
@@ -2177,11 +2223,37 @@ private final class GridLayer: CALayer {
         frame = CGRect(origin: CGPoint(x: wrap(pan.x), y: wrap(pan.y)), size: size)
     }
 
+    /// From below the bottom edge to past the top, gliding like an overdamped spring, then a
+    /// pause before the next.
+    private func animatePulse() {
+        band.removeAnimation(forKey: "pulse")
+        guard pulsing, let height = builtSize?.height else { return }
+        let rise = CASpringAnimation(keyPath: "position.y")
+        rise.fromValue = height + Self.bandHeight / 2
+        rise.toValue = -Self.bandHeight / 2
+        rise.mass = 1
+        rise.stiffness = 1.2
+        rise.damping = 2.4
+        rise.duration = Self.pulsePeriod - 1
+        let fade = CASpringAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.stiffness = 4
+        fade.damping = 4
+        fade.duration = Self.pulsePeriod - 1
+        let group = CAAnimationGroup()
+        group.animations = [rise, fade]
+        group.duration = Self.pulsePeriod
+        group.repeatCount = .infinity
+        band.add(group, forKey: "pulse")
+    }
+
     private func build(size: CGSize, zoom: CGFloat, scale: CGFloat) {
         builtSize = size
         builtScale = scale
         builtZoom = zoom
         sublayers?.forEach { $0.removeFromSuperlayer() }
+        pulse.sublayers?.forEach { $0.removeFromSuperlayer() }
         let spacing = Self.spacing * zoom
         // Major lines sit on top of minor ones; their alpha makes the overlap read as 0.09.
         let minor = BoardPalette.rgb(BoardPalette.ink, 0.05), major = BoardPalette.rgb(BoardPalette.ink, 0.042)
@@ -2200,8 +2272,29 @@ private final class GridLayer: CALayer {
                 replicator.instanceTransform = vertical ? CATransform3DMakeTranslation(step, 0, 0) : CATransform3DMakeTranslation(0, step, 0)
                 replicator.addSublayer(line)
                 addSublayer(replicator)
+                // The same lines in violet, for the pulses.
+                let lit = CALayer()
+                lit.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.8)
+                lit.frame = vertical ? CGRect(x: 0, y: 0, width: 1.5 / scale, height: size.height)
+                                     : CGRect(x: 0, y: 0, width: size.width, height: 1.5 / scale)
+                let litReplicator = CAReplicatorLayer()
+                litReplicator.frame = replicator.frame
+                litReplicator.instanceCount = replicator.instanceCount
+                litReplicator.instanceTransform = replicator.instanceTransform
+                litReplicator.addSublayer(lit)
+                pulse.addSublayer(litReplicator)
             }
         }
+        pulse.frame = CGRect(origin: .zero, size: size)
+        pulse.isHidden = !pulsing
+        let clear = BoardPalette.rgb(BoardPalette.accent, 0), solid = BoardPalette.rgb(BoardPalette.accent, 1)
+        band.colors = [clear, BoardPalette.rgb(BoardPalette.accent, 0.5), solid, BoardPalette.rgb(BoardPalette.accent, 0.5), clear]
+        band.locations = [0, 0.3, 0.5, 0.7, 1]
+        band.bounds = CGRect(x: 0, y: 0, width: size.width, height: Self.bandHeight)
+        band.position = CGPoint(x: size.width / 2, y: -Self.bandHeight)
+        pulse.mask = band
+        addSublayer(pulse)
+        animatePulse()
     }
 }
 
