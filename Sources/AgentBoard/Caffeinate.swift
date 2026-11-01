@@ -38,3 +38,35 @@ final class Caffeinate {
         }
     }
 }
+
+import SwiftUI
+
+/// Wisps of steam rising from the cup while caffeinate is on, drifting slowly like smoke.
+struct CaffeinateSteam: View {
+    var color: Color
+
+    var body: some View {
+        TimelineView(.animation) { context in
+            Canvas { canvas, size in
+                canvas.addFilter(.blur(radius: 1.2))
+                let t = context.date.timeIntervalSinceReferenceDate
+                for i in 0..<3 {
+                    let period = 2.4 + Double(i) * 0.35
+                    let phase = (t / period + Double(i) / 3).truncatingRemainder(dividingBy: 1)
+                    let rise = CGFloat(phase)
+                    let sway = CGFloat(sin(t * 1.3 + Double(i) * 2)) * 2.5 * rise
+                    let x = size.width / 2 + CGFloat(i - 1) * 3 + sway
+                    let y = size.height * (1 - rise)
+                    let radius = 1.5 + 2.5 * rise
+                    let alpha = sin(Double(rise) * .pi) * 0.55
+                    canvas.fill(
+                        Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)),
+                        with: .color(color.opacity(alpha)))
+                }
+            }
+        }
+        .frame(width: 16, height: 14)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}

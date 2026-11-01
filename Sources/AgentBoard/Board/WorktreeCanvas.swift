@@ -186,6 +186,14 @@ private struct NavigationToolbar: View {
                 Image(systemName: caffeinate.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
                     .foregroundStyle(caffeinate.isOn ? Theme.secondary : Theme.accent)
                     .contentTransition(.symbolEffect(.replace))
+                    .overlay(alignment: .top) {
+                        if caffeinate.isOn {
+                            CaffeinateSteam(color: Theme.secondary)
+                                .offset(y: -12)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.smooth, value: caffeinate.isOn)
             }
             .buttonStyle(ToolbarButtonStyle(compact: true))
             .help(caffeinate.isOn ? L("Caffeinate on: the Mac and its display stay awake. Click to let them sleep.") : L("Caffeinate: keeps the Mac and its display awake while agents work."))
