@@ -270,3 +270,10 @@
 "resets in %lldh %lldm" = "reinicia em %lldh %lldm";
 "resets in %lldm" = "reinicia em %lldm";
 "resets %@" = "reinicia %@";
+
+/* Caffeinate */
+"Caffeinate" = "Cafeína";
+"On" = "Ligado";
+"Off" = "Desligado";
+"Caffeinate: keeps the Mac and its display awake while agents work." = "Cafeína: mantém o Mac e a tela acordados enquanto os agentes trabalham.";
+"Caffeinate on: the Mac and its display stay awake. Click to let them sleep." = "Cafeína ligada: o Mac e a tela ficam acordados. Clique para deixá-los dormir.";

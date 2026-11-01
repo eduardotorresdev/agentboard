@@ -168,6 +168,7 @@ private struct CanvasToolbar: View {
 /// Zoom and navigation, floating at the bottom-right corner.
 private struct NavigationToolbar: View {
     let board: BoardController
+    private let caffeinate = Caffeinate.shared
 
     var body: some View {
         HStack(spacing: 2) {
@@ -180,6 +181,16 @@ private struct NavigationToolbar: View {
             .buttonStyle(ToolbarButtonStyle(compact: true))
             .help(board.isZen ? L("Leave zen mode: bring back the sidebar and the bars.") : L("Zen mode: hides everything but the canvas, its tools, and Needs you."))
             .accessibilityLabel(board.isZen ? L("Leave zen mode") : L("Zen mode"))
+
+            Button { caffeinate.isOn.toggle() } label: {
+                Image(systemName: caffeinate.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
+                    .foregroundStyle(caffeinate.isOn ? Theme.secondary : Theme.accent)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .buttonStyle(ToolbarButtonStyle(compact: true))
+            .help(caffeinate.isOn ? L("Caffeinate on: the Mac and its display stay awake. Click to let them sleep.") : L("Caffeinate: keeps the Mac and its display awake while agents work."))
+            .accessibilityLabel(L("Caffeinate"))
+            .accessibilityValue(caffeinate.isOn ? L("On") : L("Off"))
         }
         .font(.callout.weight(.medium))
         .padding(4)
