@@ -79,6 +79,7 @@ final class BoardController {
     func zoomOut() { view?.stepZoom(-1) }
     func resetZoom() { view?.animateZoom(to: 1) }
     func fitAgents() { view?.fitAgents() }
+    func organize() { view?.organize() }
     /// A card to frame and focus once its worktree shows on the board.
     @ObservationIgnored var pendingReveal: UUID?
     func reveal(_ id: UUID) {
@@ -244,6 +245,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }
             // Called from a SwiftUI update: publish after it.
             DispatchQueue.main.async { [weak self] in self?.publishZoom() }
+            // Cards still organizing on the worktree left land where they were going.
+            endLayoutAnimation(atTargets: true)
         }
     }
     private var pans: [String: CGPoint] = [:]
@@ -261,6 +264,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var sharpenWork: DispatchWorkItem?
     private var cameraAnimation: CameraAnimation?
     private var cameraLink: CADisplayLink?
+    /// The cards springing to where Organize put them.
+    private var layoutAnimation: LayoutAnimation?
+    private var layoutLink: CADisplayLink?
     /// Where a drag on the empty canvas started, and the pan it started from.
     private var panDrag: (start: CGPoint, origin: CGPoint)?
     private var focusedID: UUID? {
@@ -411,30 +417,53 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     // MARK: Adding
 
-    func addAgent(_ provider: any AgentProvider) {
-        let size = CGSize(width: 640, height: 420)
-        let count = store.agents(in: worktree).count
-        let cascade = CGFloat(count % 6) * 28
+    /// Where a card the user adds goes: the first free spot `BoardLayout` finds in the rows of
+    /// groups; on an empty canvas, the middle of the screen.
+    private func newCardOrigin(for size: CGSize) -> CGPoint {
+        if let origin = BoardLayout.slot(for: size, among: layoutItems, connections: worktreeConnections, aspect: screenAspect) {
+            return origin
+        }
         let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
         let top = world(CGPoint(x: 0, y: 72)).y
-        let origin = CGPoint(x: center.x - size.width / 2 + cascade,
-                             y: max(top, center.y - size.height / 2) + cascade)
-        let record = store.add(provider, to: worktree, at: origin)
+        return CGPoint(x: center.x - size.width / 2, y: max(top, center.y - size.height / 2))
+    }
+
+    /// Pans, at the current zoom, until `frame` is on screen, unless it already is.
+    private func bringIntoView(_ frame: CGRect) {
+        let inset = controller?.leadingInset ?? 0
+        let area = CGRect(x: 48 + inset, y: 48, width: bounds.width - 96 - inset, height: bounds.height - 48 - 96)
+        guard area.width > 0, area.height > 0, !area.contains(screen(frame)) else { return }
+        let zoom = cameraAnimation?.target.zoom ?? self.zoom
+        // Centered when it fits, its top-left corner in view when it doesn't.
+        let x = frame.width * zoom <= area.width ? area.midX - frame.midX * zoom : area.minX - frame.minX * zoom
+        let y = frame.height * zoom <= area.height ? area.midY - frame.midY * zoom : area.minY - frame.minY * zoom
+        animateCamera(to: Camera(zoom: zoom, pan: CGPoint(x: x, y: y)))
+    }
+
+    private var screenAspect: CGFloat {
+        bounds.height > 0 ? bounds.width / bounds.height : BoardLayout.defaultAspect
+    }
+
+    /// Every card of this worktree, as `BoardLayout` arranges it.
+    private var layoutItems: [BoardLayout.Item] {
+        let hubs = Set(store.agents(in: worktree).filter { $0.runner == nil }.map(\.id))
+        return itemFrames.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: hubs.contains($0.id)) }
+    }
+
+    func addAgent(_ provider: any AgentProvider) {
+        let record = store.add(provider, to: worktree, at: newCardOrigin(for: CGSize(width: 640, height: 420)))
         appearing.insert(record.id)
+        bringIntoView(record.frame)
         focusedID = record.id
         window?.makeFirstResponder(self)
         syncLayers()
     }
 
     func addRunner(command: String, name: String?, directory: String?) {
-        let size = AgentRecord.runnerSize
-        let count = store.runners(in: worktree).count
-        let cascade = CGFloat(count % 6) * 28
-        let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
-        let top = world(CGPoint(x: 0, y: 72)).y
-        let origin = CGPoint(x: center.x - size.width / 2 + cascade, y: max(top, center.y - size.height / 2) + cascade)
-        let record = store.addRunner(command: command, name: name, directory: directory, to: worktree, at: origin)
+        let record = store.addRunner(command: command, name: name, directory: directory, to: worktree,
+                                     at: newCardOrigin(for: AgentRecord.runnerSize))
         appearing.insert(record.id)
+        bringIntoView(record.frame)
         focusedID = record.id
         window?.makeFirstResponder(self)
         syncLayers()
@@ -443,13 +472,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     func addBrowser(_ device: BrowserDevice) {
         let scale = BrowserStore.initialScale(for: device)
         let size = BrowserStore.frame(for: device, at: .zero, scale: scale).size
-        let count = browsers.browsers(in: worktree).count
-        let cascade = CGFloat(count % 6) * 28
-        let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
-        let top = world(CGPoint(x: 0, y: 72)).y
-        let origin = CGPoint(x: center.x - size.width / 2 + cascade, y: max(top, center.y - size.height / 2) + cascade)
-        let record = browsers.add(device, to: worktree, at: origin)
+        let record = browsers.add(device, to: worktree, at: newCardOrigin(for: size))
         appearing.insert(record.id)
+        bringIntoView(record.frame)
         focusedID = record.id
         window?.makeFirstResponder(self)
         syncLayers()
@@ -457,14 +482,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     func addPostIt() {
-        let size = PostItRecord.size
-        let count = store.postIts(in: worktree).count
-        let cascade = CGFloat(count % 6) * 28
-        let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
-        let top = world(CGPoint(x: 0, y: 72)).y
-        let origin = CGPoint(x: center.x - size.width / 2 + cascade, y: max(top, center.y - size.height / 2) + cascade)
-        let record = store.addPostIt(to: worktree, at: origin)
+        let record = store.addPostIt(to: worktree, at: newCardOrigin(for: PostItRecord.size))
         appearing.insert(record.id)
+        bringIntoView(record.frame)
         focusedID = record.id
         // A new post-it opens for writing.
         postItModes[record.id] = .code
@@ -473,13 +493,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     func addFileTree() {
-        let size = FileTreeRecord.size
-        let cascade = CGFloat(fileTrees.trees(in: worktree).count % 6) * 28
-        let center = world(CGPoint(x: bounds.midX, y: bounds.midY))
-        let top = world(CGPoint(x: 0, y: 72)).y
-        let origin = CGPoint(x: center.x - size.width / 2 + cascade, y: max(top, center.y - size.height / 2) + cascade)
-        let record = fileTrees.add(to: worktree, at: origin)
+        let record = fileTrees.add(to: worktree, at: newCardOrigin(for: FileTreeRecord.size))
         appearing.insert(record.id)
+        bringIntoView(record.frame)
         focusedID = record.id
         syncLayers()
     }
@@ -906,6 +922,59 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         frame(frames.dropFirst().reduce(first) { $0.union($1) })
     }
 
+    /// Springs every card to where `BoardLayout` arranges this worktree, and the camera to
+    /// frame the result.
+    func organize() {
+        let targets = BoardLayout.organize(layoutItems, connections: worktreeConnections, aspect: screenAspect)
+        guard let first = targets.values.first else { return }
+        var animation = layoutAnimation ?? LayoutAnimation()
+        for (id, target) in targets {
+            guard let current = frame(of: id) else { continue }
+            animation.move(id, from: current.origin, to: target.origin)
+        }
+        layoutAnimation = animation
+        if layoutLink == nil {
+            let link = displayLink(target: self, selector: #selector(stepLayoutAnimation(_:)))
+            link.add(to: .main, forMode: .common)
+            layoutLink = link
+        }
+        layoutLink?.isPaused = false
+        frame(targets.values.reduce(first) { $0.union($1) })
+    }
+
+    @objc private func stepLayoutAnimation(_ link: CADisplayLink) {
+        guard var animation = layoutAnimation else {
+            link.isPaused = true
+            return
+        }
+        let now = link.targetTimestamp
+        let elapsed = animation.time.map { min(now - $0, 1.0 / 30) } ?? 1.0 / 120
+        animation.time = now
+        animation.step(by: elapsed)
+        layoutAnimation = animation
+        if animation.isSettled { return endLayoutAnimation(atTargets: true) }
+        interacted()
+        for (id, motion) in animation.motions {
+            guard let current = frame(of: id) else { continue }
+            let origin = CGPoint(x: motion.position.x.rounded(), y: motion.position.y.rounded())
+            setFrame(CGRect(origin: origin, size: current.size), for: id, persist: false)
+        }
+        syncLayers()
+    }
+
+    /// Stops the cards organizing, where they are or where they were going, and saves them there.
+    private func endLayoutAnimation(atTargets: Bool) {
+        guard let animation = layoutAnimation else { return }
+        layoutAnimation = nil
+        layoutLink?.isPaused = true
+        for (id, motion) in animation.motions {
+            guard let current = frame(of: id) else { continue }
+            let origin = atTargets ? motion.target : current.origin
+            setFrame(CGRect(origin: origin, size: current.size), for: id, persist: true)
+        }
+        syncLayers()
+    }
+
     /// Frames and focuses the card `controller.pendingReveal` names, once it is on this board.
     func revealPending() {
         guard let id = controller?.pendingReveal, let record = record(id), record.worktree == worktree else { return }
@@ -1093,6 +1162,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     override func mouseDown(with event: NSEvent) {
         interacted()
+        // Grabbing the board stops the cards organizing where they are.
+        endLayoutAnimation(atTargets: false)
         let point = convert(event.locationInWindow, from: nil)
         let location = world(point)
         window?.makeFirstResponder(self)
@@ -2269,6 +2340,52 @@ private struct CameraAnimation {
         abs(camera.zoom - target.zoom) < 0.0005 && abs(velocity.zoom) < 0.005
             && hypot(camera.pan.x - target.pan.x, camera.pan.y - target.pan.y) < 0.25
             && hypot(velocity.pan.x, velocity.pan.y) < 1
+    }
+}
+
+/// Springs driving cards toward where Organize put them, one per card, stepped once per
+/// display refresh. A touch under critical damping, so they settle with a soft overshoot.
+private struct LayoutAnimation {
+    struct Motion {
+        var position: CGPoint
+        var velocity: CGVector = .zero
+        var target: CGPoint
+    }
+
+    var motions: [UUID: Motion] = [:]
+    var time: CFTimeInterval?
+
+    private static let stiffness: CGFloat = 200
+    private static let damping: CGFloat = 0.85 * 2 * sqrt(stiffness)
+
+    /// Sends `id` toward `target`, keeping its speed if it was already moving.
+    mutating func move(_ id: UUID, from position: CGPoint, to target: CGPoint) {
+        if motions[id] != nil {
+            motions[id]?.target = target
+        } else {
+            motions[id] = Motion(position: position, target: target)
+        }
+    }
+
+    mutating func step(by elapsed: CFTimeInterval) {
+        let substeps = max(1, Int((elapsed * 480).rounded(.up)))
+        let dt = CGFloat(elapsed) / CGFloat(substeps)
+        for id in motions.keys {
+            guard var motion = motions[id] else { continue }
+            for _ in 0..<substeps {
+                motion.velocity.dx += (-Self.stiffness * (motion.position.x - motion.target.x) - Self.damping * motion.velocity.dx) * dt
+                motion.velocity.dy += (-Self.stiffness * (motion.position.y - motion.target.y) - Self.damping * motion.velocity.dy) * dt
+                motion.position.x += motion.velocity.dx * dt
+                motion.position.y += motion.velocity.dy * dt
+            }
+            motions[id] = motion
+        }
+    }
+
+    var isSettled: Bool {
+        motions.values.allSatisfy {
+            hypot($0.position.x - $0.target.x, $0.position.y - $0.target.y) < 0.5 && hypot($0.velocity.dx, $0.velocity.dy) < 2
+        }
     }
 }
 

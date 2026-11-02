@@ -60,17 +60,15 @@ final class BrowserTools {
         }
     }
 
-    /// Right of the agent's card, below other cards in the way.
+    /// In the column right of the agent's card, below the cards in the way (see `BoardLayout`).
     private func origin(near agent: AgentRecord, device: BrowserDevice) -> CGPoint {
         let size = BrowserStore.frame(for: device, at: .zero, scale: BrowserStore.initialScale(for: device)).size
-        var frame = CGRect(origin: CGPoint(x: agent.frame.maxX + 64, y: agent.frame.minY), size: size)
-        var others: [CGRect] = agents.agents.filter { $0.worktree == agent.worktree }.map(\.frame)
-        others += agents.postIts.filter { $0.worktree == agent.worktree }.map(\.frame)
-        others += store.browsers.filter { $0.worktree == agent.worktree }.map(\.frame)
-        for _ in 0..<12 where others.contains(where: { $0.insetBy(dx: -16, dy: -16).intersects(frame) }) {
-            frame.origin.y += frame.height + 32
-        }
-        return frame.origin
+        let worktree = agent.worktree
+        let items = agents.agents.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: $0.runner == nil) }
+            + agents.postIts.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
+            + store.browsers.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
+        return BoardLayout.slot(for: size, parent: agent.id, among: items, connections: agents.connections)
+            ?? CGPoint(x: agent.frame.maxX + BoardLayout.columnGap, y: agent.frame.minY)
     }
 
     /// The browsers connected to `caller`, in connection order.

@@ -63,14 +63,18 @@ extension Orchestrator {
         origin(near: caller, size: AgentRecord.runnerSize)
     }
 
-    /// Where a card of `size` an agent adds goes: right of its card, below other cards in the way.
+    /// Where a card of `size` an agent adds goes, connected to it: in the column right of its
+    /// card, below the cards in the way (see `BoardLayout`).
     func origin(near caller: AgentRecord, size: CGSize) -> CGPoint {
-        var frame = CGRect(origin: CGPoint(x: caller.frame.maxX + 64, y: caller.frame.minY), size: size)
-        let others = frames(in: caller.worktree)
-        for _ in 0..<12 where others.contains(where: { $0.insetBy(dx: -16, dy: -16).intersects(frame) }) {
-            frame.origin.y += frame.height + 32
-        }
-        return frame.origin
+        BoardLayout.slot(for: size, parent: caller.id, among: layoutItems(in: caller.worktree), connections: bus.graph.connections)
+            ?? CGPoint(x: caller.frame.maxX + BoardLayout.columnGap, y: caller.frame.minY)
+    }
+
+    /// Everything on `worktree`'s canvas, as `BoardLayout` arranges it.
+    func layoutItems(in worktree: String) -> [BoardLayout.Item] {
+        cards(in: worktree).map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: $0.runner == nil) }
+            + postIts.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
+            + elementFrames(in: worktree).map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
     }
 
     /// The addresses a runner serves, in port order: `localhost`, then the network address

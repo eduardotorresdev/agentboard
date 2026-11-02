@@ -62,6 +62,8 @@
 "No agents yet" = "Nenhum agente ainda";
 "Add an agent from the bar below. It starts in this worktree's folder." = "Adicione um agente pela barra abaixo. Ele começa na pasta desta worktree.";
 "Fits every agent on screen." = "Enquadra todos os agentes na tela.";
+"Organize: lays each agent out with what it's connected to on its right, and packs the groups in rows." = "Organizar: põe à direita de cada agente o que está conectado a ele e arruma os grupos em linhas.";
+"Organize" = "Organizar";
 "Zoom out (⌘−)" = "Diminuir zoom (⌘−)";
 "Zoom in (⌘+)" = "Aumentar zoom (⌘+)";
 "Back to actual size (⌘0)" = "Voltar ao tamanho real (⌘0)";

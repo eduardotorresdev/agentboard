@@ -212,6 +212,13 @@ private struct NavigationToolbar: View {
             .buttonStyle(ToolbarButtonStyle(compact: true))
             .help(L("Fits every agent on screen."))
 
+            Button(action: board.organize) {
+                Image(systemName: "square.grid.2x2")
+            }
+            .buttonStyle(ToolbarButtonStyle(compact: true))
+            .help(L("Organize: lays each agent out with what it's connected to on its right, and packs the groups in rows."))
+            .accessibilityLabel(L("Organize"))
+
             Button(action: board.zoomOut) {
                 Image(systemName: "minus")
             }

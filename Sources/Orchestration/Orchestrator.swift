@@ -145,10 +145,9 @@ public final class Orchestrator: CoreService {
 
     func cards(in worktree: String) -> [AgentRecord] { cards.filter { $0.worktree == worktree } }
 
-    /// The frames of everything on `worktree`'s canvas: cards, post-its and the boards' other elements.
-    func frames(in worktree: String) -> [CGRect] {
-        cards(in: worktree).map(\.frame) + postIts.filter { $0.worktree == worktree }.map(\.frame)
-            + elements.values.filter { $0.worktree == worktree }.map(\.frame)
+    /// The boards' other elements on `worktree` (browsers, file trees).
+    func elementFrames(in worktree: String) -> [(id: UUID, frame: CGRect)] {
+        elements.values.filter { $0.worktree == worktree }.map { ($0.id, $0.frame) }
     }
 
     func postIt(_ id: UUID) -> PostItRecord? { postIts.first { $0.id == id } }
