@@ -208,10 +208,18 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     fileprivate var postItEditor: PostItEditor?
     fileprivate var editingPostIt: UUID?
     private var links: [UUID: LinkLayer] = [:]
-    private let router = ConnectorRouter()
+    /// The lines hang as ropes between the handles they were drawn to; `routes` is where each
+    /// one is now, for finding the line under the pointer and sending messages along it.
+    private var ropes: [UUID: Rope] = [:]
     private var routes: [UUID: Route] = [:]
-    /// What `routes` were laid out for; lines are rerouted only when it changes.
-    private var routedFor: RouteInput?
+    /// The handles picked for lines made without them (by an agent), so their ends stay put.
+    private var chosenSides: [UUID: (Side, Side)] = [:]
+    /// The rope following the pointer while a line is drawn.
+    private var previewRope: Rope?
+    /// Steps the ropes while any of them swings; paused once they all hang still.
+    private var ropeLink: CADisplayLink?
+    private var ropeClock: CFTimeInterval?
+    private var linkScale: CGFloat = 2
     /// Cards whose terminal must be redrawn on the next display refresh.
     private var dirty: Set<UUID> = []
     /// Sessions told they are on screen.
@@ -278,17 +286,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private struct LinkDrag {
         let from: UUID
         let side: Side
-        let start: CGPoint
         /// The pointer, or the handle it snapped to.
         var point: CGPoint
         var target: UUID?
-        /// The target's handle the end snapped to; nil lets the router pick the side.
+        /// The target's handle the end is tied to.
         var targetSide: Side?
-    }
-
-    private struct RouteInput: Equatable {
-        let frames: [UUID: CGRect]
-        let connections: [Connection]
     }
 
     private struct Interaction {
@@ -363,6 +365,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         cameraLink?.invalidate()
         cameraLink = nil
         cameraAnimation = nil
+        ropeLink?.invalidate()
+        ropeLink = nil
+        ropeClock = nil
         guard let window else { return releaseTerminals() }
         NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged),
                                                name: NSWindow.didChangeOcclusionStateNotification, object: window)
@@ -630,48 +635,116 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree).map(\.id)).union(fileTrees.trees(in: worktree).map(\.id)))
     }
 
-    /// Lays out the lines between this worktree's cards (rerouting only when cards or lines
-    /// changed) and the one being drawn.
+    /// Ties each line of this worktree to its cards' handles, and the one being drawn to the
+    /// pointer; ropes whose ends moved swing until they hang still again.
     private func syncLinks(scale: CGFloat) {
+        linkScale = scale
         let connections = worktreeConnections
-        let input = RouteInput(frames: Dictionary(uniqueKeysWithValues: itemFrames.map { ($0.id, $0.frame) }), connections: connections)
-        if input != routedFor {
-            routes = router.route(connections, around: input.frames)
-            routedFor = input
-        }
+        let frames = Dictionary(itemFrames.map { ($0.id, $0.frame) }, uniquingKeysWith: { first, _ in first })
         let ids = Set(connections.map(\.id))
         for (id, link) in links where !ids.contains(id) {
             link.removeFromSuperlayer()
             links[id] = nil
         }
+        ropes = ropes.filter { ids.contains($0.key) }
+        routes = routes.filter { ids.contains($0.key) }
         if let hoveredLink, !ids.contains(hoveredLink) { self.hoveredLink = nil }
         for connection in connections {
-            guard let route = routes[connection.id] else { continue }
-            let link = links[connection.id] ?? {
+            guard let (a, b) = anchors(of: connection, in: frames) else { continue }
+            // Lines already there when the board opens hang at rest; drawn ones keep their swing.
+            var rope = ropes[connection.id] ?? .resting(from: a, to: b)
+            rope.tie(a, b)
+            ropes[connection.id] = rope
+            if links[connection.id] == nil {
                 let link = LinkLayer()
                 links[connection.id] = link
                 linksLayer.addSublayer(link)
-                return link
-            }()
-            link.update(route: route, hovered: connection.id == hoveredLink, scale: scale)
-        }
-
-        linkPreview.contentsScale = scale
-        if let linkDrag {
-            // The line being drawn is routed like a real one, after the others so they stay put:
-            // what shows is where it lands.
-            let route: Route? = if let target = linkDrag.target {
-                { pending in router.route(connections + [pending], around: input.frames)[pending.id] }(
-                    Connection(a: linkDrag.from, b: target, aSide: linkDrag.side, bSide: linkDrag.targetSide))
-            } else {
-                router.sketch(connections, around: input.frames, from: linkDrag.from, side: linkDrag.side, to: linkDrag.point)
             }
-            linkPreview.path = LinkLayer.path(route?.points ?? [linkDrag.start, linkDrag.point])
+        }
+        if let linkDrag, let frame = frames[linkDrag.from] {
+            let from = Self.anchor(frame, linkDrag.side)
+            let to = if let target = linkDrag.target, let side = linkDrag.targetSide, let frame = frames[target] {
+                Self.anchor(frame, side)
+            } else {
+                RopeAnchor(point: linkDrag.point)
+            }
+            var rope = previewRope ?? Rope(from: from, to: RopeAnchor(point: from.point))
+            rope.tie(from, to)
+            previewRope = rope
+        } else {
+            previewRope = nil
+        }
+        drawLinks()
+        if ropes.values.contains(where: { !$0.isSettled }) || previewRope.map({ !$0.isSettled }) == true { startRopes() }
+    }
+
+    /// Where a line meets a card on `side`: that side's handle, leaving straight out of it.
+    private static func anchor(_ frame: CGRect, _ side: Side) -> RopeAnchor {
+        RopeAnchor(point: CardMetrics.handles(of: frame)[side.rawValue], side: side)
+    }
+
+    /// The handles a line is tied to: the ones it was drawn between; for a line made without
+    /// them, the closest pair, picked once.
+    private func anchors(of connection: Connection, in frames: [UUID: CGRect]) -> (RopeAnchor, RopeAnchor)? {
+        guard let a = frames[connection.a], let b = frames[connection.b] else { return nil }
+        if let aSide = connection.aSide, let bSide = connection.bSide { return (Self.anchor(a, aSide), Self.anchor(b, bSide)) }
+        let sides = chosenSides[connection.id] ?? {
+            var best: (Side, Side, CGFloat)?
+            for aSide in connection.aSide.map({ [$0] }) ?? Side.allCases {
+                for bSide in connection.bSide.map({ [$0] }) ?? Side.allCases {
+                    let p = CardMetrics.handles(of: a)[aSide.rawValue], q = CardMetrics.handles(of: b)[bSide.rawValue]
+                    let distance = hypot(q.x - p.x, q.y - p.y)
+                    if distance < best?.2 ?? .infinity { best = (aSide, bSide, distance) }
+                }
+            }
+            let sides = best.map { ($0.0, $0.1) } ?? (.right, .left)
+            chosenSides[connection.id] = sides
+            return sides
+        }()
+        return (Self.anchor(a, sides.0), Self.anchor(b, sides.1))
+    }
+
+    /// Puts every line, and the one being drawn, where its rope is now.
+    private func drawLinks() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        for (id, rope) in ropes {
+            let route = rope.route
+            routes[id] = route
+            links[id]?.update(route: route, hovered: id == hoveredLink, scale: linkScale)
+        }
+        linkPreview.contentsScale = linkScale
+        if let previewRope, let linkDrag {
+            linkPreview.path = LinkLayer.path(previewRope.points)
             linkPreview.lineDashPattern = linkDrag.target == nil ? [5, 5] : nil
             linkPreview.strokeColor = BoardPalette.rgb(BoardPalette.accent, linkDrag.target == nil ? 0.7 : 0.95)
             linkPreview.isHidden = false
         } else {
             linkPreview.isHidden = true
+        }
+    }
+
+    private func startRopes() {
+        if ropeLink == nil, window != nil {
+            let link = displayLink(target: self, selector: #selector(stepRopes(_:)))
+            link.add(to: .main, forMode: .common)
+            ropeLink = link
+        }
+        if ropeLink?.isPaused != false { ropeClock = nil }
+        ropeLink?.isPaused = false
+    }
+
+    @objc private func stepRopes(_ link: CADisplayLink) {
+        let now = link.targetTimestamp
+        let elapsed = CGFloat(ropeClock.map { now - $0 } ?? 1.0 / 120)
+        ropeClock = now
+        for id in Array(ropes.keys) { ropes[id]?.advance(by: elapsed) }
+        previewRope?.advance(by: elapsed)
+        drawLinks()
+        if ropes.values.allSatisfy(\.isSettled), previewRope?.isSettled ?? true {
+            link.isPaused = true
+            ropeClock = nil
         }
     }
 
@@ -1027,11 +1100,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             // Clicking a card ends the box selection.
             selection = []
         }
-        if let hoveredCard, let (id, index) = handle(at: location), id == hoveredCard,
-           let frame = frame(of: id) {
+        if let hoveredCard, let (id, index) = handle(at: location), id == hoveredCard {
             // Drawing a line from this card.
-            let start = CardMetrics.handles(of: frame)[index]
-            linkDrag = LinkDrag(from: id, side: Side(rawValue: index) ?? .right, start: start, point: location)
+            linkDrag = LinkDrag(from: id, side: Side(rawValue: index) ?? .right, point: location)
             NSCursor.crosshair.push()
             syncLayers()
             return
@@ -1138,10 +1209,23 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }
         if var drag = linkDrag {
             let location = world(point)
-            let snap = snapHandle(near: location, excluding: drag.from)
-            drag.point = snap?.point ?? location
-            drag.target = snap?.card ?? item(at: location).flatMap { $0 == drag.from ? nil : $0 }
-            drag.targetSide = snap?.side
+            if let snap = snapHandle(near: location, excluding: drag.from) {
+                drag.point = snap.point
+                drag.target = snap.card
+                drag.targetSide = snap.side
+            } else if let target = item(at: location), target != drag.from, let frame = frame(of: target) {
+                // Over a card: the line goes to its handle nearest the pointer, and stays there.
+                let handles = CardMetrics.handles(of: frame)
+                let index = handles.indices.min { hypot(handles[$0].x - location.x, handles[$0].y - location.y)
+                    < hypot(handles[$1].x - location.x, handles[$1].y - location.y) } ?? 0
+                drag.point = handles[index]
+                drag.target = target
+                drag.targetSide = Side(rawValue: index)
+            } else {
+                drag.point = location
+                drag.target = nil
+                drag.targetSide = nil
+            }
             linkDrag = drag
             return syncLayers()
         }
@@ -1185,9 +1269,14 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return syncLayers()
         }
         if let drag = linkDrag {
+            let drawn = previewRope
             linkDrag = nil
+            previewRope = nil
             NSCursor.pop()
-            if let target = drag.target { store.connect(drag.from, target, sides: (drag.side, drag.targetSide)) }
+            // The new line keeps the rope that was drawn, swing and all.
+            if let target = drag.target, let connection = store.connect(drag.from, target, sides: (drag.side, drag.targetSide)) {
+                ropes[connection.id] = drawn
+            }
             return syncLayers()
         }
         guard let interaction, let frame = frame(of: interaction.id) else { return }
@@ -2545,15 +2634,14 @@ private final class CardLayer: CALayer {
     }
 }
 
-/// One line between two cards, in world coordinates: the routed path with rounded bends, a dot
-/// where it meets each card, and, while hovered, a knob in the middle that removes it.
+/// One line between two cards, in world coordinates: the rope as a smooth curve, a dot where it
+/// meets each card, and, while hovered, a knob in the middle that removes it.
 private final class LinkLayer: CALayer {
     private let line = CAShapeLayer()
     private let ends = CAShapeLayer()
     private let knob = CALayer()
     private let knobGlyph = CATextLayer()
     private var route: Route?
-    private static let bendRadius: CGFloat = 10
     private static let knobSize: CGFloat = 20
 
     override init() {
@@ -2632,16 +2720,20 @@ private final class LinkLayer: CALayer {
         CATransaction.commit()
     }
 
+    /// A smooth curve through `points` (Catmull-Rom, as cubic Béziers).
     static func path(_ points: [CGPoint]) -> CGPath {
         let path = CGMutablePath()
         guard let first = points.first else { return path }
         path.move(to: first)
-        for index in points.indices.dropFirst().dropLast() {
-            let (before, corner, after) = (points[index - 1], points[index], points[index + 1])
-            let room = min(hypot(corner.x - before.x, corner.y - before.y), hypot(after.x - corner.x, after.y - corner.y)) / 2
-            path.addArc(tangent1End: corner, tangent2End: after, radius: min(bendRadius, room))
+        guard points.count > 2 else {
+            points.dropFirst().forEach { path.addLine(to: $0) }
+            return path
         }
-        if let last = points.last { path.addLine(to: last) }
+        for index in 0..<points.count - 1 {
+            let p0 = points[max(index - 1, 0)], p1 = points[index], p2 = points[index + 1], p3 = points[min(index + 2, points.count - 1)]
+            path.addCurve(to: p2, control1: CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6),
+                          control2: CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6))
+        }
         return path
     }
 }

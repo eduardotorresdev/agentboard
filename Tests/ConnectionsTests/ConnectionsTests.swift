@@ -321,120 +321,55 @@ struct ToolServerTests {
     }
 }
 
-struct ConnectorRouterTests {
-    private let router = ConnectorRouter()
+struct RopeTests {
+    private let left = RopeAnchor(point: CGPoint(x: 300, y: 100), side: .right)
+    private let right = RopeAnchor(point: CGPoint(x: 700, y: 100), side: .left)
 
-    private typealias Segment = (CGPoint, CGPoint)
-
-    private func segments(_ route: Route) -> [Segment] {
-        Array(zip(route.points, route.points.dropFirst()))
+    /// The rope's ends stay exactly on the handles it was tied to, wherever they move.
+    @Test func endsStayOnTheirAnchors() {
+        var rope = Rope(from: left, to: right)
+        let moved = RopeAnchor(point: CGPoint(x: 650, y: 400), side: .top)
+        rope.tie(left, moved)
+        for _ in 0..<240 { rope.advance(by: 1.0 / 60) }
+        #expect(rope.points.first == left.point)
+        #expect(rope.points.last == moved.point)
     }
 
-    /// Length two axis-aligned segments run along each other.
-    private func overlap(_ s: Segment, _ t: Segment) -> CGFloat {
-        let sHorizontal = s.0.y == s.1.y, tHorizontal = t.0.y == t.1.y
-        guard sHorizontal == tHorizontal else { return 0 }
-        if sHorizontal {
-            guard s.0.y == t.0.y else { return 0 }
-            return min(max(s.0.x, s.1.x), max(t.0.x, t.1.x)) - max(min(s.0.x, s.1.x), min(t.0.x, t.1.x))
-        }
-        guard s.0.x == t.0.x else { return 0 }
-        return min(max(s.0.y, s.1.y), max(t.0.y, t.1.y)) - max(min(s.0.y, s.1.y), min(t.0.y, t.1.y))
+    /// Between level ends the rope sags below them, lowest near the middle.
+    @Test func hangsUnderGravity() {
+        let rope = Rope.resting(from: left, to: right)
+        let lowest = rope.points.max { $0.y < $1.y }!
+        #expect(lowest.y > left.point.y + 20)
+        #expect(abs(lowest.x - 500) < 60)
     }
 
-    /// Whether a horizontal and a vertical segment cross (ends touching counts).
-    private func cross(_ s: Segment, _ t: Segment) -> Bool {
-        let (h, v) = s.0.y == s.1.y ? (s, t) : (t, s)
-        guard h.0.y == h.1.y, v.0.x == v.1.x, h.0 != h.1, v.0 != v.1 else { return false }
-        return (min(h.0.x, h.1.x)...max(h.0.x, h.1.x)).contains(v.0.x) && (min(v.0.y, v.1.y)...max(v.0.y, v.1.y)).contains(h.0.y)
+    /// Near a card the rope leaves straight out of the side it is plugged into.
+    @Test func leavesStraightOutOfItsSide() {
+        let top = RopeAnchor(point: CGPoint(x: 300, y: 100), side: .top)
+        let rope = Rope.resting(from: top, to: right)
+        #expect(rope.points[1].y < top.point.y)
+        #expect(abs(rope.points[1].x - top.point.x) < 2)
     }
 
-    private func onEdge(_ point: CGPoint, of rect: CGRect) -> Bool {
-        rect.insetBy(dx: -0.5, dy: -0.5).contains(point) && !rect.insetBy(dx: 0.5, dy: 0.5).contains(point)
+    /// Left alone, a swinging rope comes to rest; moving an end wakes it.
+    @Test func comesToRestAndWakesWhenAnEndMoves() {
+        var rope = Rope(from: left, to: right)
+        for _ in 0..<1200 where !rope.isSettled { rope.advance(by: 1.0 / 60) }
+        #expect(rope.isSettled)
+        rope.tie(left, RopeAnchor(point: CGPoint(x: 720, y: 140), side: .left))
+        #expect(!rope.isSettled)
+        let before = rope.points
+        rope.advance(by: 1.0 / 60)
+        #expect(rope.points != before)
     }
 
-    /// Every invariant the board relies on: straight segments, ends on the right cards, no line
-    /// through a card, and no two lines along each other, across each other or sharing an end.
-    private func check(_ connections: [Connection], _ cards: [UUID: CGRect]) {
-        let routes = router.route(connections, around: cards)
-        #expect(routes.count == connections.count)
-        for connection in connections {
-            guard let route = routes[connection.id], let first = route.points.first, let last = route.points.last else {
-                Issue.record("missing route")
-                continue
-            }
-            #expect(onEdge(first, of: cards[connection.a]!))
-            #expect(onEdge(last, of: cards[connection.b]!))
-            for segment in segments(route) {
-                #expect(segment.0.x == segment.1.x || segment.0.y == segment.1.y, "segments are horizontal or vertical")
-                let middle = CGPoint(x: (segment.0.x + segment.1.x) / 2, y: (segment.0.y + segment.1.y) / 2)
-                for card in cards.values {
-                    #expect(!card.insetBy(dx: 1, dy: 1).contains(middle), "no line runs through a card")
-                }
-            }
-        }
-        let all = connections.compactMap { routes[$0.id] }
-        for (i, route) in all.enumerated() {
-            for other in all[(i + 1)...] {
-                for s in segments(route) {
-                    for t in segments(other) {
-                        #expect(overlap(s, t) <= 0, "lines never run along each other")
-                        #expect(!cross(s, t), "lines never cross")
-                    }
-                }
-                for end in [route.points.first, route.points.last] {
-                    #expect(end != other.points.first && end != other.points.last, "lines never share an end")
-                }
-            }
-        }
-    }
-
-    @Test func goesAroundACardInTheWay() {
-        let (a, middle, b) = (UUID(), UUID(), UUID())
-        let cards = [a: CGRect(x: 0, y: 0, width: 300, height: 200),
-                     middle: CGRect(x: 400, y: -100, width: 300, height: 400),
-                     b: CGRect(x: 800, y: 0, width: 300, height: 200)]
-        check([Connection(a: a, b: b)], cards)
-    }
-
-    @Test func manyLinesBetweenFewCardsNeverOverlap() {
-        let ids = (0..<4).map { _ in UUID() }
-        let cards = Dictionary(uniqueKeysWithValues: ids.enumerated().map { index, id in
-            (id, CGRect(x: CGFloat(index % 2) * 760, y: CGFloat(index / 2) * 540, width: 640, height: 420))
-        })
-        var connections: [Connection] = []
-        for i in ids.indices { for j in ids.indices where j > i { connections.append(Connection(a: ids[i], b: ids[j])) } }
-        check(connections, cards)
-    }
-
-    @Test func keepsToTheSidesTheUserPicked() {
-        let (a, b) = (UUID(), UUID())
-        let cards = [a: CGRect(x: 0, y: 0, width: 300, height: 200), b: CGRect(x: 500, y: 0, width: 300, height: 200)]
-        let connection = Connection(a: a, b: b, aSide: .bottom, bSide: .top)
-        check([connection], cards)
-        let points = router.route([connection], around: cards)[connection.id]?.points ?? []
-        #expect(points.first?.y == 200, "leaves from a's bottom")
-        #expect(points.last?.y == 0, "arrives at b's top")
-    }
-
-    @Test func sketchReachesThePointerAroundExistingLines() {
-        let (a, b) = (UUID(), UUID())
-        let cards = [a: CGRect(x: 0, y: 0, width: 300, height: 200), b: CGRect(x: 500, y: 0, width: 300, height: 200)]
-        let existing = Connection(a: a, b: b)
-        let sketch = router.sketch([existing], around: cards, from: a, side: .bottom, to: CGPoint(x: 150, y: 400))
-        let points = sketch?.points ?? []
-        #expect(points.first?.y == 200)
-        #expect(points.last.map { hypot($0.x - 150, $0.y - 400) <= 12 } == true)
-        #expect(router.sketch([], around: cards, from: a, side: .right, to: CGPoint(x: 100, y: 100)) == nil, "inside a card")
-    }
-
-    @Test func cardsSideBySideGetAStraightLine() {
-        let (a, b) = (UUID(), UUID())
-        let connection = Connection(a: a, b: b)
-        let routes = router.route([connection], around: [a: CGRect(x: 0, y: 0, width: 300, height: 200),
-                                                         b: CGRect(x: 500, y: 0, width: 300, height: 200)])
-        let points = routes[connection.id]?.points ?? []
-        #expect(points.count == 2)
-        #expect(points.first?.x == 300 && points.last?.x == 500)
+    /// Pulled apart, the rope grows to keep a little slack instead of staying taut.
+    @Test func growsWithItsEnds() {
+        var rope = Rope.resting(from: left, to: right)
+        let far = RopeAnchor(point: CGPoint(x: 1300, y: 100), side: .left)
+        rope.tie(left, far)
+        for _ in 0..<1200 where !rope.isSettled { rope.advance(by: 1.0 / 60) }
+        #expect(rope.route.length > 1000)
+        #expect(rope.points.contains { $0.y > 140 })
     }
 }
