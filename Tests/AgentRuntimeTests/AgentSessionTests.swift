@@ -68,7 +68,9 @@ struct AgentSessionTests {
     /// rather than an exit, and runs the completion afterwards.
     @Test func terminateStopsTheWholeGroup() async throws {
         let marker = "agentboard-terminate-\(UUID().uuidString.prefix(8))"
-        let session = try await run("sleep 30 & sleep 31 & echo started; wait # \(marker)", observed: false, until: .running)
+        // `wait` in a loop: bash's lone `wait` sometimes returns when the sleeps die from the
+        // signal and exits 0 before handling its own SIGTERM.
+        let session = try await run("sleep 30 & sleep 31 & echo started; while :; do wait; done # \(marker)", observed: false, until: .running)
         let pid = try #require(session.processID)
         var deadline = Date().addingTimeInterval(5)
         while childCount(of: pid) < 2, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
