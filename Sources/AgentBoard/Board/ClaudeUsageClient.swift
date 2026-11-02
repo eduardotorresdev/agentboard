@@ -45,30 +45,36 @@ enum ClaudeUsageClient {
     /// The freshest unexpired token among Claude Code's credential entries (one per config folder).
     private static func token() -> String? {
         let now = Date().timeIntervalSince1970 * 1000
-        return accounts()
+        return entries()
             .compactMap(credentials)
             .filter { $0.expiresAt > now }
             .max { $0.expiresAt < $1.expiresAt }?
             .token
     }
 
-    /// Names of the keychain entries Claude Code wrote; reading attributes alone never prompts.
-    private static func accounts() -> [String] {
+    /// The keychain entries Claude Code wrote, by service and account: one service can hold
+    /// several accounts (an old login's entry beside the current one), and asking by service
+    /// alone answers with whichever comes first. Reading attributes alone never prompts.
+    private static func entries() -> [(service: String, account: String?)] {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecMatchLimit as String: kSecMatchLimitAll,
                                     kSecReturnAttributes as String: true]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let items = result as? [[String: Any]] else {
-            return [service]
+            return [(service, nil)]
         }
-        let services = items.compactMap { $0[kSecAttrService as String] as? String }.filter { $0.hasPrefix(service) }
-        return Array(Set(services))
+        var seen: Set<String> = []
+        return items.compactMap { item -> (service: String, account: String?)? in
+            guard let name = item[kSecAttrService as String] as? String, name.hasPrefix(service) else { return nil }
+            let account = item[kSecAttrAccount as String] as? String
+            return seen.insert(name + "\u{0}" + (account ?? "")).inserted ? (name, account) : nil
+        }
     }
 
     /// Read through `security`, the tool Claude Code stores them with, so the keychain doesn't ask.
-    private static func credentials(service: String) -> (token: String, expiresAt: Double)? {
+    private static func credentials(_ entry: (service: String, account: String?)) -> (token: String, expiresAt: Double)? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        process.arguments = ["find-generic-password", "-s", service, "-w"]
+        process.arguments = ["find-generic-password", "-s", entry.service] + (entry.account.map { ["-a", $0] } ?? []) + ["-w"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
