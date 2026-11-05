@@ -249,15 +249,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             endLayoutAnimation(atTargets: true)
         }
     }
-    private var pans: [String: CGPoint] = [:]
+    /// Each worktree's camera, kept across rebuilds of the board and relaunches.
+    private let cameras = CameraMemory()
     private var pan: CGPoint {
-        get { pans[worktree] ?? .zero }
-        set { pans[worktree] = newValue }
+        get { cameras[worktree]?.pan ?? .zero }
+        set { cameras[worktree] = Camera(zoom: zoom, pan: newValue) }
     }
-    private var zooms: [String: CGFloat] = [:]
     private var zoom: CGFloat {
-        get { zooms[worktree] ?? 1 }
-        set { zooms[worktree] = newValue }
+        get { cameras[worktree]?.zoom ?? 1 }
+        set { cameras[worktree] = Camera(zoom: newValue, pan: pan) }
     }
     /// The zoom terminals and card text are rasterized for. Trails `zoom` while it changes.
     private var renderZoom: CGFloat = 1
@@ -2302,6 +2302,42 @@ private final class ProfileChoice {
 }
 
 /// What the board shows: world points map to the view as `world × zoom + pan`.
+/// Where the board looked in each worktree, saved in the user defaults shortly after it moves.
+@MainActor
+private final class CameraMemory {
+    private static let key = "boardCameras"
+    private var cameras: [String: Camera]
+    private var saveWork: DispatchWorkItem?
+
+    init() {
+        let stored = UserDefaults.standard.dictionary(forKey: Self.key) as? [String: [Double]] ?? [:]
+        cameras = stored.compactMapValues { values in
+            values.count == 3 ? Camera(zoom: values[0], pan: CGPoint(x: values[1], y: values[2])) : nil
+        }
+    }
+
+    subscript(worktree: String) -> Camera? {
+        get { cameras[worktree] }
+        set {
+            guard cameras[worktree] != newValue else { return }
+            cameras[worktree] = newValue
+            scheduleSave()
+        }
+    }
+
+    private func scheduleSave() {
+        saveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.save() }
+        saveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    private func save() {
+        let stored = cameras.mapValues { [Double($0.zoom), Double($0.pan.x), Double($0.pan.y)] }
+        UserDefaults.standard.set(stored, forKey: Self.key)
+    }
+}
+
 private struct Camera: Equatable {
     var zoom: CGFloat
     var pan: CGPoint
