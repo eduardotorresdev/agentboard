@@ -8,13 +8,21 @@ struct WorktreeSelection: Hashable {
     let worktree: Worktree
 }
 
-/// The worktree open on the canvas, kept per data folder so another instance keeps its own.
+/// The worktree open on the canvas in each organization, kept per data folder so another
+/// instance keeps its own.
 enum OpenWorktree {
-    private static var key: String { "openWorktree:" + DataFolder.url.path }
+    private static func key(_ organization: UUID) -> String {
+        "openWorktree:" + DataFolder.url.path + ":" + organization.uuidString
+    }
+    /// Before organizations kept their own.
+    private static var legacyKey: String { "openWorktree:" + DataFolder.url.path }
 
-    static var path: String? {
-        get { UserDefaults.standard.string(forKey: key) }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
+    static func path(in organization: UUID) -> String? {
+        UserDefaults.standard.string(forKey: key(organization)) ?? UserDefaults.standard.string(forKey: legacyKey)
+    }
+
+    static func set(_ path: String, in organization: UUID) {
+        UserDefaults.standard.set(path, forKey: key(organization))
     }
 }
 
@@ -71,11 +79,13 @@ struct ContentView: View {
             if old != id {
                 selection = nil
                 withAnimation(.snappy(duration: 0.3)) { isNeedsYouOpen = false }
+                // Back where the developer left this organization.
+                restoreSelection()
             }
         }
         .onAppear(perform: restoreSelection)
         .onChange(of: selection) { _, selection in
-            OpenWorktree.path = selection?.worktree.path
+            if let path = selection?.worktree.path { OpenWorktree.set(path, in: store.organizationID) }
             dismissAttentionOnScreen()
         }
         .onChange(of: agents.attention) { dismissAttentionOnScreen() }
@@ -173,9 +183,9 @@ struct ContentView: View {
         select(project)
     }
 
-    /// Reopens the worktree that was open when the board last ran, as after a rebuild.
+    /// Reopens the worktree last open in this organization, as after a rebuild or a switch.
     private func restoreSelection() {
-        guard selection == nil, let path = OpenWorktree.path else { return }
+        guard selection == nil, let path = OpenWorktree.path(in: store.organizationID) else { return }
         for project in store.projects {
             if let worktree = store.worktrees[project.id]?.first(where: { $0.path == path }) {
                 selection = WorktreeSelection(projectID: project.id, worktree: worktree)
