@@ -55,6 +55,7 @@ final class AgentStore {
     @ObservationIgnored private var replacedCore = false
     /// Runs the browser tools agents call through the core.
     @ObservationIgnored var browserTools: BrowserTools?
+    @ObservationIgnored var projectTools: ProjectTools?
     /// Where the board's other elements come from (browsers, file trees), by family; the core
     /// keeps lines to them.
     @ObservationIgnored var elementSources: [String: () -> [ElementInfo]] = [:]
@@ -209,9 +210,11 @@ final class AgentStore {
         case .toolCall(let call, let name, let arguments, let caller):
             let parsed = (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]
             Task {
-                let result = await browserTools?.call(name, arguments: parsed, caller: caller)
-                    ?? .error("This board can't run “\(name)”.")
-                link.send(.toolResult(call: call, result: WireToolResult(result)))
+                let result: ToolResult? = name.hasPrefix("project_")
+                    ? await projectTools?.call(name, arguments: parsed, caller: caller)
+                    : await browserTools?.call(name, arguments: parsed, caller: caller)
+                link.send(.toolResult(call: call, result: WireToolResult(result
+                    ?? .error("This board can't run “\(name)”."))))
             }
         }
     }

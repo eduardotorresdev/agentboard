@@ -19,6 +19,7 @@ struct AgentBoardApp: App {
         let fileTrees = FileTreeStore(database: store.database)
         fileTrees.attach(to: agents)
         _fileTrees = State(initialValue: fileTrees)
+        agents.projectTools = ProjectTools(projects: store, agents: agents)
         AppDelegate.agents = agents
         _agents = State(initialValue: agents)
         _browsers = State(initialValue: browsers)

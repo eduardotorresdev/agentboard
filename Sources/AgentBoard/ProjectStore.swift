@@ -40,6 +40,16 @@ final class ProjectStore {
         return projects.first { $0.path == url.path }
     }
 
+    /// Adds a project to `organization`, which needn't be the one shown.
+    func addProject(at url: URL, to organization: UUID) {
+        perform { try $0.insertProject(name: url.lastPathComponent, path: url.path, organization: organization) }
+    }
+
+    /// `organization`'s projects, read fresh from the database.
+    func projects(in organization: UUID) -> [Project] {
+        (try? database?.projects(in: organization)) ?? []
+    }
+
     func removeProject(_ project: Project) {
         perform { try $0.deleteProject(id: project.id) }
     }
