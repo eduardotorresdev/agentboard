@@ -19,9 +19,11 @@ public final class Orchestrator: CoreService {
     /// The post-its (see PostItTools).
     private(set) var postIts: [PostItRecord] = []
     /// The agents waiting on the developer, oldest first (see Attention.swift).
-    var attention: [AttentionRequest] = []
+    var attention: [AttentionRequest] = [] { didSet { releaseHeldMessages() } }
     /// Agents whose questions hook waits on the developer's answers (see Attention.swift).
-    var pendingQuestions: [UUID: PendingQuestions] = [:]
+    var pendingQuestions: [UUID: PendingQuestions] = [:] { didSet { releaseHeldMessages() } }
+    /// Agent endpoints, so messages held while an agent waits on the developer go out once it's answered.
+    private var agentEndpoints: [UUID: AgentEndpoint] = [:]
     let bus: MessageBus
     let catalog: ToolCatalog
     let toolServer: ToolServer
@@ -155,7 +157,13 @@ public final class Orchestrator: CoreService {
     func session(_ id: UUID) -> AgentSession? { server.session(id) }
 
     private func register(_ record: AgentRecord) {
-        bus.register(record.runner == nil ? AgentEndpoint(id: record.id, store: self) : RunnerElement(id: record.id, store: self))
+        if record.runner == nil {
+            let endpoint = AgentEndpoint(id: record.id, store: self)
+            agentEndpoints[record.id] = endpoint
+            bus.register(endpoint)
+        } else {
+            bus.register(RunnerElement(id: record.id, store: self))
+        }
         // Agents launched earlier call with the token they got then.
         _ = toolServer.token(for: record.id)
     }
@@ -332,6 +340,7 @@ public final class Orchestrator: CoreService {
         server.closeSession(id, grace: record.runner != nil ? 3 : nil)
         if record.runner != nil { forgetRunner(id) }
         bus.remove(element: id)
+        agentEndpoints[id] = nil
         toolServer.revoke(id)
         cards.removeAll { $0.id == id }
         try? database?.deleteAgent(id: id)
@@ -445,11 +454,21 @@ public final class Orchestrator: CoreService {
     }
 
     fileprivate func element(_ id: UUID) -> ElementInfo? { elements[id] }
+
+    /// Whether the agent is answering the developer's questions or a prompt in its terminal:
+    /// a message typed in now would land in that answer.
+    fileprivate func isAwaitingDeveloper(_ id: UUID) -> Bool {
+        pendingQuestions[id] != nil || attention.contains { $0.id == id && $0.reason == .waiting }
+    }
+
+    private func releaseHeldMessages() {
+        for endpoint in agentEndpoints.values { endpoint.deliverNext() }
+    }
 }
 
 /// An agent as the message bus sees it: a message is typed into its terminal as a prompt.
 @MainActor
-private final class AgentEndpoint: MessageEndpoint {
+final class AgentEndpoint: MessageEndpoint {
     let id: UUID
     private weak var store: Orchestrator?
     /// Prompts waiting their turn: each is pasted and submitted before the next, so two
@@ -484,8 +503,9 @@ private final class AgentEndpoint: MessageEndpoint {
         deliverNext()
     }
 
-    private func deliverNext() {
-        guard !delivering, !outbox.isEmpty, let session = store?.session(id) else { return }
+    /// Held while the agent waits on the developer; the store calls again once that changes.
+    func deliverNext() {
+        guard !delivering, !outbox.isEmpty, let store, !store.isAwaitingDeveloper(id), let session = store.session(id) else { return }
         delivering = true
         let prompt = outbox.removeFirst()
         session.send(session.withTerminal { $0.encodePaste(prompt) })
