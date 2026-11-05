@@ -19,9 +19,12 @@ public struct AgentRecord: Identifiable, Hashable, Codable, Sendable {
     /// Coordinates the agents connected to it: their finished turns go to it, not to Needs you.
     /// Nil for cards from before orchestrators, which aren't.
     public var orchestrates: Bool?
+    /// The agent's current conversation, when it moved off the one named after the card
+    /// (`/clear` starts another). Nil means the card's own id.
+    public var conversation: UUID?
 
     public init(id: UUID, worktree: String, providerID: String, name: String, frame: CGRect, runner: RunnerSpec? = nil,
-                organization: UUID? = nil, orchestrates: Bool? = nil) {
+                organization: UUID? = nil, orchestrates: Bool? = nil, conversation: UUID? = nil) {
         self.id = id
         self.worktree = worktree
         self.providerID = providerID
@@ -30,6 +33,7 @@ public struct AgentRecord: Identifiable, Hashable, Codable, Sendable {
         self.runner = runner
         self.organization = organization
         self.orchestrates = orchestrates
+        self.conversation = conversation
     }
 
     public var isOrchestrator: Bool { orchestrates == true && runner == nil }

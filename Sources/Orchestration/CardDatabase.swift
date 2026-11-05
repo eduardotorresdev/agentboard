@@ -63,6 +63,9 @@ final class CardDatabase {
         if try !columns(of: "agents").contains("orchestrates") {
             try execute("ALTER TABLE agents ADD COLUMN orchestrates INTEGER")
         }
+        if try !columns(of: "agents").contains("conversation") {
+            try execute("ALTER TABLE agents ADD COLUMN conversation TEXT")
+        }
         if try !columns(of: "connections").contains("a_side") {
             try execute("ALTER TABLE connections ADD COLUMN a_side INTEGER; ALTER TABLE connections ADD COLUMN b_side INTEGER")
         }
@@ -79,7 +82,7 @@ final class CardDatabase {
     }
 
     func agents() throws -> [AgentRecord] {
-        let stmt = try prepare("SELECT id, worktree, kind, x, y, width, height, name, command, directory, owner, organization, orchestrates FROM agents ORDER BY rowid")
+        let stmt = try prepare("SELECT id, worktree, kind, x, y, width, height, name, command, directory, owner, organization, orchestrates, conversation FROM agents ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
         var result: [AgentRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -100,15 +103,16 @@ final class CardDatabase {
                               width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
                 runner: runner,
                 organization: sqlite3_column_text(stmt, 11).flatMap { UUID(uuidString: String(cString: $0)) },
-                orchestrates: sqlite3_column_type(stmt, 12) == SQLITE_NULL ? nil : sqlite3_column_int(stmt, 12) != 0))
+                orchestrates: sqlite3_column_type(stmt, 12) == SQLITE_NULL ? nil : sqlite3_column_int(stmt, 12) != 0,
+                conversation: sqlite3_column_text(stmt, 13).flatMap { UUID(uuidString: String(cString: $0)) }))
         }
         return result
     }
 
     func saveAgent(_ agent: AgentRecord) throws {
         let stmt = try prepare("""
-            INSERT OR REPLACE INTO agents (id, worktree, kind, x, y, width, height, name, command, directory, owner, organization, orchestrates)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO agents (id, worktree, kind, x, y, width, height, name, command, directory, owner, organization, orchestrates, conversation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, agent.id.uuidString)
@@ -122,6 +126,7 @@ final class CardDatabase {
             if let value { bind(stmt, column, value) } else { sqlite3_bind_null(stmt, column) }
         }
         if let orchestrates = agent.orchestrates { sqlite3_bind_int(stmt, 13, orchestrates ? 1 : 0) } else { sqlite3_bind_null(stmt, 13) }
+        if let conversation = agent.conversation { bind(stmt, 14, conversation.uuidString) } else { sqlite3_bind_null(stmt, 14) }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 

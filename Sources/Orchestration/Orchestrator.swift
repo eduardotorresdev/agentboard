@@ -419,7 +419,7 @@ public final class Orchestrator: CoreService {
         // Signed in as the card's organization; `/login` in the terminal signs that one in.
         environment["CLAUDE_CONFIG_DIR"] = OrganizationHome.prepare(record.organization)?.path
         let tools = toolsURL.map { ToolServerLink(name: ToolCatalog.serverName, url: $0, token: toolServer.token(for: record.id)) }
-        session.start(LaunchSpec(executable: executable, arguments: provider.arguments(session: record.id, tools: tools),
+        session.start(LaunchSpec(executable: executable, arguments: provider.arguments(session: record.conversation ?? record.id, tools: tools),
                                  environment: environment, directory: record.worktree))
     }
 

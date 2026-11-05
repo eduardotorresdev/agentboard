@@ -141,6 +141,8 @@ public struct AgentHook: Decodable, Sendable {
     public static let prefix = "agentboard-hook:"
 
     public let hook_event_name: String
+    /// The conversation the hook fired in; a new one after `/clear`.
+    public let session_id: String?
     public let message: String?
     public let notification_type: String?
     /// The conversation so far, as Claude Code keeps it (JSONL).

@@ -98,6 +98,11 @@ extension Orchestrator {
     public func sessionNotified(_ id: UUID, _ notifications: [String]) {
         guard let record = record(id), record.runner == nil else { return }
         for hook in notifications.compactMap(AgentHook.init(notification:)) {
+            // `/clear` moves the agent to a new conversation: relaunching resumes that one.
+            if let conversation = hook.session_id.flatMap(UUID.init(uuidString:)),
+               conversation != (record.conversation ?? record.id) {
+                update(id) { $0.conversation = conversation == $0.id ? nil : conversation }
+            }
             switch hook.hook_event_name {
             case "Stop":
                 let context = hook.last_assistant_message.flatMap(TranscriptContext.trimmed)
