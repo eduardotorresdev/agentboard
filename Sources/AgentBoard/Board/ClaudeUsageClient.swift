@@ -1,3 +1,4 @@
+import AgentRuntime
 import Foundation
 import Security
 
@@ -17,10 +18,10 @@ struct ClaudeUsage: Equatable {
 }
 
 enum ClaudeUsageClient {
-    private static let service = "Claude Code-credentials"
-
-    static func fetch() async throws -> ClaudeUsage {
-        guard let token = token() else { throw URLError(.userAuthenticationRequired) }
+    /// The usage of the account the organization's agents are signed in to.
+    static func fetch(organization: UUID) async throws -> ClaudeUsage {
+        let service = OrganizationHome.keychainService(organization: organization)
+        guard let token = token(service: service) else { throw URLError(.userAuthenticationRequired) }
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -42,10 +43,11 @@ enum ClaudeUsageClient {
         return fractional.date(from: string) ?? ISO8601DateFormatter().date(from: string)
     }
 
-    /// The freshest unexpired token among Claude Code's credential entries (one per config folder).
-    private static func token() -> String? {
+    /// The freshest unexpired token stored under the organization's keychain service. Other
+    /// services belong to other organizations' config folders and must not be mixed in.
+    private static func token(service: String) -> String? {
         let now = Date().timeIntervalSince1970 * 1000
-        return entries()
+        return entries(service: service)
             .compactMap(credentials)
             .filter { $0.expiresAt > now }
             .max { $0.expiresAt < $1.expiresAt }?
@@ -55,7 +57,7 @@ enum ClaudeUsageClient {
     /// The keychain entries Claude Code wrote, by service and account: one service can hold
     /// several accounts (an old login's entry beside the current one), and asking by service
     /// alone answers with whichever comes first. Reading attributes alone never prompts.
-    private static func entries() -> [(service: String, account: String?)] {
+    private static func entries(service: String) -> [(service: String, account: String?)] {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecMatchLimit as String: kSecMatchLimitAll,
                                     kSecReturnAttributes as String: true]
         var result: CFTypeRef?
@@ -64,7 +66,7 @@ enum ClaudeUsageClient {
         }
         var seen: Set<String> = []
         return items.compactMap { item -> (service: String, account: String?)? in
-            guard let name = item[kSecAttrService as String] as? String, name.hasPrefix(service) else { return nil }
+            guard let name = item[kSecAttrService as String] as? String, name == service else { return nil }
             let account = item[kSecAttrAccount as String] as? String
             return seen.insert(name + "\u{0}" + (account ?? "")).inserted ? (name, account) : nil
         }

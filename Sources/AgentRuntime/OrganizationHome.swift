@@ -72,6 +72,11 @@ public enum OrganizationHome {
         _ = security(["add-generic-password", "-U", "-a", user, "-s", keychainService(directory), "-w", secret])
     }
 
+    /// The keychain item Claude Code keeps an organization's login in.
+    public static func keychainService(organization id: UUID?) -> String {
+        keychainService(claudeDirectory(id))
+    }
+
     /// The keychain item Claude Code keeps its login in: a suffix of the config folder's hash
     /// tells custom folders apart.
     private static func keychainService(_ directory: URL?) -> String {

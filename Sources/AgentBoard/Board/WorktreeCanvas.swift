@@ -35,7 +35,7 @@ struct WorktreeCanvas: View {
                 .padding(.bottom, 16)
                 .padding(.leading, board.leadingInset)
             if !board.isZen {
-                ClaudeUsageToolbar()
+                ClaudeUsageToolbar(organization: agents.organizationID)
                     .padding(.bottom, 16)
                     .padding(.leading, board.leadingInset + 16)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -317,6 +317,7 @@ private struct AppUsage: View {
 /// What is left of the Claude plan's 5-hour session and week, and when each resets, floating
 /// at the bottom-left corner. Refreshed every minute.
 private struct ClaudeUsageToolbar: View {
+    let organization: UUID
     @State private var usage: ClaudeUsage?
     /// Claude's official symbol.
     private static let symbol = Bundle.module.url(forResource: "ClaudeSymbol", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
@@ -341,10 +342,12 @@ private struct ClaudeUsageToolbar: View {
                 .transition(.opacity)
             }
         }
-        .task {
+        // Each organization is signed in to its own account: switching restarts the polling.
+        .task(id: organization) {
+            withAnimation(.smooth(duration: 0.3)) { usage = nil }
             while !Task.isCancelled {
                 do {
-                    let fresh = try await ClaudeUsageClient.fetch()
+                    let fresh = try await ClaudeUsageClient.fetch(organization: organization)
                     withAnimation(.smooth(duration: 0.3)) { usage = fresh }
                 } catch {
                     NSLog("Claude usage unavailable: %@", String(describing: error))
