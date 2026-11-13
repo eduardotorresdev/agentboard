@@ -302,7 +302,9 @@ public final class Orchestrator: CoreService {
         case .writePostIt(let id, let text):
             updatePostIt(id, from: board) { $0.write(text, by: nil) }
         case .addImage(let record):
-            guard image(record.id) == nil,
+            // A plain file name inside the images folder, never a path out of it.
+            guard image(record.id) == nil, !record.file.isEmpty, record.file != ".", record.file != "..",
+                  (record.file as NSString).lastPathComponent == record.file,
                   FileManager.default.fileExists(atPath: ImageFiles.url(of: record.file, in: dataFolder).path) else { return }
             insertImage(record, from: board)
         case .updateImage(let record):

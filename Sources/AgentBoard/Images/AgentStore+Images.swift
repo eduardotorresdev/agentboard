@@ -18,6 +18,14 @@ enum ImageSource: Equatable {
         return nil
     }
 
+    /// Puts the stored picture itself, at its full size, on `pasteboard`.
+    @discardableResult
+    static func copy(_ record: ImageRecord, in dataFolder: URL, to pasteboard: NSPasteboard) -> Bool {
+        guard let image = NSImage(contentsOf: ImageFiles.url(of: record.file, in: dataFolder)) else { return false }
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([image])
+    }
+
     static func isImageFile(_ url: URL) -> Bool {
         guard url.isFileURL else { return false }
         let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType ?? UTType(filenameExtension: url.pathExtension)

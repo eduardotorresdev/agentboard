@@ -97,6 +97,7 @@ public enum ImageFiles {
 
     /// Copies the picture at `source` into the folder under a new name, as it is.
     public static func store(contentsOf source: URL, in dataFolder: URL) throws -> Stored {
+        let source = source.resolvingSymlinksInPath()
         let size = (try? source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]))
         guard size?.isRegularFile == true, let bytes = size?.fileSize else { throw Failure.missing }
         guard bytes <= maximumBytes else { throw Failure.tooLarge }

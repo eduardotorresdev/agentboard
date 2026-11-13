@@ -94,10 +94,13 @@ final class ImageCardLayer: CALayer {
         picture.frame = layout.picture
 
         if shownFile != record.file {
+            // The old picture is gone with its file.
+            if let old = shownFile { Self.cache[old] = nil }
             shownFile = record.file
             let file = record.file
             Self.load(file, in: dataFolder) { [weak self] image in
                 guard let self, self.shownFile == file else { return }
+                if let image { Self.cache[file] = image }
                 CATransaction.begin()
                 CATransaction.setDisableActions(true)
                 self.picture.contents = image
@@ -108,8 +111,14 @@ final class ImageCardLayer: CALayer {
 
     // MARK: Loading
 
-    /// Loaded pictures by file name; a replaced picture has a new one.
-    @MainActor private static var cache: [String: CGImage] = [:]
+    /// Its card is gone: the picture leaves the cache.
+    @MainActor func forget() {
+        if let shownFile { Self.cache[shownFile] = nil }
+        shownFile = nil
+    }
+
+    /// Loaded pictures by file name, only of cards that show them; a replaced picture has a new one.
+    @MainActor static var cache: [String: CGImage] = [:]
 
     /// The picture, decoded off the main thread at most 2048 px on its longer side.
     @MainActor private static func load(_ file: String, in dataFolder: URL, done: @escaping @MainActor (CGImage?) -> Void) {
@@ -123,7 +132,6 @@ final class ImageCardLayer: CALayer {
             nonisolated(unsafe) let loaded = image
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    if let loaded { cache[file] = loaded }
                     done(loaded)
                 }
             }

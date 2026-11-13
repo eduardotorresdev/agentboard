@@ -1683,9 +1683,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return true
         }
         if flags == .command, event.charactersIgnoringModifiers == "c", window?.firstResponder === self,
-           let id = focusedID, store.image(id) != nil, let image = imageCards[id]?.image {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.writeObjects([NSImage(cgImage: image, size: .zero)])
+           let id = focusedID, let record = store.image(id) {
+            ImageSource.copy(record, in: store.dataFolder, to: .general)
             return true
         }
         if flags.subtracting(.shift) == .command, window?.firstResponder === self {
@@ -3075,6 +3074,7 @@ extension BoardView {
         let records = store.images(in: worktree)
         let ids = Set(records.map(\.id))
         for (id, card) in imageCards where !ids.contains(id) {
+            if store.image(id) == nil { card.forget() }
             card.removeFromSuperlayer()
             imageCards[id] = nil
         }

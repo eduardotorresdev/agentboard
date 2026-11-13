@@ -265,6 +265,13 @@ struct ImageTests {
         _ = try await call("image_replace", ["path": "new.png", "image": "Shot"], as: b.id, on: core)
         let replaced = try await context("PostToolUse", as: a.id, on: core)
         #expect(replaced?.contains("“Shot” has a new picture (60×20)") == true, "\(replaced ?? "nil")")
+        // A rename is a rename, not a new picture.
+        await MainActor.run { core.orchestrator.updateImage(shot.id) { $0.name = "Login" } }
+        let renamed = try await context("UserPromptSubmit", as: a.id, on: core)
+        #expect(renamed?.contains("“Shot” is now called “Login”") == true, "\(renamed ?? "nil")")
+        #expect(renamed?.contains("new picture") == false)
+        await MainActor.run { core.orchestrator.updateImage(shot.id) { $0.name = "Shot" } }
+        _ = try await context("UserPromptSubmit", as: a.id, on: core)
         _ = try await context("SessionStart", as: b.id, on: core)
         _ = try await call("image_replace", ["path": "new.png", "image": "Shot"], as: b.id, on: core)
         #expect(try await context("PostToolUse", as: b.id, on: core) == nil)
@@ -295,12 +302,17 @@ struct ImageTests {
         sender.send(.addCard(a))
         sender.send(.addImage(image))
         sender.send(.addImage(missing))
+        // A file name that points out of the images folder is refused.
+        var escaping = try boardImage("Escape", picture(10, 10), in: folder)
+        escaping.file = "../agentboard.sqlite"
+        sender.send(.addImage(escaping))
         var duplicate = image
         duplicate.name = "Copy"
         sender.send(.addImage(duplicate))
         sender.send(.connect(Connection(a: a.id, b: image.id)))
         try await waitUntil { core.orchestrator.bus.graph.connections.count == 1 }
         #expect(await core.orchestrator.images.map(\.name) == ["Shot"])
+        #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("agentboard.sqlite").path))
         try await waitUntil { otherInbox.events.contains { if case .imageAdded = $0 { true } else { false } } }
         #expect(!senderInbox.events.contains { if case .imageAdded = $0 { true } else { false } })
 
@@ -365,6 +377,11 @@ struct ImageTests {
             #expect(stored.file.hasSuffix("." + ext), "\(stored.file)")
             #expect(try Data(contentsOf: ImageFiles.url(of: stored.file, in: folder)) == Data(contentsOf: source))
         }
+        // Through a symlink, the file it points at.
+        let target = try write(picture(12, 8), "target.png", in: folder)
+        let link = folder.appendingPathComponent("link.png")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        #expect(try ImageFiles.store(contentsOf: link, in: folder).pixelSize == CGSize(width: 12, height: 8))
         let pasted = try ImageFiles.store(picture(7, 9), in: folder)
         #expect(pasted.pixelSize == CGSize(width: 7, height: 9))
         #expect(throws: ImageFiles.Failure.notAnImage) { try ImageFiles.store(Data("hello".utf8), in: folder) }

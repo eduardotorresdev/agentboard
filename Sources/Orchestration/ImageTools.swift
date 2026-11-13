@@ -153,9 +153,15 @@ final class ImageTools: ToolProvider {
             now[record.id] = current
             guard before[record.id] != current else { continue }
             let size = "\(Int(record.pixelSize.width))×\(Int(record.pixelSize.height))"
-            parts.append(before[record.id] == nil
-                ? "Image “\(record.name)” (\(size)) is connected to you; see it with image_read."
-                : "Image “\(record.name)” has a new picture (\(size)); see it with image_read.")
+            if let old = before[record.id] {
+                if old.file != current.file {
+                    parts.append("Image “\(record.name)” has a new picture (\(size)); see it with image_read.")
+                } else {
+                    parts.append("Image “\(old.name)” is now called “\(record.name)”.")
+                }
+            } else {
+                parts.append("Image “\(record.name)” (\(size)) is connected to you; see it with image_read.")
+            }
         }
         for (id, gone) in before where now[id] == nil {
             parts.append("Image “\(gone.name)” is no longer connected to you.")

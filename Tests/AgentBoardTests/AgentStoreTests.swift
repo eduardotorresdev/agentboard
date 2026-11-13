@@ -221,3 +221,36 @@ private func tempFolder() throws -> URL {
     #expect(ImageResize.edges(at: CGPoint(x: 101, y: 101), in: start, reach: 8) == [.left, .top])
     #expect(ImageResize.edges(at: CGPoint(x: start.midX, y: start.midY), in: start, reach: 8) == [])
 }
+
+/// Cmd+C copies the stored picture at its full size, not the card's display copy.
+@MainActor
+@Test func copyingGivesTheWholePicture() throws {
+    let folder = try tempFolder()
+    let stored = try ImageFiles.store(picture(3000, 1000), in: folder)
+    let record = ImageRecord(id: UUID(), worktree: "/w", name: "Shot", frame: .zero, file: stored.file, pixelSize: stored.pixelSize)
+    let pasteboard = NSPasteboard(name: NSPasteboard.Name("abtest-\(UUID().uuidString)"))
+    defer { pasteboard.releaseGlobally() }
+    #expect(ImageSource.copy(record, in: folder, to: pasteboard))
+    let rep = try #require(pasteboard.data(forType: .tiff).flatMap(NSBitmapImageRep.init(data:)))
+    #expect(rep.pixelsWide == 3000 && rep.pixelsHigh == 1000)
+}
+
+/// The picture cache holds only pictures of cards that still show them.
+@MainActor
+@Test func thePictureCacheEmpties() async throws {
+    let folder = try tempFolder()
+    let first = try ImageFiles.store(picture(40, 20), in: folder), second = try ImageFiles.store(picture(20, 40), in: folder)
+    var record = ImageRecord(id: UUID(), worktree: "/w", name: "Shot", frame: CGRect(x: 0, y: 0, width: 160, height: 112),
+                             file: first.file, pixelSize: first.pixelSize)
+    let card = ImageCardLayer()
+    func show() { card.update(frame: record.frame, record: record, dataFolder: folder, focused: false, closeHovered: false, renaming: false, scale: 2) }
+    show()
+    try await waitUntil { ImageCardLayer.cache[first.file] != nil }
+    record.file = second.file
+    show()
+    #expect(ImageCardLayer.cache[first.file] == nil)
+    try await waitUntil { ImageCardLayer.cache[second.file] != nil }
+    #expect(ImageCardLayer.cache[second.file] != nil)
+    card.forget()
+    #expect(ImageCardLayer.cache[second.file] == nil)
+}
