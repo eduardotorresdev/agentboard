@@ -6,13 +6,13 @@ import SQLite3
 import Testing
 @testable import Orchestration
 
-private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+func waitUntil(_ condition: @MainActor () -> Bool) async throws {
     let deadline = Date().addingTimeInterval(10)
     while await !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
 }
 
 /// An agent that prints `ready`, then echoes every line it reads as `got <line>`.
-private struct EchoAgent: AgentProvider {
+struct EchoAgent: AgentProvider {
     let id = "echo"
     let title = "Echo"
     let executable = "sh"
@@ -24,7 +24,7 @@ private struct EchoAgent: AgentProvider {
 
 /// A core with its own socket, data folder and tool server, and the way an agent calls its tools.
 @MainActor
-private final class Core {
+final class Core {
     let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")
     let path: String
     let server: CoreServer
@@ -53,7 +53,7 @@ private final class Core {
 }
 
 /// Calls `tool` as the agent `caller` would, over the tool server; the result's text.
-private func call(_ tool: String, _ arguments: [String: Any] = [:], as caller: UUID, on core: Core) async throws -> (text: String, isError: Bool) {
+func call(_ tool: String, _ arguments: [String: Any] = [:], as caller: UUID, on core: Core) async throws -> (text: String, isError: Bool) {
     let (url, token) = await MainActor.run { (core.orchestrator.toolsEndpoint, core.orchestrator.toolToken(for: caller)) }
     var request = URLRequest(url: try #require(url))
     request.httpMethod = "POST"
@@ -70,7 +70,7 @@ private func call(_ tool: String, _ arguments: [String: Any] = [:], as caller: U
 }
 
 /// What an agent's context hook gets back before `event`: the added context, or nil.
-private func context(_ event: String, as caller: UUID, on core: Core) async throws -> String? {
+func context(_ event: String, as caller: UUID, on core: Core) async throws -> String? {
     let (url, token) = await MainActor.run { (core.orchestrator.toolsEndpoint, core.orchestrator.toolToken(for: caller)) }
     var request = URLRequest(url: try #require(url).appendingPathComponent("context"))
     request.httpMethod = "POST"
@@ -81,12 +81,12 @@ private func context(_ event: String, as caller: UUID, on core: Core) async thro
     return (answer["hookSpecificOutput"] as? [String: Any])?["additionalContext"] as? String
 }
 
-private func board(_ core: Core) async throws -> CoreClient {
+func board(_ core: Core) async throws -> CoreClient {
     let path = await MainActor.run { core.path }
     return try #require(CoreClient.connect(socketPath: path, timeout: 3))
 }
 
-private func agent(_ name: String, in folder: URL) -> AgentRecord {
+func agent(_ name: String, in folder: URL) -> AgentRecord {
     AgentRecord(id: UUID(), worktree: folder.path, providerID: "echo", name: name, frame: CGRect(x: 0, y: 0, width: 640, height: 420))
 }
 
@@ -98,7 +98,7 @@ private final class Flag: @unchecked Sendable {
 }
 
 /// Events a board received, decoded.
-private final class Inbox: @unchecked Sendable {
+final class Inbox: @unchecked Sendable {
     private let lock = NSLock()
     private var _events: [BoardEvent] = []
     var events: [BoardEvent] { lock.withLock { _events } }

@@ -14,10 +14,12 @@ public final class Orchestrator: CoreService {
     let server: CoreServer
     private let database: CardDatabase?
     private let providers: [any AgentProvider]
-    private let dataFolder: URL
+    let dataFolder: URL
     private(set) var cards: [AgentRecord] = []
     /// The post-its (see PostItTools).
     private(set) var postIts: [PostItRecord] = []
+    /// The images (see ImageTools).
+    private(set) var images: [ImageRecord] = []
     /// The agents waiting on the developer, oldest first (see Attention.swift).
     var attention: [AttentionRequest] = [] { didSet { releaseHeldMessages() } }
     /// Agents whose questions hook waits on the developer's answers (see Attention.swift).
@@ -65,7 +67,8 @@ public final class Orchestrator: CoreService {
             try? database?.saveAgent(saved[index])
         }
         let savedPostIts = (try? database?.postIts()) ?? []
-        let ids = Set(saved.map(\.id)).union(savedPostIts.map(\.id)).union(database?.browserIDs() ?? [])
+        let savedImages = (try? database?.images()) ?? []
+        let ids = Set(saved.map(\.id)).union(savedPostIts.map(\.id)).union(savedImages.map(\.id)).union(database?.browserIDs() ?? [])
         let stored = ((try? database?.connections()) ?? []).filter { ids.contains($0.a) && ids.contains($0.b) }
         bus = MessageBus(graph: ConnectionGraph(stored))
         catalog = ToolCatalog([MessagingTools(bus: bus)])
@@ -75,8 +78,10 @@ public final class Orchestrator: CoreService {
         }
         cards = saved
         postIts = savedPostIts
+        images = savedImages
         catalog.add(RunnerTools(store: self))
         catalog.add(PostItTools(store: self))
+        catalog.add(ImageTools(store: self))
         toolServer.onQuestion = { [weak self] body, caller in await self?.ask(body, caller: caller) }
         toolServer.onAttention = { [weak self] body, caller in
             let notification = AgentHook.prefix + body.base64EncodedString()
@@ -91,6 +96,7 @@ public final class Orchestrator: CoreService {
         bus.onMessage = { [weak self] message in self?.broadcast(.message(message)) }
         for record in cards { register(record) }
         for record in postIts { bus.register(PostItElement(id: record.id, store: self)) }
+        for record in images { bus.register(ImageElement(id: record.id, store: self)) }
         let inherited = inheriting.flatMap { try? JSONDecoder().decode(Inherited.self, from: $0) }
         if let inherited {
             attention = (inherited.attention ?? []).filter { id in cards.contains { $0.id == id.id } }
@@ -154,6 +160,8 @@ public final class Orchestrator: CoreService {
     }
 
     func postIt(_ id: UUID) -> PostItRecord? { postIts.first { $0.id == id } }
+
+    func image(_ id: UUID) -> ImageRecord? { images.first { $0.id == id } }
 
     func session(_ id: UUID) -> AgentSession? { server.session(id) }
 
@@ -219,7 +227,7 @@ public final class Orchestrator: CoreService {
     public func boardConnected(_ board: CoreBoard) -> Data? {
         boards.insert(board)
         return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
-                          attention: attention).encoded
+                          attention: attention, images: images).encoded
     }
 
     public func boardDisconnected(_ board: CoreBoard) {
@@ -293,8 +301,17 @@ public final class Orchestrator: CoreService {
             removePostIt(id, from: board)
         case .writePostIt(let id, let text):
             updatePostIt(id, from: board) { $0.write(text, by: nil) }
-        case .addImage, .updateImage, .removeImage:
-            break // contract stub: core track
+        case .addImage(let record):
+            guard image(record.id) == nil,
+                  FileManager.default.fileExists(atPath: ImageFiles.url(of: record.file, in: dataFolder).path) else { return }
+            insertImage(record, from: board)
+        case .updateImage(let record):
+            updateImage(record.id, from: board) {
+                $0.name = record.name
+                $0.frame = record.frame
+            }
+        case .removeImage(let id):
+            removeImage(id, from: board)
         case .dismissAttention(let id):
             dismissAttention(id)
         case .answerQuestions(let id, let answers):
@@ -378,6 +395,38 @@ public final class Orchestrator: CoreService {
         postIts.removeAll { $0.id == id }
         try? database?.deletePostIt(id: id)
         broadcast(.postItRemoved(id), except: sender)
+    }
+
+    // MARK: Images
+
+    /// Adds an image and saves it; boards other than `sender` hear of it.
+    func insertImage(_ record: ImageRecord, from sender: CoreBoard? = nil) {
+        images.append(record)
+        bus.register(ImageElement(id: record.id, store: self))
+        try? database?.saveImage(record)
+        broadcast(.imageAdded(record), except: sender)
+    }
+
+    /// Changes an image in place and saves it; boards other than `sender` hear of it. A new
+    /// `file` deletes the old one.
+    func updateImage(_ id: UUID, from sender: CoreBoard? = nil, _ change: (inout ImageRecord) -> Void) {
+        guard let index = images.firstIndex(where: { $0.id == id }) else { return }
+        let before = images[index]
+        change(&images[index])
+        guard images[index] != before else { return }
+        if images[index].file != before.file { ImageFiles.remove(before.file, in: dataFolder) }
+        try? database?.saveImage(images[index])
+        broadcast(.imageUpdated(images[index]), except: sender)
+    }
+
+    /// Forgets an image, its lines and its file.
+    func removeImage(_ id: UUID, from sender: CoreBoard? = nil) {
+        guard let record = image(id) else { return }
+        bus.remove(element: id)
+        images.removeAll { $0.id == id }
+        try? database?.deleteImage(id: id)
+        ImageFiles.remove(record.file, in: dataFolder)
+        broadcast(.imageRemoved(id), except: sender)
     }
 
     // MARK: Launching
@@ -561,6 +610,26 @@ private final class PostItElement: BoardElement {
         guard let record = store?.postIt(id) else { return nil }
         let lines = record.text.split(whereSeparator: \.isNewline).count
         return "shared markdown note, \(lines == 0 ? "empty" : "\(lines) line\(lines == 1 ? "" : "s")"); read with postit_read"
+    }
+}
+
+/// An image as the message bus sees it: reachable along lines, seen with `image_read`.
+@MainActor
+private final class ImageElement: BoardElement {
+    let id: UUID
+    private weak var store: Orchestrator?
+
+    init(id: UUID, store: Orchestrator) {
+        self.id = id
+        self.store = store
+    }
+
+    var name: String { store?.image(id)?.name ?? "" }
+    var kind: ElementKind { .image }
+
+    var detail: String? {
+        guard let size = store?.image(id)?.pixelSize else { return nil }
+        return "\(Int(size.width))×\(Int(size.height))"
     }
 }
 

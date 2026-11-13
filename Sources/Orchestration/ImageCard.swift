@@ -1,5 +1,7 @@
 import AgentRuntime
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 /// An image on the board: a picture the user pasted, picked or dropped, or one an agent made
 /// (a screenshot, a chart). The core keeps it, so agents use it while no board runs. Agents
@@ -95,12 +97,34 @@ public enum ImageFiles {
 
     /// Copies the picture at `source` into the folder under a new name, as it is.
     public static func store(contentsOf source: URL, in dataFolder: URL) throws -> Stored {
-        fatalError("contract stub: core track")
+        let size = (try? source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]))
+        guard size?.isRegularFile == true, let bytes = size?.fileSize else { throw Failure.missing }
+        guard bytes <= maximumBytes else { throw Failure.tooLarge }
+        guard let data = try? Data(contentsOf: source) else { throw Failure.missing }
+        return try store(data, in: dataFolder)
     }
 
     /// Stores `data` (a pasted picture) under a new name, as it is.
     public static func store(_ data: Data, in dataFolder: URL) throws -> Stored {
-        fatalError("contract stub: core track")
+        guard data.count <= maximumBytes else { throw Failure.tooLarge }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(source).flatMap({ UTType($0 as String) }),
+              let pixelSize = pixelSize(of: source) else { throw Failure.notAnImage }
+        let file = UUID().uuidString + "." + (type.preferredFilenameExtension ?? "img")
+        try FileManager.default.createDirectory(at: folder(in: dataFolder), withIntermediateDirectories: true)
+        try data.write(to: url(of: file, in: dataFolder))
+        return Stored(file: file, pixelSize: pixelSize)
+    }
+
+    /// The first frame's size, upright, read from the header without decoding the bitmap.
+    private static func pixelSize(of source: CGImageSource) -> CGSize? {
+        guard CGImageSourceGetCount(source) > 0,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int, width > 0, height > 0 else { return nil }
+        // EXIF orientations 5–8 turn the picture a quarter.
+        let turned = (properties[kCGImagePropertyOrientation] as? Int).map { (5...8).contains($0) } ?? false
+        return turned ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
     }
 
     public static func remove(_ file: String, in dataFolder: URL) {
@@ -111,6 +135,21 @@ public enum ImageFiles {
     /// `readSide` on its longer side, else scaled down to that and encoded as JPEG when the
     /// source is one and PNG otherwise. Nil when the file is gone or unreadable.
     public static func reading(_ file: String, in dataFolder: URL) -> (data: Data, mimeType: String)? {
-        fatalError("contract stub: core track")
+        guard let data = try? Data(contentsOf: url(of: file, in: dataFolder)),
+              let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(source).flatMap({ UTType($0 as String) }),
+              let size = pixelSize(of: source) else { return nil }
+        let passed: [UTType: String] = [.png: "image/png", .jpeg: "image/jpeg", .gif: "image/gif", .webP: "image/webp"]
+        if let mimeType = passed[type], max(size.width, size.height) <= CGFloat(readSide) { return (data, mimeType) }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                        kCGImageSourceCreateThumbnailWithTransform: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: min(readSide, Int(max(size.width, size.height)))]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let output: UTType = type == .jpeg ? .jpeg : .png
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(encoded, output.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return (encoded as Data, output == .jpeg ? "image/jpeg" : "image/png")
     }
 }

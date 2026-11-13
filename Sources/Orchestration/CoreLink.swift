@@ -144,9 +144,10 @@ extension BoardState {
                 state.cards.append(record)
             case .updateCard(let record):
                 if let index = state.cards.firstIndex(where: { $0.id == record.id }) { state.cards[index] = record }
-            case .removeCard(let id), .removePostIt(let id):
+            case .removeCard(let id), .removePostIt(let id), .removeImage(let id):
                 state.cards.removeAll { $0.id == id }
                 state.postIts?.removeAll { $0.id == id }
+                state.images?.removeAll { $0.id == id }
                 state.connections.removeAll { $0.touches(id) }
             case .addPostIt(let record) where state.postIts?.contains { $0.id == record.id } != true:
                 state.postIts = (state.postIts ?? []) + [record]
@@ -154,6 +155,13 @@ extension BoardState {
                 if let index = state.postIts?.firstIndex(where: { $0.id == record.id }) {
                     state.postIts?[index].name = record.name
                     state.postIts?[index].frame = record.frame
+                }
+            case .addImage(let record) where state.images?.contains { $0.id == record.id } != true:
+                state.images = (state.images ?? []) + [record]
+            case .updateImage(let record):
+                if let index = state.images?.firstIndex(where: { $0.id == record.id }) {
+                    state.images?[index].name = record.name
+                    state.images?[index].frame = record.frame
                 }
             case .writePostIt(let id, let text):
                 if let index = state.postIts?.firstIndex(where: { $0.id == id }) { state.postIts?[index].write(text, by: nil) }

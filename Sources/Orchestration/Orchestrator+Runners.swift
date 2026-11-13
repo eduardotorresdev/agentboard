@@ -74,6 +74,7 @@ extension Orchestrator {
     func layoutItems(in worktree: String) -> [BoardLayout.Item] {
         cards(in: worktree).map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: $0.runner == nil) }
             + postIts.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
+            + images.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
             + elementFrames(in: worktree).map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
     }
 

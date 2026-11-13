@@ -43,6 +43,16 @@ final class CardDatabase {
                 editor TEXT,
                 editor_name TEXT NOT NULL,
                 edited REAL
+            );
+            CREATE TABLE IF NOT EXISTS images (
+                id TEXT PRIMARY KEY,
+                worktree TEXT NOT NULL,
+                name TEXT NOT NULL,
+                x REAL NOT NULL, y REAL NOT NULL,
+                width REAL NOT NULL, height REAL NOT NULL,
+                file TEXT NOT NULL,
+                pixel_width REAL NOT NULL, pixel_height REAL NOT NULL,
+                organization TEXT
             )
             """)
         // Before migrating notes blocks, which saves post-its with it.
@@ -181,6 +191,52 @@ final class CardDatabase {
 
     func deletePostIt(id: UUID) throws {
         let stmt = try prepare("DELETE FROM postits WHERE id = ?")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// Images, in the order they were added.
+    func images() throws -> [ImageRecord] {
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, file, pixel_width, pixel_height, organization FROM images ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [ImageRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            result.append(ImageRecord(
+                id: id,
+                worktree: String(cString: sqlite3_column_text(stmt, 1)),
+                name: String(cString: sqlite3_column_text(stmt, 2)),
+                frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
+                              width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
+                file: String(cString: sqlite3_column_text(stmt, 7)),
+                pixelSize: CGSize(width: sqlite3_column_double(stmt, 8), height: sqlite3_column_double(stmt, 9)),
+                organization: sqlite3_column_text(stmt, 10).flatMap { UUID(uuidString: String(cString: $0)) }))
+        }
+        return result
+    }
+
+    func saveImage(_ image: ImageRecord) throws {
+        let stmt = try prepare("""
+            INSERT OR REPLACE INTO images (id, worktree, name, x, y, width, height, file, pixel_width, pixel_height, organization)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, image.id.uuidString)
+        bind(stmt, 2, image.worktree)
+        bind(stmt, 3, image.name)
+        for (index, value) in [image.frame.minX, image.frame.minY, image.frame.width, image.frame.height].enumerated() {
+            sqlite3_bind_double(stmt, Int32(index + 4), value)
+        }
+        bind(stmt, 8, image.file)
+        sqlite3_bind_double(stmt, 9, image.pixelSize.width)
+        sqlite3_bind_double(stmt, 10, image.pixelSize.height)
+        if let organization = image.organization { bind(stmt, 11, organization.uuidString) } else { sqlite3_bind_null(stmt, 11) }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func deleteImage(id: UUID) throws {
+        let stmt = try prepare("DELETE FROM images WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
