@@ -205,6 +205,8 @@ final class AgentStore {
         case .postItRemoved(let id):
             postIts.removeAll { $0.id == id }
             connections.removeAll { $0.touches(id) }
+        case .imageAdded, .imageUpdated, .imageRemoved:
+            break // contract stub: board track
         case .attention(let list):
             attention = list
         case .toolCall(let call, let name, let arguments, let caller):

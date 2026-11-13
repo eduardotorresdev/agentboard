@@ -293,6 +293,8 @@ public final class Orchestrator: CoreService {
             removePostIt(id, from: board)
         case .writePostIt(let id, let text):
             updatePostIt(id, from: board) { $0.write(text, by: nil) }
+        case .addImage, .updateImage, .removeImage:
+            break // contract stub: core track
         case .dismissAttention(let id):
             dismissAttention(id)
         case .answerQuestions(let id, let answers):

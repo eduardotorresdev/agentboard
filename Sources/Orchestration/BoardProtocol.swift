@@ -33,6 +33,13 @@ public enum BoardRequest: Codable, Sendable {
     case removePostIt(UUID)
     /// The user rewrote its text.
     case writePostIt(id: UUID, text: String)
+    /// A picture the user pasted, picked or dropped: the board stored its file with `ImageFiles`
+    /// first. One whose file isn't there is ignored.
+    case addImage(ImageRecord)
+    /// Its name or frame changed; the core keeps its picture.
+    case updateImage(ImageRecord)
+    /// Forgets it and deletes its file.
+    case removeImage(UUID)
     /// The developer dealt with the agent's attention request.
     case dismissAttention(UUID)
     /// The developer answered the questions the agent asked, keyed by question text; nil
@@ -59,6 +66,10 @@ public enum BoardEvent: Codable, Sendable {
     /// Its name, frame or text changed.
     case postItUpdated(PostItRecord)
     case postItRemoved(UUID)
+    case imageAdded(ImageRecord)
+    /// Its name, frame or picture (`file`, `pixelSize`) changed.
+    case imageUpdated(ImageRecord)
+    case imageRemoved(UUID)
     /// Every attention request, oldest first, after any change.
     case attention([AttentionRequest])
 }
@@ -72,14 +83,17 @@ public struct BoardState: Codable, Sendable {
     public var postIts: [PostItRecord]?
     /// The agents waiting on the developer; nil from a core that predates them.
     public var attention: [AttentionRequest]?
+    /// The images; nil from a core that predates them.
+    public var images: [ImageRecord]?
 
     public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = [],
-                attention: [AttentionRequest] = []) {
+                attention: [AttentionRequest] = [], images: [ImageRecord] = []) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
         self.postIts = postIts
         self.attention = attention
+        self.images = images
     }
 }
 
