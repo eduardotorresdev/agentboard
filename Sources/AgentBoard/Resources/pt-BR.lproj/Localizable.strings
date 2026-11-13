@@ -291,3 +291,15 @@
 "Off" = "Desligado";
 "Caffeinate: keeps the Mac and its display awake while agents work." = "Cafeína: mantém o Mac e a tela acordados enquanto os agentes trabalham.";
 "Caffeinate on: the Mac and its display stay awake. Click to let them sleep." = "Cafeína ligada: o Mac e a tela ficam acordados. Clique para deixá-los dormir.";
+
+/* Images */
+"Image" = "Imagem";
+"Image name" = "Nome da imagem";
+"Add image" = "Adicionar imagem";
+"Puts pictures from your files on the board; agents connected to one see it." = "Coloca imagens dos seus arquivos no quadro; os agentes conectados a uma a veem.";
+"The pasted picture" = "A imagem colada";
+"%@ is larger than 20 MB." = "%@ tem mais de 20 MB.";
+"%@ isn't a picture the board can show." = "%@ não é uma imagem que o quadro consegue mostrar.";
+"%@ couldn't be read." = "Não foi possível ler %@.";
+"Couldn't add the image" = "Não foi possível adicionar a imagem";
+"Couldn't add %lld images" = "Não foi possível adicionar %lld imagens";

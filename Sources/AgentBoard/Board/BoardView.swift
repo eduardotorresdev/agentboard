@@ -65,6 +65,7 @@ final class BoardController {
     func add(_ device: BrowserDevice) { view?.addBrowser(device) }
     func addPostIt() { view?.addPostIt() }
     func addFileTree() { view?.addFileTree() }
+    func addImages() { view?.addImages() }
     /// The dialog that asks what a new runner runs is open.
     var addingRunner = false
     func addRunner(command: String, name: String?, directory: String?) { view?.addRunner(command: command, name: name, directory: directory) }
@@ -208,6 +209,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// The text view over the post-it being written in.
     fileprivate var postItEditor: PostItEditor?
     fileprivate var editingPostIt: UUID?
+    fileprivate var imageCards: [UUID: ImageCardLayer] = [:]
     private var links: [UUID: LinkLayer] = [:]
     /// The lines hang as ropes between the handles they were drawn to; `routes` is where each
     /// one is now, for finding the line under the pointer and sending messages along it.
@@ -305,6 +307,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         let kind: Kind
         let start: CGPoint
         let frame: CGRect
+        /// The edges an image card is resized from.
+        var edges: ImageResize.Edges = [.right, .bottom]
     }
 
     init(store: AgentStore, browsers: BrowserStore, fileTrees: FileTreeStore) {
@@ -341,6 +345,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         store.onMessage = { [weak self] message in self?.showMessage(message) }
         store.onRunnersChange = { [weak self] in self?.syncLayers() }
         browsers.onPageChange = { [weak self] _ in self?.syncLayers() }
+        registerForDraggedTypes([.fileURL])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -492,6 +497,54 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         beginPostItEditing(on: record.id, at: nil)
     }
 
+    /// Asks for picture files and adds a card for each.
+    func addImages() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        guard let window else { return }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard response == .OK, let self else { return }
+            self.addImages(panel.urls.map(ImageSource.file), at: nil)
+        }
+    }
+
+    /// Adds a card per picture: at `point` (world), cascading, or where new cards go. A refused
+    /// file is reported once all are in.
+    fileprivate func addImages(_ sources: [ImageSource], at point: CGPoint?) {
+        var refused: [String] = []
+        var added: ImageRecord?
+        for (index, source) in sources.enumerated() {
+            let step = CGFloat(index) * 32
+            do {
+                let origin = point.map { CGPoint(x: $0.x + step, y: $0.y + step) } ?? newCardOrigin(for: CGSize(width: ImageRecord.initialSide, height: ImageRecord.initialSide))
+                let record = try store.addImage(source, named: source.baseName, to: worktree, at: origin)
+                appearing.insert(record.id)
+                added = record
+            } catch {
+                let name = if case .file(let url) = source { url.lastPathComponent } else { L("The pasted picture") }
+                let reason = switch error as? ImageFiles.Failure {
+                case .tooLarge: L("\(name) is larger than 20 MB.")
+                case .notAnImage: L("\(name) isn't a picture the board can show.")
+                default: L("\(name) couldn't be read.")
+                }
+                refused.append(reason)
+            }
+        }
+        if let added {
+            bringIntoView(added.frame)
+            focusedID = added.id
+            window?.makeFirstResponder(self)
+            syncLayers()
+        }
+        guard !refused.isEmpty, let window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = refused.count == 1 ? L("Couldn't add the image") : L("Couldn't add \(refused.count) images")
+        alert.informativeText = refused.joined(separator: "\n")
+        alert.beginSheetModal(for: window)
+    }
+
     func addFileTree() {
         let record = fileTrees.add(to: worktree, at: newCardOrigin(for: FileTreeRecord.size))
         appearing.insert(record.id)
@@ -595,6 +648,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }
         }
         syncPostIts(scale: renderScale)
+        syncImages(scale: renderScale)
         syncBrowsers(onScreen: onScreen, scale: renderScale)
         syncFileTrees(scale: renderScale)
         syncLinks(scale: renderScale)
@@ -614,7 +668,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             browserCards[id] = nil
         }
         if let editingAddress, !ids.contains(editingAddress) { endAddressEditing() }
-        let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count)
+        let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count + store.images(in: worktree).count)
         for (index, record) in records.enumerated() {
             if onScreen { browsers.show(record.id) }
             let card = browserCards[record.id] ?? {
@@ -643,6 +697,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// Every card of this worktree, agents, post-its then browsers: bottom to top.
     private var itemFrames: [(id: UUID, frame: CGRect)] {
         store.agents(in: worktree).map { ($0.id, $0.frame) } + store.postIts(in: worktree).map { ($0.id, $0.frame) }
+            + store.images(in: worktree).map { ($0.id, $0.frame) }
             + browsers.browsers(in: worktree).map { ($0.id, $0.frame) } + fileTrees.trees(in: worktree).map { ($0.id, $0.frame) }
     }
 
@@ -1061,7 +1116,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// The topmost agent card under a world point, unless a browser or post-it covers it.
     private func card(at point: CGPoint) -> AgentRecord? {
-        guard browser(at: point) == nil, postIt(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, postIt(at: point) == nil, image(at: point) == nil, fileTree(at: point) == nil else { return nil }
         return store.agents(in: worktree).last { $0.frame.contains(point) }
     }
 
@@ -1078,17 +1133,23 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// The topmost post-it under a world point, unless a browser card covers it.
     fileprivate func postIt(at point: CGPoint) -> PostItRecord? {
-        guard browser(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, fileTree(at: point) == nil, image(at: point) == nil else { return nil }
         return store.postIts(in: worktree).last { $0.frame.contains(point) }
+    }
+
+    /// The topmost image under a world point; images sit above post-its, below browsers.
+    fileprivate func image(at point: CGPoint) -> ImageRecord? {
+        guard browser(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        return store.images(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost card of any kind under a world point.
     private func item(at point: CGPoint) -> UUID? {
-        fileTree(at: point)?.id ?? browser(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
+        fileTree(at: point)?.id ?? browser(at: point)?.id ?? image(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
     }
 
     private func frame(of id: UUID) -> CGRect? {
-        record(id)?.frame ?? store.postIt(id)?.frame ?? browsers.record(id)?.frame ?? fileTrees.record(id)?.frame
+        record(id)?.frame ?? store.postIt(id)?.frame ?? store.image(id)?.frame ?? browsers.record(id)?.frame ?? fileTrees.record(id)?.frame
     }
 
     private func record(_ id: UUID) -> AgentRecord? {
@@ -1199,6 +1260,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return
         }
         endAddressEditing()
+        if let image = image(at: location) {
+            endPostItEditing()
+            imageMouseDown(image, at: location, event: event)
+            syncLayers()
+            return
+        }
         endCardRename()
         if let postIt = postIt(at: location) {
             postItMouseDown(postIt, at: location, event: event)
@@ -1308,7 +1375,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             frame.origin.x += dx
             frame.origin.y += dy
         case .resize:
-            if let record = browsers.record(interaction.id) {
+            if let record = store.image(interaction.id) {
+                frame = ImageResize.frame(resizing: frame, edges: interaction.edges, by: CGSize(width: dx, height: dy), pixelSize: record.pixelSize)
+            } else if let record = browsers.record(interaction.id) {
                 frame = Self.browserFrame(resizing: frame, by: CGSize(width: dx, height: dy), device: record.device)
             } else {
                 frame.size.width = max(CardMetrics.minimumSize.width, frame.width + dx)
@@ -1402,6 +1471,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let tree, CardMetrics.close(of: tree.frame).contains(point) {
             hovered = tree.id
         }
+        let image = image(at: point)
+        if let image, ImageCardLayout(size: image.frame.size).close.contains(local(point, in: image.frame)) {
+            hovered = image.id
+        }
         let browser = browser(at: point)
         let control = browser.flatMap { record in Self.control(at: point, in: record).map { (record.id, $0) } }
         if let browser, browser.id == focusedID, BrowserCardLayout(frame: browser.frame, record: browser).content.contains(point) {
@@ -1418,7 +1491,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             syncLayers()
         }
         let handle = handle(at: point)
-        let showing = handle?.card ?? tree?.id ?? browser?.id ?? postIt?.id ?? card?.id
+        let showing = handle?.card ?? tree?.id ?? browser?.id ?? image?.id ?? postIt?.id ?? card?.id
         if control?.0 != hoveredControl?.card || control?.1 != hoveredControl?.control {
             hoveredControl = control.map { (card: $0.0, control: $0.1) }
             syncLayers()
@@ -1545,6 +1618,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 observed.remove(id)
             } else if store.postIt(id) != nil {
                 store.removePostIt(id)
+            } else if store.image(id) != nil {
+                store.removeImage(id)
             } else if browsers.record(id) != nil {
                 browsers.remove(id)
             } else if fileTrees.record(id) != nil {
@@ -1599,6 +1674,18 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let id = focusedBrowser, window?.firstResponder === self, browserKeyEquivalent(event, to: id) { return true }
         if flags == .command, event.charactersIgnoringModifiers == "v", focusedSession != nil, window?.firstResponder === self {
             paste(nil)
+            return true
+        }
+        // With no terminal focused and no text being edited, a pasted picture becomes a card.
+        if flags == .command, event.charactersIgnoringModifiers == "v", focusedSession == nil, window?.firstResponder === self,
+           let source = ImageSource.read(from: .general) {
+            addImages([source], at: nil)
+            return true
+        }
+        if flags == .command, event.charactersIgnoringModifiers == "c", window?.firstResponder === self,
+           let id = focusedID, store.image(id) != nil, let image = imageCards[id]?.image {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([NSImage(cgImage: image, size: .zero)])
             return true
         }
         if flags.subtracting(.shift) == .command, window?.firstResponder === self {
@@ -1769,7 +1856,9 @@ extension BoardView {
     }
 
     fileprivate func setFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
-        if fileTrees.record(id) != nil {
+        if store.image(id) != nil {
+            store.setImageFrame(frame, for: id, persist: persist)
+        } else if fileTrees.record(id) != nil {
             fileTrees.setFrame(frame, for: id, persist: persist)
         } else if browsers.record(id) != nil {
             browsers.setFrame(frame, for: id, persist: persist)
@@ -2051,7 +2140,7 @@ extension BoardView {
     // MARK: Card name
 
     fileprivate func beginCardRename(_ id: UUID) {
-        guard let record = record(id) else { return }
+        guard let name = record(id)?.name ?? store.image(id)?.name else { return }
         let field = nameField ?? {
             let field = NSTextField()
             field.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -2063,7 +2152,8 @@ extension BoardView {
             return field
         }()
         renamingCard = id
-        field.stringValue = record.name
+        field.placeholderString = store.image(id) != nil ? L("Image name") : L("Agent name")
+        field.stringValue = name
         if field.superview == nil { addSubview(field) }
         placeNameField()
         window?.makeFirstResponder(field)
@@ -2071,10 +2161,10 @@ extension BoardView {
     }
 
     fileprivate func placeNameField() {
-        guard let field = nameField, let id = renamingCard, let record = record(id) else { return }
-        let frame = record.frame
+        guard let field = nameField, let id = renamingCard, let frame = record(id)?.frame ?? store.image(id)?.frame else { return }
+        let height = store.image(id) != nil ? ImageRecord.titleHeight : CardMetrics.titleHeight
         let title = CGRect(x: frame.minX + CardMetrics.inset, y: frame.minY,
-                           width: frame.width - CardMetrics.inset * 2 - CardMetrics.closeSize - 8, height: CardMetrics.titleHeight)
+                           width: frame.width - CardMetrics.inset * 2 - CardMetrics.closeSize - 8, height: height)
         let rect = screen(title)
         field.frame = CGRect(x: rect.minX, y: rect.midY - 11, width: max(120, rect.width), height: 22)
     }
@@ -2085,7 +2175,9 @@ extension BoardView {
         renamingCard = nil
         let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         field.removeFromSuperview()
-        if commit, !name.isEmpty { store.rename(id, to: name) }
+        if commit, !name.isEmpty {
+            if store.image(id) != nil { store.renameImage(id, to: name) } else { store.rename(id, to: name) }
+        }
         window?.makeFirstResponder(self)
         syncLayers()
     }
@@ -2907,7 +2999,8 @@ extension BoardView {
             views.bar.removeFromSuperview()
             fileTreeViews[id] = nil
         }
-        let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count + browsers.browsers(in: worktree).count)
+        let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count + store.images(in: worktree).count
+            + browsers.browsers(in: worktree).count)
         for (index, record) in records.enumerated() {
             let card = fileTreeCards[record.id] ?? {
                 let card = FileTreeCardLayer()
@@ -2971,5 +3064,86 @@ extension BoardView {
             // The title bar and the card's margins move it.
             interaction = Interaction(id: record.id, kind: .move, start: point, frame: frame)
         }
+    }
+}
+
+// MARK: Images
+
+extension BoardView {
+    /// Images sit above the post-its and below the browsers, in their own stacking order.
+    fileprivate func syncImages(scale: CGFloat) {
+        let records = store.images(in: worktree)
+        let ids = Set(records.map(\.id))
+        for (id, card) in imageCards where !ids.contains(id) {
+            card.removeFromSuperlayer()
+            imageCards[id] = nil
+        }
+        let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count)
+        for (index, record) in records.enumerated() {
+            let card = imageCards[record.id] ?? {
+                let card = ImageCardLayer()
+                imageCards[record.id] = card
+                cardsLayer.addSublayer(card)
+                if appearing.remove(record.id) != nil { card.animateAppearance() }
+                return card
+            }()
+            card.zPosition = below + CGFloat(index)
+            card.update(frame: record.frame, record: record, dataFolder: store.dataFolder, focused: record.id == focusedID,
+                        closeHovered: hoveredClose == record.id, renaming: renamingCard == record.id, scale: scale)
+            let showsHandles = linkDrag != nil || record.id == hoveredCard
+            let lit: Int? = if let linkDrag {
+                linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
+            } else {
+                record.id == hoveredCard ? hoveredHandle : nil
+            }
+            card.updateHandles(visible: showsHandles, hovered: lit, linkTarget: linkDrag?.target == record.id)
+        }
+    }
+
+    fileprivate func imageMouseDown(_ record: ImageRecord, at location: CGPoint, event: NSEvent) {
+        let frame = record.frame
+        let start = convert(event.locationInWindow, from: nil)
+        focusedID = record.id
+        store.raiseImage(record.id)
+        let point = local(location, in: frame)
+        let edges = ImageResize.edges(at: location, in: frame, reach: 8 / zoom)
+        let corner = CardMetrics.resizeHandle / zoom
+        if ImageCardLayout(size: frame.size).close.contains(point) {
+            endCardRename()
+            store.removeImage(record.id)
+            focusedID = nil
+            hoveredClose = nil
+        } else if !edges.isEmpty || (location.x > frame.maxX - corner && location.y > frame.maxY - corner) {
+            endCardRename()
+            interaction = Interaction(id: record.id, kind: .resize, start: start, frame: frame, edges: edges.isEmpty ? [.right, .bottom] : edges)
+        } else if event.clickCount == 2, point.y < ImageRecord.titleHeight {
+            // Double-clicking the title renames the image.
+            beginCardRename(record.id)
+        } else {
+            endCardRename()
+            interaction = Interaction(id: record.id, kind: .move, start: start, frame: frame)
+        }
+    }
+
+    // MARK: Dropping files
+
+    private func droppedImages(_ info: NSDraggingInfo) -> [URL] {
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.filter(ImageSource.isImageFile)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedImages(sender).isEmpty ? [] : .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedImages(sender).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = droppedImages(sender)
+        guard !urls.isEmpty else { return false }
+        addImages(urls.map(ImageSource.file), at: world(convert(sender.draggingLocation, from: nil)))
+        return true
     }
 }

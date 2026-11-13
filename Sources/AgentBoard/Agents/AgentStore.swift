@@ -19,6 +19,10 @@ final class AgentStore {
     private(set) var connections: [Connection] = []
     /// Post-its (see AgentStore+PostIts.swift).
     var postIts: [PostItRecord] = []
+    /// Images (see AgentStore+Images.swift).
+    var images: [ImageRecord] = []
+    /// Where pictures are stored: the folder the core shares.
+    @ObservationIgnored var dataFolder = DataFolder.url
     /// Agents waiting on the developer, in every organization, oldest first.
     private(set) var attention: [AttentionRequest] = []
     /// False until the core has said which cards there are.
@@ -152,6 +156,7 @@ final class AgentStore {
         replacedCore = false
         agents = state.cards
         postIts = state.postIts ?? []
+        images = state.images ?? []
         attention = state.attention ?? []
         connections = state.connections
         runnerReport = state.runners
@@ -179,7 +184,7 @@ final class AgentStore {
         for session in sessions.values { session.fail(L("Couldn't start the process that runs the agents.")) }
     }
 
-    private func received(_ event: BoardEvent) {
+    func received(_ event: BoardEvent) {
         switch event {
         case .cardAdded(let record):
             guard self.record(record.id) == nil else { return }
@@ -205,8 +210,15 @@ final class AgentStore {
         case .postItRemoved(let id):
             postIts.removeAll { $0.id == id }
             connections.removeAll { $0.touches(id) }
-        case .imageAdded, .imageUpdated, .imageRemoved:
-            break // contract stub: board track
+        case .imageAdded(let record):
+            guard image(record.id) == nil else { return }
+            images.append(record)
+        case .imageUpdated(let record):
+            guard let index = images.firstIndex(where: { $0.id == record.id }) else { return }
+            images[index] = record
+        case .imageRemoved(let id):
+            images.removeAll { $0.id == id }
+            connections.removeAll { $0.touches(id) }
         case .attention(let list):
             attention = list
         case .toolCall(let call, let name, let arguments, let caller):
@@ -283,7 +295,8 @@ final class AgentStore {
 
     /// The lines between cards of `worktree`; `elements` are its other cards (browsers…).
     func connections(in worktree: String, elements: Set<UUID> = []) -> [Connection] {
-        let ids = Set(agents(in: worktree).map(\.id)).union(postIts(in: worktree).map(\.id)).union(elements)
+        let ids = Set(agents(in: worktree).map(\.id)).union(postIts(in: worktree).map(\.id))
+            .union(images(in: worktree).map(\.id)).union(elements)
         return connections.filter { ids.contains($0.a) && ids.contains($0.b) }
     }
 

@@ -66,6 +66,7 @@ final class BrowserTools {
         let worktree = agent.worktree
         let items = agents.agents.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: $0.runner == nil) }
             + agents.postIts.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
+            + agents.images.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
             + store.browsers.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
         return BoardLayout.slot(for: size, parent: agent.id, among: items, connections: agents.connections)
             ?? CGPoint(x: agent.frame.maxX + BoardLayout.columnGap, y: agent.frame.minY)

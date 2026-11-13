@@ -78,6 +78,7 @@ struct WorktreeCanvas: View {
 
     private var isEmpty: Bool {
         agents.isLoaded && agents.agents(in: worktree.path).isEmpty && agents.postIts(in: worktree.path).isEmpty
+            && agents.images(in: worktree.path).isEmpty
             && browsers.browsers(in: worktree.path).isEmpty
             && fileTrees.trees(in: worktree.path).isEmpty
     }
@@ -108,6 +109,11 @@ private struct CanvasToolbar: View {
                 .fixedSize()
                 .accessibilityLabel(L("Add post-it"))
                 .help(L("A new post-it in markdown: you and every agent connected to it read and write it."))
+            Button { board.addImages() } label: { Image(systemName: "photo") }
+                .buttonStyle(ToolbarButtonStyle(icon: true))
+                .fixedSize()
+                .accessibilityLabel(L("Add image"))
+                .help(L("Puts pictures from your files on the board; agents connected to one see it."))
             Button { board.addFileTree() } label: { Image(systemName: "folder") }
                 .buttonStyle(ToolbarButtonStyle(icon: true))
                 .fixedSize()
