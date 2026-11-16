@@ -67,10 +67,22 @@ public enum OrganizationHome {
         try? files.copyItem(at: account, to: directory.appendingPathComponent(".claude.json"))
         try? files.copyItem(at: userClaude.appendingPathComponent(".credentials.json"),
                             to: directory.appendingPathComponent(".credentials.json"))
-        guard let secret = security(["find-generic-password", "-s", keychainService(nil), "-w"]) else { return }
-        let user = NSUserName()
-        _ = security(["add-generic-password", "-U", "-a", user, "-s", keychainService(directory), "-w", secret])
+        inheritKeychainLogin(into: directory, credentials: credentials())
     }
+
+    /// Copies the default login's keychain item to the one Claude Code reads for `directory`.
+    static func inheritKeychainLogin(into directory: URL, credentials: any CredentialStore) {
+        guard let secret = credentials.secret(service: keychainService(nil)) else { return }
+        credentials.save(secret, service: keychainService(directory), account: NSUserName())
+    }
+
+    /// The login keychain, except for an isolated instance, which gets one of its own in memory:
+    /// a harness adding organizations must never write the user's keychain.
+    static func credentials(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> any CredentialStore {
+        DataFolder.isIsolated(environment) ? isolatedCredentials : KeychainCredentials()
+    }
+
+    private static let isolatedCredentials = InMemoryCredentials()
 
     /// The keychain item Claude Code keeps an organization's login in.
     public static func keychainService(organization id: UUID?) -> String {
@@ -85,7 +97,7 @@ public enum OrganizationHome {
         return "Claude Code-credentials-" + hash.prefix(8)
     }
 
-    private static func security(_ arguments: [String]) -> String? {
+    fileprivate static func security(_ arguments: [String]) -> String? {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -99,4 +111,35 @@ public enum OrganizationHome {
         let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .newlines)
         return text.isEmpty ? nil : text
     }
+}
+
+/// Where logins' secrets are kept, by keychain service name.
+protocol CredentialStore: Sendable {
+    func secret(service: String) -> String?
+    func save(_ secret: String, service: String, account: String)
+}
+
+/// The user's login keychain, through `security`, the tool Claude Code stores logins with.
+struct KeychainCredentials: CredentialStore {
+    func secret(service: String) -> String? {
+        OrganizationHome.security(["find-generic-password", "-s", service, "-w"])
+    }
+
+    func save(_ secret: String, service: String, account: String) {
+        _ = OrganizationHome.security(["add-generic-password", "-U", "-a", account, "-s", service, "-w", secret])
+    }
+}
+
+/// Secrets kept in memory, for isolated instances and tests.
+final class InMemoryCredentials: CredentialStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var secrets: [String: String]
+
+    init(_ secrets: [String: String] = [:]) { self.secrets = secrets }
+
+    var services: [String] { lock.withLock { Array(secrets.keys) } }
+
+    func secret(service: String) -> String? { lock.withLock { secrets[service] } }
+
+    func save(_ secret: String, service: String, account: String) { lock.withLock { secrets[service] = secret } }
 }

@@ -21,6 +21,7 @@ final class Instance: @unchecked Sendable {
         self.core = core
         var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("CLAUDE") }
         environment["AGENTBOARD_HOME"] = home.path
+        environment["AGENTBOARD_TEST"] = "1"
         environment["AGENTBOARD_CORE_SOCKET"] = socket
         // Runners run in `$SHELL -l`: a plain sh with an empty home prints nothing of its own, so
         // what a terminal shows is exactly what its program wrote.

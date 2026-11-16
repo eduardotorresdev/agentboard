@@ -1,0 +1,69 @@
+#!/bin/bash
+# The only way to run tests here. Three layers keep the user's data out of reach:
+#   1. AGENTBOARD_HOME is a fresh temp folder and AGENTBOARD_TEST=1 (the app aborts otherwise);
+#   2. the tests run inside a system sandbox that denies writes to the real data folders;
+#   3. the real folders and preferences are fingerprinted before and after; any change fails.
+# Usage: scripts/test-safe [--no-home] [swift-testing args, e.g. --filter X --no-parallel]
+#   --no-home: leave AGENTBOARD_HOME unset (only to prove the app aborts; the sandbox still holds).
+# The keychain isn't covered by the sandbox: an isolated home uses in-memory credentials, and the
+# count of agent login items is part of the fingerprint.
+set -uo pipefail
+# One run at a time on this machine: parallel suites starve each other's timing tests.
+[ -n "${TEST_SAFE_LOCKED:-}" ] || TEST_SAFE_LOCKED=1 exec /usr/bin/lockf "${TMPDIR:-/tmp}/agentboard-test-safe.lock" "$0" "$@"
+cd "$(dirname "$0")/.."
+
+SUPPORT="$HOME/Library/Application Support"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/agentboard-test.XXXXXX")"
+SCRATCH="${AGENTBOARD_TEST_BUILD:-.build/test-safe}"
+
+fingerprint() {
+    # Skipped: the core's log and socket, and the agents' own config folders, which the installed
+    # app's agents keep syncing.
+    for d in AgentBoard "AgentBoard Dev"; do
+        (cd "$SUPPORT/$d" 2>/dev/null && find . -type f ! -name core.log ! -name 'core.sock*' ! -path './organizations/*/claude/*' -exec shasum {} + | sort -k2)
+    done
+    # The installed app keeps writing its own preferences while in use (cameras, selection), so
+    # only entries naming a temporary folder count: those can only come from a run like this one.
+    for domain in AgentBoard "AgentBoard Dev" dev.agentboard.AgentBoard swiftpm-testing-helper; do
+        defaults read "$domain" 2>/dev/null | grep -E "/private/tmp|/var/folders|/tmp/" | sed "s|^|$domain: |"
+    done
+    security dump-keychain 2>/dev/null | grep -c "Claude Code-credentials"
+}
+
+NO_HOME=false
+if [ "${1:-}" = "--no-home" ]; then NO_HOME=true; shift; fi
+
+# SwiftPM sandboxes its own manifest build and can't nest inside ours: build outside, run inside.
+swift build --build-tests --scratch-path "$SCRATCH" 2>&1 | grep -E "error:|Build complete" | sort -u
+[ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+
+DEV=/Applications/Xcode.app/Contents/Developer
+HELPER="$DEV/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper"
+BUNDLE="$PWD/$SCRATCH/arm64-apple-macosx/debug/AgentBoardPackageTests.xctest/Contents/MacOS/AgentBoardPackageTests"
+POLICY="(version 1)(allow default)(deny file-write* (subpath \"$SUPPORT/AgentBoard\") (subpath \"$SUPPORT/AgentBoard Dev\"))"
+
+fingerprint > "$WORK/before"
+ENVIRONMENT=(AGENTBOARD_TEST=1 "DYLD_FRAMEWORK_PATH=$DEV/Platforms/MacOSX.platform/Developer/Library/Frameworks:$DEV/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks"
+    "DYLD_LIBRARY_PATH=$DEV/Platforms/MacOSX.platform/Developer/usr/lib")
+$NO_HOME || ENVIRONMENT+=("AGENTBOARD_HOME=$WORK/home" "HOME=$WORK/user")
+mkdir -p "$WORK/home" "$WORK/user"
+# /usr/bin/env sets DYLD_* after the sandbox's exec, which would strip them.
+safely() { env -u AGENTBOARD_HOME sandbox-exec -p "$POLICY" /usr/bin/env "${ENVIRONMENT[@]}" "$@"; }
+# Serial: WorktreeTitleTests hold the main thread for seconds each (real repositories), which
+# starves the suites whose cores answer on the main queue when they run alongside.
+safely "$HELPER" --test-bundle-path "$BUNDLE" "$BUNDLE" --testing-library swift-testing --no-parallel "$@"
+STATUS=$?
+# The few XCTest suites run whole: their filter syntax differs. XCTEST=0 skips them.
+if [ "${XCTEST:-1}" = 1 ]; then
+    safely "$DEV/usr/bin/xctest" "${BUNDLE%/Contents/MacOS/*}" 2>&1 | grep -E "error:|failed|Executed .* tests"
+    [ "${PIPESTATUS[0]}" -eq 0 ] || STATUS=1
+fi
+fingerprint > "$WORK/after"
+
+if ! diff -q "$WORK/before" "$WORK/after" >/dev/null; then
+    echo "test-safe: THE REAL DATA FOLDER OR PREFERENCES CHANGED. Stop and report:" >&2
+    diff "$WORK/before" "$WORK/after" >&2
+    exit 99
+fi
+echo "test-safe: real data unchanged (exit $STATUS, work folder $WORK)"
+exit $STATUS

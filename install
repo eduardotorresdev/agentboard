@@ -9,6 +9,9 @@
 # AGENTBOARD_HOME installs onto another data folder (to try installing out).
 set -euo pipefail
 cd "$(dirname "$0")"
+# Test and benchmark switches never reach the installed app or its core (AGENTBOARD_TEST=1 makes
+# it refuse to start, AGENTBOARD_LOCAL keeps agents in the app, a bench database isn't the user's).
+unset AGENTBOARD_TEST AGENTBOARD_LOCAL AGENTBOARD_BENCH_DB
 
 DEST="${INSTALL_DIR:-/Applications}/AgentBoard.app"
 BUNDLE_ID="dev.agentboard.AgentBoard"
@@ -68,8 +71,17 @@ APP_PIDS=$( (pgrep -f "^$DEST/Contents/MacOS/AgentBoard\$"; pgrep -f "^$REAL_DES
 mv "$APP" "$DEST"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST" 2>/dev/null || true
 
-# The agents move to the new core; with none running, this starts one.
-"$DEST/Contents/MacOS/AgentBoardCore" --take-over
+# The agents move to the new core; with none running, this starts one. If that fails, the old
+# core keeps its agents, and the previous app goes back in place for them.
+if ! "$DEST/Contents/MacOS/AgentBoardCore" --take-over; then
+    if [ -d "$STAGE/previous.app" ]; then
+        mv "$DEST" "$STAGE/failed.app" && mv "$STAGE/previous.app" "$DEST"
+        echo "install: the new core couldn't take the agents over; the previous app is back in place and its core keeps them." >&2
+    else
+        echo "install: the new core couldn't start." >&2
+    fi
+    exit 1
+fi
 
 # SIGTERM leaves the agents on the core (Cmd+Q would end them).
 for pid in $APP_PIDS; do

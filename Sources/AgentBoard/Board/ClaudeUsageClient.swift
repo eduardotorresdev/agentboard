@@ -20,6 +20,10 @@ struct ClaudeUsage: Equatable {
 enum ClaudeUsageClient {
     /// The usage of the account the organization's agents are signed in to.
     static func fetch(organization: UUID) async throws -> ClaudeUsage {
+        // An isolated instance (tests, harnesses) never reads the user's keychain, not even to look.
+        guard !DataFolder.isIsolated(), ProcessInfo.processInfo.environment["AGENTBOARD_TEST"] != "1" else {
+            throw URLError(.userAuthenticationRequired)
+        }
         let service = OrganizationHome.keychainService(organization: organization)
         guard let token = token(service: service) else { throw URLError(.userAuthenticationRequired) }
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)

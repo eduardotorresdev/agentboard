@@ -14,7 +14,9 @@ public final class InProcessCore {
     public init(database: URL? = nil) throws {
         socketPath = (NSTemporaryDirectory() as NSString).appendingPathComponent("agentboard-local-\(getpid()).sock")
         server = CoreServer(socketPath: socketPath, idleTimeout: .greatestFiniteMagnitude, queue: .main)
-        orchestrator = Orchestrator(server: server, database: database)
+        // Its key, port and media live beside the database it was given, never in the user's folder.
+        orchestrator = Orchestrator(server: server, database: database,
+                                    dataFolder: database?.deletingLastPathComponent() ?? DataFolder.url)
         server.service = orchestrator
         try server.start()
     }

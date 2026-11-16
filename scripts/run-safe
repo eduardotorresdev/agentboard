@@ -1,0 +1,43 @@
+#!/bin/bash
+# The only way to launch a build of the app (renders, window harnesses) or a benchmark here,
+# with the same three layers as scripts/test-safe: a temp AGENTBOARD_HOME and HOME with
+# AGENTBOARD_TEST=1, a system sandbox denying writes to the real data folders, and a fingerprint
+# of those folders, the app's preferences and the agent login items before and after.
+# Usage: scripts/run-safe <command> [args...]   e.g. scripts/run-safe .build/debug/AgentBoard
+# Extra environment for the command passes through (SNAPSHOT_PATH=… scripts/run-safe …).
+set -uo pipefail
+cd "$(dirname "$0")/.."
+[ $# -gt 0 ] || { echo "usage: scripts/run-safe <command> [args...]" >&2; exit 2; }
+
+SUPPORT="$HOME/Library/Application Support"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/agentboard-run.XXXXXX")"
+POLICY="(version 1)(allow default)(deny file-write* (subpath \"$SUPPORT/AgentBoard\") (subpath \"$SUPPORT/AgentBoard Dev\") (subpath \"/Applications/AgentBoard.app\"))"
+
+fingerprint() {
+    # Skipped: the core's log and socket, and the agents' own config folders, which the installed
+    # app's agents keep syncing.
+    for d in AgentBoard "AgentBoard Dev"; do
+        (cd "$SUPPORT/$d" 2>/dev/null && find . -type f ! -name core.log ! -name 'core.sock*' ! -path './organizations/*/claude/*' -exec shasum {} + | sort -k2)
+    done
+    # The installed app keeps writing its own preferences while in use (cameras, selection), so
+    # only entries naming a temporary folder count: those can only come from a run like this one.
+    for domain in AgentBoard "AgentBoard Dev" dev.agentboard.AgentBoard swiftpm-testing-helper; do
+        defaults read "$domain" 2>/dev/null | grep -E "/private/tmp|/var/folders|/tmp/" | sed "s|^|$domain: |"
+    done
+    security dump-keychain 2>/dev/null | grep -c "Claude Code-credentials"
+}
+
+mkdir -p "$WORK/home" "$WORK/user"
+fingerprint > "$WORK/before"
+env -u AGENTBOARD_HOME sandbox-exec -p "$POLICY" /usr/bin/env AGENTBOARD_TEST=1 \
+    "AGENTBOARD_HOME=$WORK/home" "HOME=$WORK/user" "$@"
+STATUS=$?
+fingerprint > "$WORK/after"
+
+if ! diff -q "$WORK/before" "$WORK/after" >/dev/null; then
+    echo "run-safe: THE REAL DATA FOLDER OR PREFERENCES CHANGED. Stop and report:" >&2
+    diff "$WORK/before" "$WORK/after" >&2
+    exit 99
+fi
+echo "run-safe: real data unchanged (exit $STATUS, work folder $WORK)"
+exit $STATUS

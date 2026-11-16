@@ -24,7 +24,10 @@ final class AppRun {
         // turns back into /var/…), since that is how the app matches worktrees.
         let main = try Self.realPath(repo), empty = try Self.realPath(other)
 
-        let database = directory.appendingPathComponent("bench.sqlite")
+        // The run's data folder holds its database too: the app refuses one kept anywhere else.
+        let home = directory.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let database = home.appendingPathComponent("bench.sqlite")
         try Self.seed(database, project: main)
 
         // `claude` takes the first free slot; past `working`, an agent waits at its start screen.
@@ -47,6 +50,9 @@ final class AppRun {
         var environment = ProcessInfo.processInfo.environment
         environment["SHELL"] = shell.path
         environment["AGENTBOARD_BENCH_DB"] = database.path
+        // The run's own data folder: never the user's (tools.port, tools.key, organizations).
+        environment["AGENTBOARD_HOME"] = home.path
+        environment["AGENTBOARD_TEST"] = "1"
         environment["AGENTBOARD_BENCH_WORKTREE"] = main
         environment["AGENTBOARD_BENCH_BACKGROUND"] = "1"
         if scenario.focusPrinting { environment["AGENTBOARD_BENCH_FOCUS"] = "printing" }
