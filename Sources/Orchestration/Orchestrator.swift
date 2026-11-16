@@ -735,9 +735,10 @@ final class AgentEndpoint: MessageEndpoint {
         // Whatever was on the line goes in with this prompt.
         line = TerminalLine()
         delivering = true
-        let prompt = TerminalLine.pasteable(outbox.removeFirst().text,
-                                            bracketed: session.withTerminal { $0.modes.contains(.bracketedPaste) })
-        session.send(session.withTerminal { $0.encodePaste(prompt) })
+        let next = outbox.removeFirst()
+        let prompt = TerminalLine.pasteable(next.text, bracketed: session.withTerminal { $0.modes.contains(.bracketedPaste) })
+        // A slash command is typed, not pasted, so the program runs it as if keyed in.
+        session.send(next.fromUser && TerminalLine.isCommand(prompt) ? Array(prompt.utf8) : session.withTerminal { $0.encodePaste(prompt) })
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.submitDelay) { [weak self] in
             session.send([0x0D])
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.submitDelay) {
@@ -826,6 +827,11 @@ struct TerminalLine {
 
     /// `text` safe to paste: no control characters but line breaks and tabs, and on one line
     /// when the program doesn't bracket pastes (each break would be an Enter).
+    /// `/effort high`, `/compact`…: one line starting with a slash.
+    static func isCommand(_ text: String) -> Bool {
+        text.hasPrefix("/") && !text.contains(where: \.isNewline)
+    }
+
     static func pasteable(_ text: String, bracketed: Bool) -> String {
         let kept = text.unicodeScalars.filter { scalar in
             scalar == "\n" || scalar == "\t" || !(scalar.properties.generalCategory == .control)

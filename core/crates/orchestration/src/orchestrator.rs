@@ -720,7 +720,11 @@ impl BoardView<'_> {
         // Whatever was on the line goes in with this prompt.
         endpoint.line = TerminalLine::default();
         endpoint.delivering = true;
-        let paste = session.with_terminal(|terminal| terminal.encode_paste(&TerminalLine::pasteable(&next.text, terminal.modes().contains(TerminalModes::BRACKETED_PASTE))));
+        let paste = session.with_terminal(|terminal| {
+            let text = TerminalLine::pasteable(&next.text, terminal.modes().contains(TerminalModes::BRACKETED_PASTE));
+            // A slash command is typed, not pasted, so the program runs it as if keyed in.
+            if next.from_user && TerminalLine::is_command(&text) { text.into_bytes() } else { terminal.encode_paste(&text) }
+        });
         session.send(paste);
         self.store.handle.post_after(AgentEndpoint::SUBMIT_DELAY, move |_: &mut Orchestrator, server| {
             session.send(vec![0x0D]);
@@ -840,6 +844,11 @@ impl TerminalLine {
 
     /// `text` safe to paste: no control characters but line breaks and tabs, and on one line
     /// when the program doesn't bracket pastes (each break would be an Enter).
+    /// `/effort high`, `/compact`…: one line starting with a slash.
+    pub fn is_command(text: &str) -> bool {
+        text.starts_with('/') && !text.contains(is_newline)
+    }
+
     pub fn pasteable(text: &str, bracketed: bool) -> String {
         let clean: String = text.chars().filter(|scalar| *scalar == '\n' || *scalar == '\t' || !scalar.is_control()).collect();
         if bracketed {
