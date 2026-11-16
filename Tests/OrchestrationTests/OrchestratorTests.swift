@@ -7,7 +7,8 @@ import Testing
 @testable import Orchestration
 
 func waitUntil(_ condition: @MainActor () -> Bool) async throws {
-    let deadline = Date().addingTimeInterval(10)
+    // Generous: conditions wait on the main queue, which slows down a lot when test runs share the machine.
+    let deadline = Date().addingTimeInterval(30)
     while await !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
 }
 
@@ -128,8 +129,9 @@ struct OrchestratorTests {
         #expect(peers.text.contains("Bob"))
         let sent = try await call("send_message", ["to": "Bob", "message": "hello there"], as: a.id, on: core)
         #expect(!sent.isError, "\(sent.text)")
-        try await waitUntil { core.screen(b.id).contains("got hello there") }
-        #expect(await core.screen(b.id).contains("got hello there"))
+        // Unbracketed (the echo agent), the message is pasted on one line: header, then text.
+        try await waitUntil { core.screen(b.id).contains("hello there") }
+        #expect(await core.screen(b.id).contains("got Message from “Ada”"))
 
         let started = try await call("runner_start", ["command": "printf 'serving\\n'; sleep 30", "name": "web", "wait": false],
                                      as: a.id, on: core)
@@ -275,6 +277,50 @@ struct OrchestratorTests {
         let direct = #"{"hook_event_name":"Stop","last_assistant_message":"Said directly"}"#
         orchestrator.sessionNotified(card.id, [AgentHook.prefix + Data(direct.utf8).base64EncodedString()])
         #expect(orchestrator.attention.first?.context == "Said directly")
+    }
+
+    /// A saved board that can't be read isn't an empty one: its lines are never replaced.
+    @MainActor @Test func anUnreadableBoardKeepsItsLines() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ablines-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("agentboard.sqlite")
+        let a = agent("Ada", in: folder), b = agent("Bob", in: folder)
+        do {
+            let database = try CardDatabase(url: url)
+            try database.saveAgent(a)
+            try database.saveAgent(b)
+            try database.saveConnections([Connection(a: a.id, b: b.id)])
+        }
+        // A post-its table that can't be read, as a damaged or newer file would have.
+        var db: OpaquePointer?
+        #expect(sqlite3_open(url.path, &db) == SQLITE_OK)
+        #expect(sqlite3_exec(db, "DROP TABLE postits; CREATE TABLE postits (x)", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+
+        let server = CoreServer(socketPath: NSTemporaryDirectory() + "abcore-unused.sock", queue: .main)
+        let orchestrator = Orchestrator(server: server, dataFolder: folder, providers: [EchoAgent()], searchPath: "/usr/bin:/bin")
+        let c = agent("Cy", in: folder)
+        orchestrator.insert(c)
+        _ = orchestrator.bus.connect(a.id, c.id)
+        #expect(try CardDatabase(url: url).connections().map(\.b) == [b.id])
+    }
+
+    /// Ending a turn isn't waiting on the user; an agent whose program ended leaves the queue.
+    @MainActor @Test func attentionNeedsTheUserOnlyWhileTheAgentRuns() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("abattention-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let server = CoreServer(socketPath: NSTemporaryDirectory() + "abcore-unused.sock", queue: .main)
+        let orchestrator = Orchestrator(server: server, dataFolder: folder, providers: [EchoAgent()], searchPath: "/usr/bin:/bin")
+        let card = agent("Ada", in: folder)
+        orchestrator.insert(card)
+        #expect(!AttentionRequest(id: card.id, reason: .turnEnded).needsUser)
+        #expect(AttentionRequest(id: card.id, reason: .waiting).needsUser)
+        #expect(AttentionRequest(id: card.id, reason: .said("Allow rm?")).needsUser)
+        orchestrator.requestAttention(card.id, .waiting)
+        server.onSessionStatus?(card.id, SessionStatus(state: .running, processID: 1, exitCode: nil))
+        #expect(orchestrator.attention.map(\.id) == [card.id])
+        server.onSessionStatus?(card.id, SessionStatus(state: .exited, processID: nil, exitCode: 1))
+        #expect(orchestrator.attention.isEmpty)
     }
 
     /// An agent's questions (AskUserQuestion) reach the queue through its hook, which waits:
@@ -468,6 +514,8 @@ struct OrchestratorTests {
         let page = try await call("postit_read", as: a.id, on: core)
         #expect(page.text.contains("# Export\n- CSV uses semicolons\n- Bob owns the tests"), "\(page.text)")
         #expect(page.text.contains("last written by Bob"), "\(page.text)")
+        // Events reach the board on the main queue: wait for it rather than assume it ran.
+        try await waitUntil { inbox.events.contains { if case .postItUpdated(let record) = $0 { record.editorName == "Bob" } else { false } } }
         #expect(inbox.events.contains { if case .postItUpdated(let record) = $0 { record.editorName == "Bob" } else { false } })
 
         // An edit changes one passage and leaves what others wrote.
@@ -717,7 +765,7 @@ private func binaryCall(_ tool: String, _ arguments: [String: Any] = [:], as cal
     takeOver.arguments = ["--take-over"]
     takeOver.environment = ProcessInfo.processInfo.environment.merging(environment.merging(["AGENTBOARD_CORE_SOCKET": path]) { $1 }) { $1 }
     try takeOver.run()
-    takeOver.waitUntilExit()
+    #expect(waitForExit(takeOver))
     #expect(takeOver.terminationStatus == 0)
     try await Task.sleep(for: .milliseconds(300))
     done.set()
@@ -773,7 +821,7 @@ private func binaryCall(_ tool: String, _ arguments: [String: Any] = [:], as cal
         return (server, orchestrator)
     }
     var (server, orchestrator) = try core()
-    let link = CoreLink(connect: { CoreClient.open(socketPath: path, timeout: 1) })
+    let link = CoreLink(connect: { CoreClient.open(socketPath: path, timeout: 10) })
     link.retryInterval = 0.05
     var connections: [BoardState] = []
     link.onConnect = { _, state, waiting in connections.append(state.applying(waiting)) }
@@ -807,7 +855,7 @@ private func binaryCall(_ tool: String, _ arguments: [String: Any] = [:], as cal
     let newer = CoreServer(socketPath: path, queue: .main)
     newer.versions = CoreProtocol.Versions(version: CoreProtocol.version + 3, oldest: CoreProtocol.version + 2)
     try newer.start()
-    let link = CoreLink(connect: { CoreClient.open(socketPath: path, timeout: 1) })
+    let link = CoreLink(connect: { CoreClient.open(socketPath: path, timeout: 10) })
     link.retryInterval = 0.05
     var reported: [CoreProtocol.Versions] = []
     var connected = 0
@@ -904,8 +952,19 @@ private func binaryCall(_ tool: String, _ arguments: [String: Any] = [:], as cal
 
     // The dev instance going away leaves the stable one's agents running.
     dev.board.shutdown()
-    dev.core.waitUntilExit()
+    #expect(waitForExit(dev.core))
     #expect(await logs(stable).contains("stable serving"))
     stable.board.shutdown()
-    stable.core.waitUntilExit()
+    #expect(waitForExit(stable.core))
+}
+
+/// Waits for `process` to end, killing it after `timeout`: a core that doesn't exit fails the
+/// test instead of hanging the suite.
+func waitForExit(_ process: Process, timeout: TimeInterval = 20) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while process.isRunning, Date() < deadline { usleep(50_000) }
+    guard process.isRunning else { return true }
+    kill(process.processIdentifier, SIGKILL)
+    process.waitUntilExit()
+    return false
 }

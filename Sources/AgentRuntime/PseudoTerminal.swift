@@ -80,6 +80,8 @@ final class PseudoTerminal {
         var emptyMask = sigset_t()
         sigemptyset(&emptyMask)
 
+        // Read before forking: the child only calls async-signal-safe functions.
+        let openLimit = min(getdtablesize(), 65_536)
         var fd: Int32 = -1
         let child = forkpty(&fd, nil, nil, &size)
         if child < 0 { throw LaunchError.forkFailed(errno) }
@@ -91,6 +93,10 @@ final class PseudoTerminal {
                 signal += 1
             }
             sigprocmask(SIG_SETMASK, &emptyMask, nil)
+            // Nor the app's other descriptors: a pipe open elsewhere in the process (a git
+            // command's output) would never reach end-of-file while the program holds a copy.
+            var descriptor: Int32 = 3
+            while descriptor < openLimit { close(descriptor); descriptor += 1 }
             chdir(cwd)
             execve(path, argv, envp)
             _exit(127)

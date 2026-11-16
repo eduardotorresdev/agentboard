@@ -32,6 +32,9 @@ enum CardMetrics {
          CGPoint(x: frame.midX, y: frame.maxY), CGPoint(x: frame.minX, y: frame.midY)]
     }
 
+    /// The smallest a control's hit area gets on screen, whatever the zoom.
+    static let minimumTarget: CGFloat = 20
+
     static func close(of frame: CGRect) -> CGRect {
         CGRect(x: frame.maxX - inset - closeSize + 4, y: frame.minY + (titleHeight - closeSize) / 2,
                width: closeSize, height: closeSize)
@@ -47,10 +50,10 @@ enum BoardPalette {
 
     static let ink: UInt32 = Theme.Hex.ink
     static let accent: UInt32 = Theme.Hex.accent
-    static let secondary: UInt32 = Theme.Hex.secondary
-    static let card = rgb(0xFFFFFF)
-    /// A post-it's paper: the cream of the sky's clouds.
-    static let postIt: UInt32 = 0xFFF3C8
+    static let deep: UInt32 = Theme.Hex.deep
+    static let card = rgb(Theme.Hex.white)
+    /// A post-it's paper: a baby-blue wash (Radix Blue 3).
+    static let postIt: UInt32 = Theme.Hex.accentSoft
 }
 
 /// Lets SwiftUI chrome (the canvas toolbar) talk to the board.
@@ -379,6 +382,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         guard let window else { return releaseTerminals() }
         NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged),
                                                name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        // Reduce Transparency and Increase Contrast change how card headers draw.
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(displayOptionsChanged),
+                                                          name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         let link = displayLink(target: self, selector: #selector(refresh))
         link.isPaused = true
         pace = .background
@@ -387,6 +393,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         displayLink = link
         syncLayers()
     }
+
+    @objc private func displayOptionsChanged() { syncLayers() }
 
     @objc private func occlusionChanged() {
         if isOnScreen { syncLayers() } else { releaseTerminals() }
@@ -413,6 +421,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         observed.removeAll()
         dirty.removeAll()
         cards.values.forEach { $0.detachTerminal() }
+        // Hidden, minimized or gone: no video keeps playing behind it.
+        imageCards.values.forEach { $0.video?.pause() }
         surface?.release()
         displayLink?.isPaused = true
     }
@@ -512,13 +522,18 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// Adds a card per picture: at `point` (world), cascading, or where new cards go. A refused
     /// file is reported once all are in.
     fileprivate func addImages(_ sources: [ImageSource], at point: CGPoint?) {
+        Task { await addImagesNow(sources, at: point) }
+    }
+
+    private func addImagesNow(_ sources: [ImageSource], at point: CGPoint?) async {
         var refused: [String] = []
         var added: ImageRecord?
+        let worktree = worktree
         for (index, source) in sources.enumerated() {
             let step = CGFloat(index) * 32
             do {
                 let origin = point.map { CGPoint(x: $0.x + step, y: $0.y + step) } ?? newCardOrigin(for: CGSize(width: ImageRecord.initialSide, height: ImageRecord.initialSide))
-                let record = try store.addImage(source, named: source.baseName, to: worktree, at: origin)
+                let record = try await store.addImage(source, named: source.baseName, to: worktree, at: origin)
                 appearing.insert(record.id)
                 added = record
             } catch {
@@ -528,12 +543,14 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 case .tooLarge: L("\(name) is larger than 20 MB.")
                 case .notAnImage: L("\(name) isn't a picture the board can show.")
                 case .notPlayable: L("\(name) isn't a video the board can play. Use MP4, MOV or M4V.")
+                case .notAFile: L("\(name) isn't a file.")
                 default: L("\(name) couldn't be read.")
                 }
                 refused.append(reason)
             }
         }
-        if let added {
+        // The board moved on to another worktree while a video was copied: nothing to show here.
+        if let added, added.worktree == self.worktree {
             bringIntoView(added.frame)
             focusedID = added.id
             window?.makeFirstResponder(self)
@@ -544,7 +561,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         alert.alertStyle = .warning
         alert.messageText = refused.count == 1 ? L("Couldn't add the file") : L("Couldn't add \(refused.count) files")
         alert.informativeText = refused.joined(separator: "\n")
-        alert.beginSheetModal(for: window)
+        alert.beginSheetModal(for: window, completionHandler: nil)
     }
 
     func addFileTree() {
@@ -601,6 +618,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         for (id, view) in composers where !ids.contains(id) {
             view.removeFromSuperview()
             composers[id] = nil
+            // Off this worktree it keeps its draft; removed from the board it doesn't.
+            if store.record(id) == nil { ComposerDrafts.forget(id) }
         }
         let onScreen = isOnScreen
         var visible = Set<UUID>()
@@ -626,9 +645,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }
             card.contentTop = content.minY - record.frame.minY
             card.titleReserve = record.runner == nil ? 0 : RunnerChromeLayout.titleReserve
-            let status: CardStatus = record.runner != nil
-                ? CardStatus.runner(SessionStatus(state: state, processID: nil, exitCode: session.exitCode), running: state == .running || state == .starting)
-                : CardStatus.agent(SessionStatus(state: state, processID: nil, exitCode: nil), waiting: store.attention.contains { $0.id == record.id })
+            // The same source as the sidebar.
+            let status = store.cardStatus(record)
             let kind = record.runner != nil ? L("Runner") : record.provider?.title ?? record.providerID
             // The kind is left out when the name already says it ("Claude 2").
             let detail = status == .waiting || status == .crashed ? status.label
@@ -684,7 +702,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }()
         let frame = screen(record.frame)
         view.frame = CGRect(x: frame.minX, y: frame.maxY + 8, width: frame.width, height: 34)
-        view.isHidden = record.id != focusedID && !AgentComposer.hasDraft(record.id)
+        view.isHidden = record.id != focusedID && !AgentComposer.hasDraft(record.id) && store.heldMessages[record.id] == nil
     }
 
     /// Browser cards sit above the agents, in their own stacking order.
@@ -1336,7 +1354,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         store.raise(record.id)
         if let control = runnerControl(at: location, in: record) {
             perform(control, on: record)
-        } else if CardMetrics.close(of: frame).contains(location) {
+        } else if CardMetrics.close(of: frame).target(zoom: zoom).contains(location) {
             store.remove(record.id)
             observed.remove(record.id)
             focusedID = nil
@@ -1377,7 +1395,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             box.current = world(point)
             marquee = box
             let rect = Self.rect(box.start, box.current)
-            selection = CanvasSelection.hits(itemFrames, in: rect, adding: box.base)
+            // A visible composer (8pt gap + 34pt strip on screen) counts as part of its card.
+            let frames = itemFrames.map { item in
+                (id: item.id, frame: composers[item.id]?.isHidden == false ? CanvasSelection.extended(item.frame, below: 42 / zoom) : item.frame)
+            }
+            selection = CanvasSelection.hits(frames, in: rect, adding: box.base)
             return syncLayers()
         }
         if var drag = linkDrag {
@@ -1509,19 +1531,19 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         let point = world(convert(event.locationInWindow, from: nil))
         var hovered: UUID?
         let card = card(at: point)
-        if let card, CardMetrics.close(of: card.frame).contains(point) {
+        if let card, CardMetrics.close(of: card.frame).target(zoom: zoom).contains(point) {
             hovered = card.id
         }
         let tree = fileTree(at: point)
-        if let tree, CardMetrics.close(of: tree.frame).contains(point) {
+        if let tree, CardMetrics.close(of: tree.frame).target(zoom: zoom).contains(point) {
             hovered = tree.id
         }
         let image = image(at: point)
-        if let image, ImageCardLayout(size: image.frame.size).close.contains(local(point, in: image.frame)) {
+        if let image, ImageCardLayout(size: image.frame.size).close.target(zoom: zoom).contains(local(point, in: image.frame)) {
             hovered = image.id
         }
         let browser = browser(at: point)
-        let control = browser.flatMap { record in Self.control(at: point, in: record).map { (record.id, $0) } }
+        let control = browser.flatMap { record in Self.control(at: point, in: record, zoom: zoom).map { (record.id, $0) } }
         if let browser, browser.id == focusedID, BrowserCardLayout(frame: browser.frame, record: browser).content.contains(point) {
             // Hover effects on the page follow the pointer while its card is focused.
             let page = pagePoint(point, in: browser)
@@ -1529,7 +1551,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }
         let postIt = postIt(at: point)
         let postItHover = postIt.map { record in
-            (card: record.id, control: PostItCardLayout(size: record.frame.size).control(at: local(point, in: record.frame)))
+            (card: record.id, control: PostItCardLayout(size: record.frame.size).control(at: local(point, in: record.frame), zoom: zoom))
         }
         if postItHover?.card != hoveredPostIt?.card || postItHover?.control != hoveredPostIt?.control {
             hoveredPostIt = postItHover
@@ -1697,6 +1719,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }
         }
         if let id = focusedBrowser { return browserKeyDown(event, to: id) }
+        if let id = focusedID, let video = imageCards[id]?.video, video.handleKey(event) { return }
         guard let session = focusedSession else { return super.keyDown(with: event) }
         interacted()
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -1929,13 +1952,13 @@ extension BoardView {
         return CGRect(x: frame.minX, y: frame.minY, width: width + chrome.width, height: (width * ratio).rounded() + chrome.height)
     }
 
-    fileprivate static func control(at point: CGPoint, in record: BrowserRecord) -> BrowserCardLayer.Control? {
+    fileprivate static func control(at point: CGPoint, in record: BrowserRecord, zoom: CGFloat) -> BrowserCardLayer.Control? {
         let layout = BrowserCardLayout(frame: record.frame, record: record)
         if layout.device.contains(point) { return .device }
         if layout.back.contains(point) { return .back }
         if layout.forward.contains(point) { return .forward }
         if layout.reload.contains(point) { return .reload }
-        if layout.close.contains(point) { return .close }
+        if layout.close.target(zoom: zoom).contains(point) { return .close }
         return nil
     }
 
@@ -1945,7 +1968,7 @@ extension BoardView {
         focusedID = record.id
         browsers.raise(record.id)
         let handle = CardMetrics.resizeHandle / zoom
-        switch Self.control(at: location, in: record) {
+        switch Self.control(at: location, in: record, zoom: zoom) {
         case .close:
             browsers.remove(record.id)
             focusedID = nil
@@ -2181,7 +2204,7 @@ extension BoardView {
         guard let name = record(id)?.name ?? store.image(id)?.name else { return }
         let field = nameField ?? {
             let field = NSTextField()
-            field.font = .systemFont(ofSize: 13, weight: .semibold)
+            field.font = .systemFont(ofSize: Theme.Font.bodySize, weight: .semibold)
             field.focusRingType = .none
             field.bezelStyle = .roundedBezel
             field.delegate = self
@@ -2319,7 +2342,7 @@ extension BoardView {
         }
         // Where the click falls in the text, unscrolled.
         let textPoint = CGPoint(x: point.x - layout.content.minX, y: point.y - layout.content.minY + (postItScroll[record.id] ?? 0))
-        switch layout.control(at: point) {
+        switch layout.control(at: point, zoom: zoom) {
         case .close:
             endPostItEditing()
             store.removePostIt(record.id)
@@ -2440,7 +2463,7 @@ private final class CameraMemory {
     private var saveWork: DispatchWorkItem?
 
     init() {
-        let stored = UserDefaults.standard.dictionary(forKey: Self.key) as? [String: [Double]] ?? [:]
+        let stored = AppDefaults.shared.dictionary(forKey: Self.key) as? [String: [Double]] ?? [:]
         cameras = stored.compactMapValues { values in
             values.count == 3 ? Camera(zoom: values[0], pan: CGPoint(x: values[1], y: values[2])) : nil
         }
@@ -2464,7 +2487,7 @@ private final class CameraMemory {
 
     private func save() {
         let stored = cameras.mapValues { [Double($0.zoom), Double($0.pan.x), Double($0.pan.y)] }
-        UserDefaults.standard.set(stored, forKey: Self.key)
+        AppDefaults.shared.set(stored, forKey: Self.key)
     }
 }
 
@@ -2584,8 +2607,8 @@ private final class CardLayer: CALayer {
         super.init()
         cursor.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.35)
         cursor.isHidden = true
-        dim.backgroundColor = BoardPalette.rgb(0xFFFFFF, 0.75)
-        status.fontSize = 12
+        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.white, 0.75)
+        status.fontSize = Theme.Font.labelSize
         status.truncationMode = .end
         status.alignmentMode = .center
         [bar, closeHover, closeGlyph, cursor, dim, status].forEach(addSublayer)
@@ -2597,10 +2620,6 @@ private final class CardLayer: CALayer {
             // A handle is a control: the white ring sets it off from the card edge it sits on.
             handle.borderColor = BoardPalette.card
             handle.borderWidth = 2
-            handle.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-            handle.shadowOpacity = 0.18
-            handle.shadowRadius = 3
-            handle.shadowOffset = CGSize(width: 0, height: 1)
             handle.isHidden = true
             handle.zPosition = 10
             addSublayer(handle)
@@ -2619,7 +2638,7 @@ private final class CardLayer: CALayer {
         status.contentsScale = scale
 
         let ink = BoardPalette.ink
-        let font = NSFont.systemFont(ofSize: 12)
+        let font = NSFont.systemFont(ofSize: Theme.Font.labelSize)
         let line = ceil(font.ascender - font.descender) + 2
         let close = CardMetrics.close(of: bounds)
         bar.update(size: bounds.size, icon: icon, status: cardStatus, kind: kind, title: text, detail: detail, focused: focused,
@@ -2634,7 +2653,7 @@ private final class CardLayer: CALayer {
         let label = message ?? (state == .starting ? starting : nil)
         status.isHidden = label == nil
         status.string = label
-        status.font = NSFont.systemFont(ofSize: 12, weight: message == nil ? .medium : .semibold)
+        status.font = NSFont.systemFont(ofSize: Theme.Font.labelSize, weight: message == nil ? .medium : .semibold)
         status.foregroundColor = BoardPalette.rgb(ink, message == nil ? 0.45 : 0.75)
         status.frame = CGRect(x: area.minX + 12, y: area.midY - line / 2, width: max(0, area.width - 24), height: line)
     }
@@ -2778,16 +2797,16 @@ private final class LinkLayer: CALayer {
         knob.cornerRadius = Self.knobSize / 2
         knob.backgroundColor = BoardPalette.card
         knob.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        knob.shadowOpacity = 0.18
-        knob.shadowRadius = 5
-        knob.shadowOffset = CGSize(width: 0, height: 2)
+        knob.shadowOpacity = Theme.Shadow.opacity
+        knob.shadowRadius = Theme.Shadow.radius
+        knob.shadowOffset = CGSize(width: 0, height: Theme.Shadow.y)
         knob.isHidden = true
         knobGlyph.string = "✕"
-        knobGlyph.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
-        knobGlyph.fontSize = 10
+        knobGlyph.font = NSFont.systemFont(ofSize: Theme.Font.captionSize, weight: .semibold)
+        knobGlyph.fontSize = Theme.Font.captionSize
         knobGlyph.alignmentMode = .center
         knobGlyph.foregroundColor = BoardPalette.rgb(BoardPalette.ink, 0.7)
-        let line = ceil(NSFont.systemFont(ofSize: 10).ascender - NSFont.systemFont(ofSize: 10).descender)
+        let line = ceil(NSFont.systemFont(ofSize: Theme.Font.captionSize).ascender - NSFont.systemFont(ofSize: Theme.Font.captionSize).descender)
         knobGlyph.frame = CGRect(x: 0, y: (Self.knobSize - line) / 2, width: Self.knobSize, height: line)
         knob.addSublayer(knobGlyph)
         [self.line, ends, knob].forEach(addSublayer)
@@ -2933,7 +2952,7 @@ extension BoardView {
         fileTrees.raise(record.id)
         let frame = record.frame
         let handle = CardMetrics.resizeHandle / zoom
-        if CardMetrics.close(of: frame).contains(location) {
+        if CardMetrics.close(of: frame).target(zoom: zoom).contains(location) {
             fileTrees.remove(record.id)
             focusedID = nil
             hoveredClose = nil
@@ -2990,7 +3009,7 @@ extension BoardView {
         let point = local(location, in: frame)
         let edges = ImageResize.edges(at: location, in: frame, reach: 8 / zoom)
         let corner = CardMetrics.resizeHandle / zoom
-        if ImageCardLayout(size: frame.size).close.contains(point) {
+        if ImageCardLayout(size: frame.size).close.target(zoom: zoom).contains(point) {
             endCardRename()
             store.removeImage(record.id)
             focusedID = nil
@@ -3011,6 +3030,59 @@ extension BoardView {
             endCardRename()
             interaction = Interaction(id: record.id, kind: .move, start: start, frame: frame)
         }
+    }
+
+    /// VoiceOver reaches the controls of the video cards, which are layers, through these.
+    override func accessibilityChildren() -> [Any]? {
+        var children = super.accessibilityChildren() ?? []
+        guard let window else { return children }
+        for record in store.images(in: worktree) where record.isVideo {
+            guard let video = imageCards[record.id]?.video else { continue }
+            let picture = ImageCardLayout(size: record.frame.size).picture.offsetBy(dx: record.frame.minX, dy: record.frame.minY)
+            children += video.accessibilityElements(parent: self, name: record.name) { local in
+                window.convertToScreen(self.convert(self.screen(local.offsetBy(dx: picture.minX, dy: picture.minY)), to: nil))
+            }
+        }
+        return children + headerAccessibility(in: window)
+    }
+
+    /// The title-bar controls of agent, runner and browser cards, which are layers, for
+    /// VoiceOver and keyboard access; each card's close button also says the card's state.
+    private func headerAccessibility(in window: NSWindow) -> [NSAccessibilityElement] {
+        let onScreen = { (rect: CGRect) in window.convertToScreen(self.convert(self.screen(rect), to: nil)) }
+        func button(_ label: String, _ rect: CGRect, _ press: @escaping () -> Void) -> VideoAccessibilityControl {
+            VideoAccessibilityControl(role: .button, label: label, frame: onScreen(rect), parent: self, press: press)
+        }
+        var elements: [NSAccessibilityElement] = []
+        for record in store.agents(in: worktree) {
+            let id = record.id
+            let close = button(L("Close \(record.name)"), CardMetrics.close(of: record.frame)) { [weak self] in
+                self?.store.remove(id)
+                self?.observed.remove(id)
+            }
+            close.setAccessibilityValue(store.cardStatus(record).label)
+            elements.append(close)
+            guard record.runner != nil else { continue }
+            let state = store.sessions[id]?.state ?? .stopped
+            let layout = runnerLayout(record, state: state).0
+            let running = state == .running || state == .starting
+            let origin = record.frame.origin
+            elements.append(button(running ? L("Stop \(record.name)") : L("Start \(record.name)"), layout.toggle.offsetBy(dx: origin.x, dy: origin.y)) { [weak self] in
+                self?.perform(.toggle, on: record)
+            })
+            elements.append(button(L("Restart \(record.name)"), layout.restart.offsetBy(dx: origin.x, dy: origin.y)) { [weak self] in
+                self?.perform(.restart, on: record)
+            })
+        }
+        for record in browsers.browsers(in: worktree) {
+            let id = record.id
+            let layout = BrowserCardLayout(frame: record.frame, record: record)
+            elements.append(button(L("Back"), layout.back) { [weak self] in self?.browsers.go("back", on: id) })
+            elements.append(button(L("Forward"), layout.forward) { [weak self] in self?.browsers.go("forward", on: id) })
+            elements.append(button(L("Reload"), layout.reload) { [weak self] in self?.browsers.go("reload", on: id) })
+            elements.append(button(L("Close \(record.name)"), layout.close) { [weak self] in self?.browsers.remove(id) })
+        }
+        return elements
     }
 
     /// Follows the pressed mouse until it goes up, handing over each drag.

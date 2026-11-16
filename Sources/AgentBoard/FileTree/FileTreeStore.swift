@@ -49,7 +49,7 @@ final class FileTreeStore {
         self.agents = agents
         agents.elementSources[ElementKind.fileTree.rawValue] = { [weak self] in
             self?.trees.map { ElementInfo(id: $0.id, name: $0.name, kind: ElementKind.fileTree.rawValue, detail: nil,
-                                          worktree: $0.worktree, frame: $0.frame) } ?? []
+                                          worktree: $0.worktree, frame: $0.frame, organization: $0.organization) } ?? []
         }
         agents.elementsChanged()
     }

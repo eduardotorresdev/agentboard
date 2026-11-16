@@ -13,13 +13,13 @@ final class Caffeinate {
 
     var isOn: Bool {
         didSet {
-            UserDefaults.standard.set(isOn, forKey: Self.key)
+            AppDefaults.shared.set(isOn, forKey: Self.key)
             apply()
         }
     }
 
     private init() {
-        isOn = UserDefaults.standard.bool(forKey: Self.key)
+        isOn = AppDefaults.shared.bool(forKey: Self.key)
         apply()
     }
 

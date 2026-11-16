@@ -1,4 +1,5 @@
 import AppKit
+import Connections
 import Orchestration
 import UniformTypeIdentifiers
 
@@ -68,13 +69,16 @@ extension AgentStore {
         images.first { $0.id == id }
     }
 
-    /// Stores the picture and adds a card for it at `origin`, named `name` (made unique).
+    /// Stores the picture or video and adds a card for it at `origin`, named `name` (made
+    /// unique). A video is checked and copied off the main thread.
     @discardableResult
-    func addImage(_ source: ImageSource, named name: String, to worktree: String, at origin: CGPoint) throws -> ImageRecord {
+    func addImage(_ source: ImageSource, named name: String, to worktree: String, at origin: CGPoint) async throws -> ImageRecord {
         let stored = switch source {
-        case .file(let url): try ImageFiles.store(contentsOf: url, in: dataFolder)
+        case .file(let url): try await ImageFiles.storeMedia(contentsOf: url, in: dataFolder)
         case .data(let data): try ImageFiles.store(data, in: dataFolder)
         }
+        // A file's name reaches agents: one line of visible text.
+        let name = BoardName.clean(name) ?? (stored.duration == nil ? L("Image") : L("Video"))
         let record = ImageRecord(id: UUID(), worktree: worktree, name: ImageRecord.uniqueName(name, among: images(in: worktree)),
                                  frame: CGRect(origin: origin, size: ImageRecord.cardSize(for: stored.pixelSize)),
                                  file: stored.file, pixelSize: stored.pixelSize, organization: organizationID,
@@ -98,7 +102,7 @@ extension AgentStore {
 
     func renameImage(_ id: UUID, to name: String) {
         guard let index = images.firstIndex(where: { $0.id == id }) else { return }
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let trimmed = BoardName.clean(name) ?? ""
         guard !trimmed.isEmpty, trimmed != images[index].name else { return }
         images[index].name = ImageRecord.uniqueName(trimmed, among: images(in: images[index].worktree).filter { $0.id != id })
         send(.updateImage(images[index]))

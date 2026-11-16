@@ -51,6 +51,8 @@ public enum BoardRequest: Codable, Sendable {
     /// The user sent `text` from the agent card's composer: typed into its terminal as a
     /// prompt, queued behind messages so neither interrupts the other.
     case prompt(id: UUID, text: String)
+    /// Delivers the messages held while the user had text on the agent's terminal line.
+    case deliverHeld(UUID)
 }
 
 /// Core → board.
@@ -75,6 +77,11 @@ public enum BoardEvent: Codable, Sendable {
     case imageRemoved(UUID)
     /// Every attention request, oldest first, after any change.
     case attention([AttentionRequest])
+    /// How many messages wait for the user to finish the line they typed in agent `id`'s terminal.
+    case held(id: UUID, count: Int)
+    /// A composer prompt agent `id` couldn't take (it stopped, or waits on the developer):
+    /// back to the composer with why.
+    case promptReturned(id: UUID, text: String, reason: String)
 }
 
 /// What a board gets with its welcome.
@@ -166,4 +173,37 @@ extension BoardState {
 
 extension CoreClient {
     public func send(_ request: BoardRequest) { send(service: request.encoded) }
+}
+
+extension BoardRequest {
+    /// The request with every name it carries made a valid one: one line of visible text, never
+    /// an id. A rename to an invalid name becomes empty, which keeps the old name. The one place
+    /// names from a board are cleaned on their way in.
+    var withCleanNames: BoardRequest {
+        func named(_ name: String, _ fallback: String) -> String { BoardName.named(name, else: fallback) }
+        switch self {
+        case .addCard(var record):
+            record.name = named(record.name, record.runner == nil ? "Agent" : "Runner")
+            return .addCard(record)
+        case .updateCard(var record):
+            record.name = named(record.name, "")
+            return .updateCard(record)
+        case .addPostIt(var record):
+            record.name = named(record.name, "Post-it")
+            return .addPostIt(record)
+        case .updatePostIt(var record):
+            record.name = named(record.name, "")
+            return .updatePostIt(record)
+        case .addImage(var record):
+            record.name = named(record.name, record.isVideo ? "Video" : "Image")
+            return .addImage(record)
+        case .updateImage(var record):
+            record.name = named(record.name, "")
+            return .updateImage(record)
+        case .elements(let list):
+            return .elements(list.map { var info = $0; info.name = named(info.name, info.kind); return info })
+        default:
+            return self
+        }
+    }
 }

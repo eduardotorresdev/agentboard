@@ -94,15 +94,14 @@ struct ImageTests {
         #expect(inbox.events.contains { if case .imageAdded(let added) = $0 { added.id == record.id } else { false } })
 
         let peers = try await call("list_peers", as: a.id, on: core)
-        #expect(peers.text.contains("Image (image, id: \(record.id.uuidString), connected: true, 800×400"), "\(peers.text)")
+        #expect(peers.text.contains("“Image” (image, id: \(record.id.uuidString), connected: true, 800×400"), "\(peers.text)")
 
-        // `~` resolves too.
-        let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".abtest-\(UUID().uuidString.prefix(8)).png")
-        try png.write(to: home)
-        defer { try? FileManager.default.removeItem(at: home) }
-        let fromHome = try await call("image_create", ["path": "~/" + home.lastPathComponent, "name": "Chart"], as: a.id, on: core)
-        #expect(!fromHome.isError, "\(fromHome.text)")
-        #expect(await core.orchestrator.images.map(\.name) == ["Image", "Chart"])
+        // `~` resolves to the home folder; checked with a file that isn't there, so nothing is written to HOME.
+        let name = ".abtest-\(UUID().uuidString.prefix(8)).png"
+        let fromHome = try await call("image_create", ["path": "~/" + name, "name": "Chart"], as: a.id, on: core)
+        let expanded = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(name).path
+        #expect(fromHome.isError && fromHome.text.contains(expanded), "\(fromHome.text)")
+        #expect(await core.orchestrator.images.map(\.name) == ["Image"])
         client.disconnect()
     }
 

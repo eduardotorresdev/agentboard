@@ -25,6 +25,10 @@ final class AgentStore {
     @ObservationIgnored var dataFolder = DataFolder.url
     /// Agents waiting on the developer, in every organization, oldest first.
     private(set) var attention: [AttentionRequest] = []
+    /// Messages held behind the text the user typed in an agent's terminal, by agent.
+    var heldMessages: [UUID: Int] = [:]
+    /// Why the core gave a composer prompt back, by agent: shown in its composer.
+    var composerNotices: [UUID: String] = [:]
     /// False until the core has said which cards there are.
     private(set) var isLoaded = false
     /// Why the cards can't be shown, when the core runs another build this one can't talk to.
@@ -167,6 +171,7 @@ final class AgentStore {
         client.onStatus = { [weak self] id, status in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.statuses[id] = status } }
         }
+        client.subscribeToStatuses()
         client.send(.elements(elements()))
         for (id, session) in sessions {
             guard let record = record(id) else {
@@ -227,6 +232,11 @@ final class AgentStore {
             connections.removeAll { $0.touches(id) }
         case .attention(let list):
             attention = list
+        case .held(let id, let count):
+            heldMessages[id] = count == 0 ? nil : count
+        case .promptReturned(let id, let text, let reason):
+            ComposerDrafts.restore(text, for: id)
+            composerNotices[id] = L("Not sent: \(reason).")
         case .toolCall(let call, let name, let arguments, let caller):
             let parsed = (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]
             Task {
@@ -240,6 +250,9 @@ final class AgentStore {
     }
 
     /// Sends a change to the core, now or once it is back.
+    /// Whether the core speaks the composer's `prompt` (protocol 6).
+    var coreTakesPrompts: Bool { (link.client?.version ?? 0) >= 6 }
+
     func send(_ request: BoardRequest) {
         guard !isUnavailable else { return }
         link.send(request)
@@ -291,6 +304,7 @@ final class AgentStore {
         if sessions.removeValue(forKey: id) != nil { core?.unregister(id) }
         viewers[id] = nil
         attention.removeAll { $0.id == id }
+        statuses[id] = nil
         hosted[id] = nil
         runnersToStart.remove(id)
         agents.removeAll { $0.id == id }

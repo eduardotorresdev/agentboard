@@ -6,16 +6,12 @@ struct OrganizationAvatar: View {
     let organization: Organization
     let size: CGFloat
 
-    /// Avatar colors. No greens or teals; amber takes dark ink.
+    /// Avatar colors, from the app's slate and blue palette; white initials pass AA on each.
     static let palette: [(fill: Color, ink: Color)] = [
-        (Theme.accent, .white),
-        (Theme.secondary, .white),
-        (Color(red: 0x00 / 255, green: 0x90 / 255, blue: 0xFF / 255), .white),
-        (Color(red: 0xD6 / 255, green: 0x40 / 255, blue: 0x9F / 255), .white),
-        (Color(red: 0xE5 / 255, green: 0x48 / 255, blue: 0x4D / 255), .white),
-        (Color(red: 0x3E / 255, green: 0x63 / 255, blue: 0xDD / 255), .white),
-        (Color(red: 0xFF / 255, green: 0xB2 / 255, blue: 0x24 / 255), Color(red: 0x4E / 255, green: 0x2A / 255, blue: 0x00 / 255)),
-        (Color(red: 0xAD / 255, green: 0x7F / 255, blue: 0x58 / 255), .white),
+        (Theme.accent, Theme.onAccent),
+        (Theme.deep, Theme.onAccent),
+        (Theme.ink, Theme.onAccent),
+        (Theme.inkMuted, Theme.onAccent),
     ]
 
     /// The stored name, with the default organization's translated until the user renames it.

@@ -140,6 +140,43 @@ struct CoreTests {
         session.close(grace: 1)
     }
 
+    /// A session made after the board connected still reaches `known` and `onStatus`, through
+    /// its exit: the sidebar's states come from there.
+    @Test func sessionCreatedAfterConnectReportsItsStatus() async throws {
+        let core = try Fixture()
+        let board = try core.board()
+        let seen = Locked<[SessionStatus]>([])
+        board.onStatus = { _, status in seen.withLock { $0.append(status) } }
+        let id = UUID()
+        let session = AgentSession(cols: 40, rows: 6)
+        session.host(on: board, id: id)
+        session.start(LaunchSpec(executable: "/bin/sh", arguments: ["-c", "echo up; sleep 0.3; exit 3"],
+                                 environment: ["PATH": "/usr/bin:/bin"], directory: NSTemporaryDirectory()))
+        try await waitUntil { board.known[id]?.state == .exited }
+        #expect(board.known[id]?.exitCode == 3)
+        #expect(seen.withLock { $0.contains { $0.state == .running } })
+        #expect(seen.withLock { $0.last?.state == .exited })
+    }
+
+    /// A board that never opened a session still hears its status: its sidebar lists it.
+    @Test func aBoardThatDidntOpenTheSessionHearsItsStatus() async throws {
+        let core = try Fixture()
+        let opener = try core.board()
+        let other = try core.board()
+        // It opened no card: subscribing is enough.
+        other.subscribeToStatuses()
+        let agentConnection = try core.board()
+        let id = UUID()
+        let session = AgentSession(cols: 40, rows: 6)
+        session.host(on: opener, id: id)
+        session.start(LaunchSpec(executable: "/bin/sh", arguments: ["-c", "echo up; sleep 0.3; exit 2"],
+                                 environment: ["PATH": "/usr/bin:/bin"], directory: NSTemporaryDirectory()))
+        try await waitUntil { other.known[id]?.state == .exited }
+        #expect(other.known[id]?.exitCode == 2)
+        // A connection that didn't subscribe (an agent's own) hears nothing it didn't open.
+        #expect(agentConnection.known[id] == nil)
+    }
+
     /// The point of the core: the board goes away, the program keeps running, and a new board
     /// picks up the same screen and keeps talking to it.
     @Test func programOutlivesTheBoard() async throws {
@@ -237,4 +274,11 @@ struct CoreTests {
         try await waitUntil { (try? UnixSocket.connect(to: path)).map { close($0); return false } ?? true }
         #expect((try? UnixSocket.connect(to: path)) == nil)
     }
+}
+
+private final class Locked<Value>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+    init(_ value: Value) { self.value = value }
+    func withLock<T>(_ body: (inout Value) -> T) -> T { lock.withLock { body(&value) } }
 }

@@ -1,8 +1,9 @@
 import Observation
 import SwiftUI
 
-/// Adds a worktree to a project. The user names what they'll work on; the branch and folder
-/// are derived from that name, and the name becomes the worktree's title.
+/// Adds a worktree to a project. The user names what they'll work on; that name is the
+/// worktree's title, and the branch and folder are derived from it (or, when it names an
+/// existing branch, are that branch).
 struct NewWorktreeDialog: View {
     let store: ProjectStore
     let project: Project
@@ -11,6 +12,8 @@ struct NewWorktreeDialog: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var draft: WorktreeDraft
+    /// Set when git failed after the worktree was in place (e.g. a hook): shown before closing.
+    @State private var created: (worktree: Worktree, warning: String)?
 
     init(store: ProjectStore, project: Project, onAdded: @escaping (Worktree) -> Void) {
         self.store = store
@@ -22,130 +25,258 @@ struct NewWorktreeDialog: View {
     var body: some View {
         AppDialog(title: L("New Worktree"), subtitle: project.name) {
             VStack(alignment: .leading, spacing: 14) {
-                FormRow(label: L("Name"), message: message, isError: draft.problem != nil) {
+                FormRow(label: L("Name"), message: message, isError: draft.problem != nil, reservesMessage: true) {
                     TextField("", text: $draft.name, prompt: Text(L("Fix the login redirect")))
-                        .onSubmit(create)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.large)
+                        .onSubmit(submit)
+                        .disabled(draft.isCreating || created != nil)
                 }
-                if let error = draft.error {
+                // The full path, where the short form above leaves some out.
+                .help(draft.check?.fullPath ?? "")
+                if let created {
+                    DialogError(message: L("The worktree was created, but git reported a problem: \(created.warning)"))
+                } else if let error = draft.error {
                     DialogError(message: error)
                 }
             }
         } footer: {
-            Button(L("Cancel"), role: .cancel) { dismiss() }
+            if let created {
+                Button(L("Open Worktree")) { finish(created.worktree) }
+                    .buttonStyle(DialogButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+            } else {
+                Button(L("Cancel"), role: .cancel) {
+                    // Stops git if it's running; what it made so far is undone where provably safe.
+                    draft.cancel()
+                    dismiss()
+                }
                 .keyboardShortcut(.cancelAction)
-            Button(L("Create"), action: create)
+                Button(action: submit) {
+                    HStack(spacing: 8) {
+                        if draft.isCreating { ProgressView().controlSize(.small) }
+                        Text(L("Create"))
+                    }
+                }
                 .buttonStyle(DialogButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
-                .disabled(!draft.canSubmit)
+                .disabled(draft.trimmedName.isEmpty || draft.problem != nil || draft.isCreating)
+            }
         }
-        // Restarts on each keystroke, so only the last one is checked (see WorktreeDraft).
-        .task(id: draft.name) { await draft.validate() }
+        // Restarts on each keystroke and after a failure, so only the latest state is checked.
+        .task(id: draft.revision) { await draft.validate() }
+        .onAppear {
+            draft.onCreated = { result in
+                guard let worktree = store.worktree(at: result.path, in: project) else { dismiss(); return }
+                // The typed name is the initial title; agents may refine it, unlike a user rename.
+                store.setInitialTitle(draft.trimmedName, path: worktree.path)
+                if let warning = result.warning {
+                    created = (worktree, WorktreeDraft.cause(of: warning))
+                } else {
+                    finish(worktree)
+                }
+            }
+        }
     }
 
-    /// The problem with the name, or what creating it will do.
+    /// The problem with the name, or what creating it will do. Kept while a new check runs, so
+    /// the line doesn't flicker as the user types.
     private var message: String? {
         if let problem = draft.problem { return problem }
-        guard let check = draft.check, check.branch == draft.branch else { return nil }
+        guard let check = draft.check else { return nil }
         let start: String
         switch check.start {
         case .existingBranch: start = L("Continues the existing branch \(check.branch).")
+        case .remoteBranch(let remote): start = L("Continues the existing branch \(remote).")
         case .newBranch(let base?): start = L("Starts \(check.branch) from \(base).")
         case .newBranch(nil): start = L("Starts \(check.branch) from the current commit.")
         }
         return start + " " + L("Creates \(abbreviated(check.location.path))")
     }
 
-    private func create() {
-        var added: Worktree?
-        guard draft.create(using: { added = try store.addWorktree(branch: $0, to: project) }) else { return }
+    private func submit() {
+        draft.submitTask = Task { await draft.submit() }
+    }
+
+    private func finish(_ worktree: Worktree) {
         dismiss()
-        if let added {
-            // TODO(F3): store draft.trimmedName as the worktree's initial title (not a user alias).
-            onAdded(added)
-        }
+        onAdded(worktree)
     }
 
     private func abbreviated(_ path: String) -> String {
-        (path as NSString).abbreviatingWithTildeInPath
+        DisplayPath.short(path, base: project.path)
     }
 }
 
-/// What the New Worktree dialog knows about the typed name. Checking runs git, so it happens
-/// off the main thread, after typing pauses; once creation starts the check is frozen, so the
-/// folder just created never reads back as a conflict.
+/// What the New Worktree dialog knows about the typed name. Checking and creating run git, so
+/// both happen off the main thread; checks run after typing pauses. Creating happens at most
+/// once at a time, and a submit that arrives while the name is being checked waits for it.
 @MainActor @Observable
 final class WorktreeDraft {
     struct Check: Equatable {
+        /// The trimmed name this check is for.
+        var name: String
         var branch: String
         var location: URL
         var problem: String?
         var start: Git.WorktreeStart
+        /// The folder the message is about, in full, for its tooltip.
+        var fullPath: String
+
+        init(name: String, branch: String, location: URL, problem: String? = nil, start: Git.WorktreeStart, fullPath: String? = nil) {
+            (self.name, self.branch, self.location, self.problem, self.start) = (name, branch, location, problem, start)
+            self.fullPath = fullPath ?? location.path
+        }
+
+        /// Creating continues a branch that already exists rather than starting one.
+        var continuesBranch: Bool {
+            if case .newBranch = start { return false }
+            return true
+        }
     }
 
     let repository: String
-    var name = "" { didSet { if !isCreating { error = nil } } }
+    var name = "" {
+        didSet {
+            // Return rewrites the binding with the same text; that isn't an edit.
+            guard name != oldValue else { return }
+            error = nil
+            wantsSubmit = false
+            revision += 1
+        }
+    }
+    /// The latest finished check; may be for an earlier name while a new one runs.
     private(set) var check: Check?
     private(set) var isCreating = false
+    /// Changes whenever the name should be checked again.
+    private(set) var revision = 0
     var error: String?
+    /// Called on the main actor with what was created.
+    var onCreated: ((Git.CreatedWorktree) -> Void)?
+    /// The running submit, so Cancel can stop git.
+    var submitTask: Task<Void, Never>?
+    private var wantsSubmit = false
 
     init(repository: String) { self.repository = repository }
 
     var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
-    var branch: String { Self.slug(trimmedName) }
 
-    /// The current name's problem; nil while it's being checked.
-    var problem: String? {
-        if !trimmedName.isEmpty && branch.isEmpty { return L("Use at least one letter or number.") }
-        return check?.branch == branch ? check?.problem : nil
-    }
-
-    var canSubmit: Bool { !isCreating && !branch.isEmpty && check?.branch == branch && check?.problem == nil }
+    /// The current name's problem, if the latest check is for it.
+    var problem: String? { check?.name == trimmedName ? check?.problem : nil }
 
     func validate() async {
-        let branch = branch, repository = repository
-        guard !branch.isEmpty else { check = nil; return }
+        let name = trimmedName, repository = repository
+        guard !name.isEmpty else { check = nil; return }
         try? await Task.sleep(for: .milliseconds(120))
         guard !Task.isCancelled, !isCreating else { return }
-        let result = await Task.detached { Self.inspect(branch, in: repository) }.value
-        guard !Task.isCancelled, !isCreating else { return }
+        let result = await Task.detached { Self.inspect(name, in: repository) }.value
+        guard !Task.isCancelled, !isCreating, result.name == trimmedName else { return }
         check = result
+        if wantsSubmit {
+            wantsSubmit = false
+            // Continuing an existing branch is shown first: an Enter typed before the user could
+            // read that doesn't confirm it.
+            if !result.continuesBranch { await submit() }
+        }
     }
 
-    /// Runs `add` with the branch once; true when it succeeded. Later calls do nothing.
-    func create(using add: (String) throws -> Void) -> Bool {
-        guard canSubmit else { return false }
+    /// Creates the worktree for the current name, or, while the name is still being checked,
+    /// as soon as the check passes.
+    func submit() async {
+        guard !isCreating, !trimmedName.isEmpty else { return }
+        guard let check, check.name == trimmedName else { wantsSubmit = true; return }
+        guard check.problem == nil else { return }
         isCreating = true
+        error = nil
+        let branch = check.branch, repository = repository
+        let work = Task.detached { try Git.createWorktree(branch: branch, in: repository) }
         do {
-            try add(branch)
-            return true
+            let result = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            onCreated?(result)
+        } catch is CancellationError {
+            isCreating = false
         } catch {
             isCreating = false
-            self.error = error.localizedDescription
-            return false
+            self.error = Self.cause(of: error.localizedDescription)
+            // What's on disk may have changed (or the branch is now known): check again.
+            revision += 1
         }
     }
 
-    nonisolated static func inspect(_ branch: String, in repository: String) -> Check {
-        let location = Git.worktreeLocation(for: branch, in: repository)
-        var problem: String?
-        if !Git.isValidBranchName(branch) {
-            problem = L("This name can't be used for a branch. Try other words.")
-        } else if FileManager.default.fileExists(atPath: location.path) {
-            problem = L("\((location.path as NSString).abbreviatingWithTildeInPath) already exists. Pick another name.")
-        }
-        let start = problem == nil ? Git.worktreeStart(for: branch, in: repository) : .newBranch(from: nil)
-        return Check(branch: branch, location: location, problem: problem, start: start)
+    func cancel() {
+        submitTask?.cancel()
     }
 
-    /// "Fix the Login redirect!" → "fix-the-login-redirect".
+    /// What decides the branch and folder for `name`: the name itself when a branch has
+    /// exactly that name (locally or on a remote); otherwise a slug of it, numbered past folders
+    /// and branches already taken. Branch names are compared ignoring case, as the volume may.
+    nonisolated static func inspect(_ name: String, in repository: String) -> Check {
+        let locals = (Git.refs("refs/heads/", in: repository) ?? []).map { String($0.dropFirst("refs/heads/".count)) }
+        let open = Git.worktrees(at: repository) ?? []
+        let same = { (a: String, b: String) in a.caseInsensitiveCompare(b) == .orderedSame }
+
+        if Git.isValidBranchName(name) {
+            let start = Git.worktreeStart(for: name, in: repository)
+            if case .newBranch = start {} else {
+                let location = Git.worktreeLocation(for: name, in: repository)
+                if let other = open.first(where: { $0.branch.map { same($0, name) } ?? false }) {
+                    return Check(name: name, branch: name, location: location,
+                                 problem: L("\(name) is already open in \(DisplayPath.short(other.path, base: repository))."),
+                                 start: start, fullPath: other.path)
+                }
+                if FileManager.default.fileExists(atPath: location.path) {
+                    return Check(name: name, branch: name, location: location,
+                                 problem: L("\(DisplayPath.short(location.path, base: repository)) already exists. Pick another name."), start: start)
+                }
+                return Check(name: name, branch: name, location: location, start: start)
+            }
+        }
+        let base = slug(name).nonEmptyOr("worktree")
+        guard Git.headCommit(in: repository) != nil else {
+            return Check(name: name, branch: base, location: Git.worktreeLocation(for: base, in: repository),
+                         problem: L("The repository has no commits yet. Make a first commit, then add worktrees."), start: .newBranch(from: nil))
+        }
+        for number in 1 ... 99 {
+            let branch = number == 1 ? base : "\(base)-\(number)"
+            let location = Git.worktreeLocation(for: branch, in: repository)
+            // Taken: a folder there, or a branch with this name, inside it ("x/y"), or holding it ("x" for "x/y").
+            let clashes = locals.contains { same($0, branch) || $0.lowercased().hasPrefix(branch.lowercased() + "/") || branch.lowercased().hasPrefix($0.lowercased() + "/") }
+            guard !clashes, !FileManager.default.fileExists(atPath: location.path), Git.isValidBranchName(branch) else { continue }
+            let start = Git.worktreeStart(for: branch, in: repository)
+            guard case .newBranch = start else { continue }
+            return Check(name: name, branch: branch, location: location, start: start)
+        }
+        return Check(name: name, branch: base, location: Git.worktreeLocation(for: base, in: repository),
+                     problem: L("Too many worktrees already use this name. Pick another name."), start: .newBranch(from: nil))
+    }
+
+    /// "Fix the Login redirect!" → "fix-the-login-redirect"; other scripts are transliterated
+    /// ("Исправить вход" → "ispravit-vhod"). Empty when nothing usable is left (emoji only).
     nonisolated static func slug(_ name: String) -> String {
-        let folded = name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased()
-        let words = folded.split { !($0.isASCII && ($0.isLetter || $0.isNumber)) }
-        return String(words.joined(separator: "-").prefix(60)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let latin = name.applyingTransform(StringTransform("Any-Latin; Latin-ASCII; Lower"), reverse: false) ?? name.lowercased()
+        var slug = ""
+        // Whole words only, up to 60 characters.
+        for word in latin.split(whereSeparator: { !($0.isASCII && ($0.isLetter || $0.isNumber)) }) {
+            let next = slug.isEmpty ? String(word) : slug + "-" + word
+            if next.count > 60 { return slug.isEmpty ? String(word.prefix(60)) : slug }
+            slug = next
+        }
+        return slug
+    }
+
+    /// git's message without its progress chatter ("Preparing worktree…", "HEAD is now at…").
+    nonisolated static func cause(of message: String) -> String {
+        let lines = message.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("Preparing worktree") && !$0.hasPrefix("HEAD is now at") }
+        return lines.isEmpty ? L("git stopped without saying why; often a hook that failed without output.") : lines.joined(separator: "\n")
     }
 }
 
-/// An error under a dialog's form, selectable so it can be copied.
+private extension String {
+    func nonEmptyOr(_ fallback: String) -> String { isEmpty ? fallback : self }
+}
+
+/// An error under a dialog's form, selectable so it can be copied, wrapping to show all of it.
 struct DialogError: View {
     let message: String
 
@@ -154,6 +285,7 @@ struct DialogError: View {
             .font(Theme.Font.body)
             .foregroundStyle(Theme.danger)
             .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, DialogLayout.labelWidth + DialogLayout.gap)
     }
 }

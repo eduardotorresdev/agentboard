@@ -1,262 +1,322 @@
+import AppKit
 import SwiftUI
 
-/// The organizations by name in a segmented switch, styled like the other top bar controls. A
-/// quiet thumb marks the current one; it
-/// can be clicked or dragged, follows the pointer while dragged and switches on release to the
-/// name under it. Holding a name (or its context menu) edits it; the plus adds an organization.
-/// The pointer logic is `OrganizationSwitchGesture`; this view only feeds it and draws.
+/// The active organization's avatar in the top bar. A dot in its corner tells that another
+/// organization has an agent waiting for the user (deep blue) or crashed (red). Clicking it opens
+/// the organization menu, which lists them all with their status, switches, edits and adds.
 struct OrganizationSwitcher: View {
     let store: ProjectStore
-    @State private var editing: UUID?
-    /// Each name's frame in the track.
-    @State private var frames: [UUID: CGRect] = [:]
-    /// The thumb's edges. Moved by separate springs, so the edge in front leads and the thumb
-    /// stretches while it travels and settles to the width of the name it lands on.
-    @State private var leading: CGFloat = 0
-    @State private var trailing: CGFloat = 0
-    @State private var gesture = OrganizationSwitchGesture()
-    @State private var hovered: UUID?
-    @State private var isAddHovered = false
-    /// Name under the pointer while dragging, scrolled into view.
-    @State private var dragOver: UUID?
-    @GestureState private var isPointerDown = false
-    @FocusState private var isFocused: Bool
+    let agents: AgentStore
+    @State private var menu = OrganizationMenuPanel()
+    @State private var isHovered = false
 
-    /// Longer names truncate; the full name is in their tooltip.
-    static let maxLabelWidth: CGFloat = 120
-    /// Wider than this, the track scrolls sideways.
-    static let maxTrackWidth: CGFloat = 440
-    /// The thumb; with the inset, the rail is as tall as the other top bar controls (30).
-    private static let height: CGFloat = 24
-    /// Space between the rail's edge and the thumb.
-    private static let inset: CGFloat = 3
-    private static let holdDuration: Duration = .seconds(0.45)
-    private static let space = "organizationTrack"
-    /// Neutral fills matching the other top bar controls: the rail, and the darker thumb on it.
-    private static let railFill = Theme.line.opacity(0.04)
-    private static let thumbFill = Theme.line.opacity(0.1)
+    private var active: Organization? { store.organizations.first { $0.id == store.organizationID } }
 
-    private var organizations: [Organization] { store.organizations }
-
-    private var segments: [OrganizationSwitchGesture.Segment] {
-        organizations.compactMap { organization in
-            frames[organization.id].map { .init(id: organization.id, minX: $0.minX, maxX: $0.maxX) }
-        }
-    }
-
-    private var trackWidth: CGFloat { (segments.last?.maxX ?? 0) + Self.inset * 2 }
-
-    private var isPressing: Bool {
-        if case .pressed = gesture.phase { return true }
-        return gesture.phase == .dragging
+    private var attention: [UUID: OrganizationAttention] {
+        OrganizationAttention.byOrganization(cards: agents.agents, status: agents.cardStatus, active: store.organizationID)
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            ScrollViewReader { scroller in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    track.padding(Self.inset)
-                }
-                .frame(width: min(trackWidth, Self.maxTrackWidth), height: Self.height + Self.inset * 2)
-                .onChange(of: store.organizationID) { _, id in
-                    withAnimation(.smooth) { scroller.scrollTo(id, anchor: .center) }
-                }
-                .onChange(of: dragOver) { _, id in
-                    if let id { withAnimation(.smooth) { scroller.scrollTo(id) } }
-                }
-                // Once the names are measured, the current one in view (it may be far right).
-                .task(id: trackWidth > 0) { if trackWidth > 0 { scroller.scrollTo(store.organizationID, anchor: .center) } }
-            }
-            .background(Self.railFill, in: .rect(cornerRadius: Theme.Radius.control))
-            .overlay {
-                // Keyboard focus: the one place a stroke is needed.
-                RoundedRectangle(cornerRadius: Theme.Radius.control)
-                    .strokeBorder(Theme.accent, lineWidth: 2)
-                    .opacity(isFocused ? 1 : 0)
-                    .animation(.snappy(duration: 0.2), value: isFocused)
-            }
-            .focusable()
-            .focused($isFocused)
-            .focusEffectDisabled()
-            .onKeyPress(.leftArrow) { step(-1) }
-            .onKeyPress(.rightArrow) { step(1) }
-            .onKeyPress(.escape) {
-                guard gesture.isActive else { return .ignored }
-                apply(gesture.cancel())
-                return .handled
-            }
-            .accessibilityRepresentation {
-                Picker(L("Organization"), selection: Binding(get: { store.organizationID }, set: select)) {
-                    ForEach(organizations) { Text(OrganizationAvatar.displayName($0)).tag($0.id) }
-                }
-                .pickerStyle(.segmented)
-                .accessibilityActions {
-                    ForEach(organizations) { organization in
-                        Button(L("Edit \(OrganizationAvatar.displayName(organization))…")) { editing = organization.id }
-                    }
-                }
-            }
-            Button(action: add) {
-                Image(systemName: "plus")
-                    .font(Theme.Font.label)
-                    .foregroundStyle(isAddHovered ? Theme.ink : Theme.inkMuted)
-                    .frame(width: Self.height + Self.inset * 2, height: Self.height + Self.inset * 2)
-                    .background(Theme.line.opacity(isAddHovered ? 0.08 : 0.04), in: .rect(cornerRadius: Theme.Radius.control))
-                    .contentShape(.rect(cornerRadius: Theme.Radius.control))
-            }
-            .buttonStyle(.plain)
-            .onHover { inside in withAnimation(.snappy(duration: 0.2)) { isAddHovered = inside } }
-            .help(L("New organization: its own projects and its own Claude login"))
-            .accessibilityLabel(L("New Organization"))
-        }
-        .padding(.horizontal, 4)
-        .onChange(of: organizations.map(\.id)) { _, ids in
-            frames = frames.filter { ids.contains($0.key) }
-        }
-    }
-
-    /// Names in muted ink, the thumb, then the same names in full ink clipped to the thumb, so the
-    /// color changes exactly where the thumb is, without toggling anything.
-    private var track: some View {
-        let thumb = RoundedRectangle(cornerRadius: Theme.Radius.thumb)
-            .frame(width: max(trailing - leading, 0), height: Self.height)
-            .position(x: (leading + trailing) / 2, y: Self.height / 2)
-        return ZStack(alignment: .topLeading) {
-            interactiveLabels
-            thumb.foregroundStyle(Self.thumbFill)
-                .scaleEffect(y: isPressing ? 0.9 : 1)
-                .animation(.bouncy(duration: 0.3), value: isPressing)
-                .allowsHitTesting(false)
-            highlightedLabels
-                .mask { thumb.scaleEffect(y: isPressing ? 0.9 : 1).animation(.bouncy(duration: 0.3), value: isPressing) }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-        }
-        .coordinateSpace(.named(Self.space))
-        .contentShape(.rect)
-        .gesture(drag)
-        .onChange(of: isPointerDown) { _, down in if !down { apply(gesture.end()) } }
-        .onChange(of: frames) { place(animated: false) }
-        .onChange(of: store.organizationID) { place(animated: true) }
-    }
-
-    /// The names that measure, hover, edit and get scrolled to.
-    private var interactiveLabels: some View {
-        HStack(spacing: 0) {
-            ForEach(organizations) { organization in
-                let name = OrganizationAvatar.displayName(organization)
-                label(organization, ink: hovered == organization.id ? Theme.ink : Theme.inkMuted)
-                    .background(Theme.line.opacity(hovered == organization.id ? 0.04 : 0),
-                                in: .rect(cornerRadius: Theme.Radius.thumb))
-                    .animation(.snappy(duration: 0.2), value: hovered)
-                    .id(organization.id)
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frames[organization.id] = $0 }
-                    .onHover { inside in
-                        if inside { hovered = organization.id } else if hovered == organization.id { hovered = nil }
-                    }
-                    .help(L("\(name) — hold to edit"))
-                    .contextMenu { Button(L("Edit Organization…")) { editing = organization.id } }
-                    .popover(isPresented: binding(for: organization.id), arrowEdge: .bottom) {
-                        OrganizationEditor(store: store, id: organization.id, onDone: { editing = nil })
-                    }
+        let others = attention
+        let barStatus = OrganizationAttention.barStatus(others)
+        Button { menu.toggle(store: store, attention: { attention }) } label: {
+            if let active {
+                OrganizationBarAvatar(organization: active, status: barStatus, isHovered: isHovered)
             }
         }
+        .buttonStyle(.plain)
+        .background(OrganizationMenuAnchor(panel: menu))
+        .onHover { hovering in withAnimation(.snappy(duration: 0.2)) { isHovered = hovering } }
+        .help(L("Organizations: switch, edit or add"))
+        .accessibilityLabel(L("Organization: \(active.map(OrganizationAvatar.displayName) ?? "")"))
+        .accessibilityValue(others.values.compactMap(\.summary).joined(separator: "; "))
+        .accessibilityHint(L("Opens the list of organizations"))
     }
+}
 
-    /// Drawing only: the same names in full ink, shown through the thumb.
-    private var highlightedLabels: some View {
-        HStack(spacing: 0) {
-            ForEach(organizations) { label($0, ink: Theme.ink) }
-        }
-    }
+/// The bar's avatar, with the most pressing status of the other organizations in its corner.
+struct OrganizationBarAvatar: View {
+    let organization: Organization
+    let status: CardStatus?
+    var isHovered = false
 
-    /// Name only: avatars in a quiet bar would fight it. The editor still shows the avatar.
-    private func label(_ organization: Organization, ink: Color) -> some View {
-        Text(OrganizationAvatar.displayName(organization))
-            .font(Theme.Font.label)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: Self.maxLabelWidth)
-            .fixedSize()
-            .foregroundStyle(ink)
-            .padding(.horizontal, 10)
-            .frame(height: Self.height)
-    }
-
-    private var drag: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
-            .updating($isPointerDown) { _, down, _ in down = true }
-            .onChanged { value in
-                if gesture.phase == .idle, let press = gesture.press(at: value.startLocation.x, in: segments) {
-                    Task {
-                        try? await Task.sleep(for: Self.holdDuration)
-                        apply(gesture.holdTimeout(press: press))
-                    }
-                }
-                apply(gesture.move(to: value.location.x, in: segments))
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            OrganizationAvatar(organization: organization, size: 22)
+                .scaleEffect(isHovered ? 1.06 : 1)
+            if let status {
+                // A 2pt knockout ring in the bar's own white keeps the dot apart from the avatar.
+                Circle().fill(status.color)
+                    .frame(width: 8, height: 8)
+                    .padding(2)
+                    .background(Theme.surface, in: .circle)
+                    .offset(x: 4, y: -4)
+                    .transition(.scale.combined(with: .opacity))
             }
-            .onEnded { value in
-                apply(gesture.release(at: value.location.x, in: segments, current: store.organizationID))
+        }
+        .frame(width: 30, height: 30)
+        .contentShape(.circle)
+        .animation(.bouncy(duration: 0.35), value: status)
+    }
+}
+
+/// Where the menu hangs from: the avatar's frame on screen.
+private struct OrganizationMenuAnchor: NSViewRepresentable {
+    let panel: OrganizationMenuPanel
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        panel.anchor = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) { panel.anchor = view }
+}
+
+/// The organization menu: an app-owned, borderless glass panel under the avatar. It closes on
+/// Escape, on a click anywhere else (the panel stops being key) and after a choice.
+@MainActor
+final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
+    weak var anchor: NSView?
+    private var panel: NSPanel?
+    private let state = OrganizationMenuState()
+    /// When it last closed: the click on the avatar that closes it must not reopen it.
+    private var closedAt = Date.distantPast
+
+    func toggle(store: ProjectStore, attention: @escaping () -> [UUID: OrganizationAttention]) {
+        if panel != nil { return close() }
+        guard Date().timeIntervalSince(closedAt) > 0.25, let anchor, let window = anchor.window else { return }
+        let content = OrganizationMenu(store: store, attention: attention, state: state, close: { [weak self] in self?.close() })
+        let host = NSHostingView(rootView: content)
+        let size = host.fittingSize
+        let below = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+        let panel = NSPanel(contentRect: CGRect(x: below.maxX - size.width + 8, y: below.minY - size.height - 6,
+                                                width: size.width, height: size.height),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isFloatingPanel = true
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.contentView = host
+        panel.delegate = self
+        panel.becomesKeyOnlyIfNeeded = false
+        self.panel = panel
+        state.editing = nil
+        state.isShown = false
+        panel.makeKeyAndOrderFront(nil)
+        withAnimation(.snappy(duration: 0.28)) { state.isShown = true }
+    }
+
+    func close() {
+        guard let panel else { return }
+        self.panel = nil
+        closedAt = Date()
+        withAnimation(.snappy(duration: 0.2)) { state.isShown = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { panel.orderOut(nil) }
+    }
+
+    /// A click outside makes another window key.
+    func windowDidResignKey(_ notification: Notification) { close() }
+
+    /// Grows or shrinks with its content (the editor is taller than the list), keeping its top.
+    func fit() {
+        guard let panel, let size = panel.contentView?.fittingSize else { return }
+        var frame = panel.frame
+        frame.origin.y += frame.height - size.height
+        frame.size = size
+        panel.setFrame(frame, display: true)
+    }
+}
+
+@MainActor
+@Observable
+final class OrganizationMenuState {
+    var isShown = false
+    /// The organization being edited in place of the list.
+    var editing: UUID?
+}
+
+/// The menu's content: each organization with its avatar, name and status, the active one marked;
+/// then "New organization". Arrows move, Return chooses, Escape closes.
+private struct OrganizationMenu: View {
+    let store: ProjectStore
+    let attention: () -> [UUID: OrganizationAttention]
+    let state: OrganizationMenuState
+    let close: () -> Void
+    @State private var navigation: OrganizationMenuNavigation?
+    @State private var hovered: OrganizationMenuNavigation.Item?
+    @FocusState private var isFocused: Bool
+
+    private static let width: CGFloat = 280
+    private static let corner: CGFloat = 14
+
+    var body: some View {
+        Group {
+            if let id = state.editing {
+                OrganizationEditor(store: store, id: id, onDone: { withAnimation(.snappy(duration: 0.25)) { state.editing = nil } })
+            } else {
+                list
             }
-    }
-
-    private func apply(_ effect: OrganizationSwitchGesture.Effect) {
-        switch effect {
-        case .none:
-            break
-        case let .follow(minX, maxX, over):
-            dragOver = over
-            move(to: minX, maxX, front: .interactiveSpring(response: 0.18, dampingFraction: 0.8),
-                 back: .interactiveSpring(response: 0.3, dampingFraction: 0.75))
-        case .snap:
-            dragOver = nil
-            place(animated: true)
-        case let .select(id):
-            dragOver = nil
-            select(id)
-            place(animated: true)
-        case let .openEditor(id):
-            editing = id
         }
+        .frame(width: Self.width)
+        .modifier(MenuGlass(corner: Self.corner))
+        .scaleEffect(state.isShown ? 1 : 0.94, anchor: .topTrailing)
+        .opacity(state.isShown ? 1 : 0)
+        .padding(1)
     }
 
-    /// Settles the thumb on the current organization.
-    private func place(animated: Bool) {
-        guard gesture.phase != .dragging, let frame = frames[store.organizationID] else { return }
-        if animated {
-            move(to: frame.minX, frame.maxX, front: .bouncy(duration: 0.32, extraBounce: 0.1), back: .bouncy(duration: 0.48))
-        } else {
-            leading = frame.minX
-            trailing = frame.maxX
+    private var list: some View {
+        let others = attention()
+        let navigation = navigation ?? OrganizationMenuNavigation(organizations: store.organizations.map(\.id),
+                                                                  active: store.organizationID)
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(store.organizations) { organization in
+                row(organization, attention: others[organization.id], highlighted: navigation.highlightedItem == .organization(organization.id))
+            }
+            Divider().padding(.vertical, 4).opacity(0) // spacing only: rows are separated by fill
+            createRow(highlighted: navigation.highlightedItem == .create)
         }
+        .padding(6)
+        .focusable()
+        .focused($isFocused)
+        .focusEffectDisabled()
+        .onAppear {
+            self.navigation = navigation
+            isFocused = true
+        }
+        .onKeyPress(.upArrow) { press(.up) }
+        .onKeyPress(.downArrow) { press(.down) }
+        .onKeyPress(.return) { press(.enter) }
+        .onKeyPress(.escape) { press(.escape) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L("Organizations"))
     }
 
-    private func move(to newLeading: CGFloat, _ newTrailing: CGFloat, front: Animation, back: Animation) {
-        let forward = newLeading > leading
-        withAnimation(forward ? front : back) { trailing = newTrailing }
-        withAnimation(forward ? back : front) { leading = newLeading }
-    }
-
-    private func step(_ offset: Int) -> KeyPress.Result {
-        guard let id = OrganizationSwitchGesture.step(from: store.organizationID, by: offset, in: organizations.map(\.id))
-        else { return .ignored }
-        select(id)
+    private func press(_ key: OrganizationMenuNavigation.Key) -> KeyPress.Result {
+        guard var navigation else { return .ignored }
+        let action = navigation.press(key, active: store.organizationID)
+        withAnimation(.snappy(duration: 0.15)) { self.navigation = navigation }
+        perform(action)
         return .handled
     }
 
-    /// Exactly what the avatar switcher did.
-    private func select(_ id: UUID) {
-        withAnimation(.snappy(duration: 0.3)) { store.selectOrganization(id) }
+    private func perform(_ action: OrganizationMenuNavigation.Action) {
+        switch action {
+        case .none: break
+        case .close: close()
+        case let .select(id):
+            // Exactly what the switcher always did.
+            withAnimation(.snappy(duration: 0.3)) { store.selectOrganization(id) }
+            close()
+        case .create:
+            let number = store.organizations.count + 1
+            let organization = store.addOrganization(named: L("Organization \(number)"))
+            // Straight to naming it.
+            withAnimation(.snappy(duration: 0.25)) { state.editing = organization.id }
+        }
     }
 
-    private func binding(for id: UUID) -> Binding<Bool> {
-        Binding(get: { editing == id }, set: { if !$0 { editing = nil } })
+    private func row(_ organization: Organization, attention: OrganizationAttention?, highlighted: Bool) -> some View {
+        let isActive = organization.id == store.organizationID
+        let item = OrganizationMenuNavigation.Item.organization(organization.id)
+        let name = OrganizationAvatar.displayName(organization)
+        return HStack(spacing: 10) {
+            OrganizationAvatar(organization: organization, size: 24)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(Theme.Font.body.weight(isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? Theme.deep : Theme.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let attention, let summary = attention.summary, let status = attention.status {
+                    HStack(spacing: 5) {
+                        CardStatusDot(status: status)
+                        Text(summary).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                    }
+                }
+            }
+            Spacer(minLength: 4)
+            if hovered == item || highlighted {
+                Button { withAnimation(.snappy(duration: 0.25)) { state.editing = organization.id } } label: {
+                    Image(systemName: "pencil")
+                        .font(Theme.Font.label)
+                        .foregroundStyle(Theme.inkMuted)
+                        .frame(width: 24, height: 24)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain)
+                .help(L("Edit Organization…"))
+                .accessibilityHidden(true)
+                .transition(.opacity)
+            }
+            if isActive {
+                Image(systemName: "checkmark")
+                    .font(Theme.Font.label)
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isActive ? Theme.accentTint : highlighted || hovered == item ? Theme.surfaceDeep : .clear,
+                    in: .rect(cornerRadius: Theme.Radius.control))
+        .contentShape(.rect(cornerRadius: Theme.Radius.control))
+        .onHover { inside in hover(item, inside) }
+        .onTapGesture { perform(isActive ? .close : .select(organization.id)) }
+        .help(name)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(name)
+        .accessibilityValue(attention?.summary ?? "")
+        .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { perform(isActive ? .close : .select(organization.id)) }
+        .accessibilityAction(named: Text(L("Edit Organization…"))) { state.editing = organization.id }
     }
 
-    private func add() {
-        let number = organizations.count + 1
-        let organization = store.addOrganization(named: L("Organization \(number)"))
-        // Straight to naming it.
-        editing = organization.id
+    private func createRow(highlighted: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "plus")
+                .font(Theme.Font.label)
+                .foregroundStyle(Theme.accent)
+                .frame(width: 24, height: 24)
+                .background(Theme.accentSoft, in: .circle)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(L("New Organization")).font(Theme.Font.body).foregroundStyle(Theme.ink)
+                Text(L("Its own projects and its own agent login")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(highlighted || hovered == .create ? Theme.surfaceDeep : .clear, in: .rect(cornerRadius: Theme.Radius.control))
+        .contentShape(.rect(cornerRadius: Theme.Radius.control))
+        .onHover { inside in hover(.create, inside) }
+        .onTapGesture { perform(.create) }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { perform(.create) }
+    }
+
+    private func hover(_ item: OrganizationMenuNavigation.Item, _ inside: Bool) {
+        withAnimation(.snappy(duration: 0.15)) {
+            if inside {
+                hovered = item
+                navigation?.highlight(item)
+            } else if hovered == item {
+                hovered = nil
+            }
+        }
+    }
+}
+
+/// The chrome's material: Liquid Glass where the system has it, a translucent material before.
+private struct MenuGlass: ViewModifier {
+    let corner: CGFloat
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.glassEffect(.regular, in: .rect(cornerRadius: corner))
+        } else {
+            content.background(.regularMaterial, in: .rect(cornerRadius: corner))
+        }
     }
 }

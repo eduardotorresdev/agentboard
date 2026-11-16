@@ -67,7 +67,7 @@ struct VideoTests {
         try await makeVideo(at: clip, width: 64, height: 48, seconds: 2)
         #expect(ImageFiles.isVideoFile(clip))
 
-        let stored = try ImageFiles.store(contentsOf: clip, in: dir)
+        let stored = try await ImageFiles.storeMedia(contentsOf: clip, in: dir)
         #expect(stored.pixelSize == CGSize(width: 64, height: 48))
         #expect(abs((stored.duration ?? 0) - 2) < 0.2)
         #expect(stored.file.hasSuffix(".mp4"))
@@ -75,10 +75,10 @@ struct VideoTests {
         // A container AVFoundation doesn't open natively, and bytes that aren't a video.
         let avi = dir.appendingPathComponent("clip.avi")
         try FileManager.default.copyItem(at: clip, to: avi)
-        #expect(throws: ImageFiles.Failure.notPlayable) { try ImageFiles.store(contentsOf: avi, in: dir) }
+        await #expect(throws: ImageFiles.Failure.notPlayable) { try await ImageFiles.storeMedia(contentsOf: avi, in: dir) }
         let fake = dir.appendingPathComponent("fake.mov")
         try Data("not a video".utf8).write(to: fake)
-        #expect(throws: ImageFiles.Failure.notPlayable) { try ImageFiles.store(contentsOf: fake, in: dir) }
+        await #expect(throws: ImageFiles.Failure.notPlayable) { try await ImageFiles.storeMedia(contentsOf: fake, in: dir) }
 
         // Larger than the video limit (sparse, so nothing is really written).
         let large = dir.appendingPathComponent("large.mp4")
@@ -86,9 +86,9 @@ struct VideoTests {
         let handle = try FileHandle(forWritingTo: large)
         try handle.truncate(atOffset: UInt64(ImageFiles.maximumVideoBytes + 1))
         try handle.close()
-        #expect(throws: ImageFiles.Failure.tooLarge) { try ImageFiles.store(contentsOf: large, in: dir) }
+        await #expect(throws: ImageFiles.Failure.tooLarge) { try await ImageFiles.storeMedia(contentsOf: large, in: dir) }
 
-        let frames = try #require(ImageFiles.readingVideo(stored.file, in: dir))
+        let frames = try #require(await ImageFiles.readingVideo(stored.file, in: dir))
         #expect(frames.count == ImageFiles.readFrames)
         #expect(frames.map(\.second) == frames.map(\.second).sorted())
     }
@@ -146,7 +146,7 @@ struct VideoTests {
         #expect(await MainActor.run { core.orchestrator.bus.peers(of: a.id, kind: .video).map(\.id) } == [record.id])
 
         let peers = try await call("list_peers", as: a.id, on: core)
-        #expect(peers.text.contains("Demo (video, 80×60"), "\(peers.text)")
+        #expect(peers.text.contains("(video, id: \(record.id.uuidString)"), "\(peers.text)")
         let noImage = try await callCounting("image_read", [:], as: a.id, on: core)
         #expect(noImage.isError && noImage.text.contains("No image"), "\(noImage.text)")
 

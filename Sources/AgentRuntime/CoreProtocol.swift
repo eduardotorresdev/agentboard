@@ -40,7 +40,9 @@ public enum CoreProtocol {
     /// 3: `takeOver`, and both sides say the oldest version they speak.
     /// 4: the attention queue (`BoardEvent.attention`, `BoardRequest.dismissAttention`).
     /// 5: an agent's questions in its attention request, answered with `answerQuestions`.
-    public static let version = 5
+    /// 6: the composer's `prompt`, and messages `held` behind the user's terminal line (`deliverHeld`).
+    /// 7: `subscribeStatuses`, a board hearing every session's status.
+    public static let version = 7
     public static let oldest = 2
     public static let versions = Versions(version: version, oldest: oldest)
 
@@ -91,6 +93,9 @@ enum CoreRequest: Codable {
     case resize(id: UUID, cols: Int, rows: Int)
     /// Whether a board shows the session; the core reads output sooner while any does.
     case observe(id: UUID, observed: Bool)
+    /// From a board: every session's status, of every organization, from now on, as `status`
+    /// events; the sessions it attaches to get theirs anyway. Since 7.
+    case subscribeStatuses
     /// SIGTERM to the program's group, SIGKILL after `grace` seconds.
     case terminate(id: UUID, grace: Double)
     /// SIGHUP, as when a terminal window closes.

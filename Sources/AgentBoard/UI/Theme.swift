@@ -2,21 +2,34 @@ import AppKit
 import SwiftUI
 
 /// AgentBoard's visual identity. The app is light mode only.
-/// Editorial and square: sky blue is the accent (actions, selection, focus); yellow/cream is the
-/// secondary, for details and highlights, never behind long text. No greens or teals: the blue
-/// stays at hue ~208°, never drifting toward cyan.
+/// White, light grays, baby blue, a stronger blue and near-black, from Radix Colors (Slate and
+/// Blue, light scales, radix-ui.com/colors), whose steps are contrast-tested. Red is reserved for
+/// errors. No yellow, green or teal; the blue stays at hue ~205–210°.
 enum Theme {
     // MARK: Hex values (shared with BoardPalette and the contrast test)
 
     enum Hex {
-        static let accent: UInt32 = 0x2272B8
-        static let accentSoft: UInt32 = 0xDCEBF7
-        static let secondary: UInt32 = 0xF5C443
-        static let cream: UInt32 = 0xFBE7A1
-        static let ink: UInt32 = 0x14233D
-        static let inkMuted: UInt32 = 0x5A6478
-        static let paper: UInt32 = 0xFBF8F1
-        static let paperDeep: UInt32 = 0xF2EDE1
+        /// Blue 11: the solid accent. White text on it passes AA.
+        static let accent: UInt32 = 0x0D74CE
+        /// Blue 3: selected rows, quiet accent fills.
+        static let accentSoft: UInt32 = 0xE6F4FE
+        /// Blue 2: near-white baby blue, the sky's tone.
+        static let sky: UInt32 = 0xF4FAFF
+        /// Blue 5: a light blue tint for selected thumbs; deep text on it.
+        static let accentTint: UInt32 = 0xC2E5FF
+        /// Blue 6: decorative light blue (the blob's little clouds).
+        static let blueLight: UInt32 = 0xACD8FC
+        /// Blue 12: deep blue for strong emphasis, "waiting for you", the mascot.
+        static let deep: UInt32 = 0x113264
+        /// Slate 12.
+        static let ink: UInt32 = 0x1C2024
+        /// Slate 11.
+        static let inkMuted: UInt32 = 0x60646C
+        static let paper: UInt32 = 0xFFFFFF
+        /// Slate 3: control fills, wells.
+        static let paperDeep: UInt32 = 0xF0F0F3
+        /// Slate 2: behind content that isn't the sky.
+        static let canvas: UInt32 = 0xF9F9FB
         static let danger: UInt32 = 0xC0322B
         static let white: UInt32 = 0xFFFFFF
     }
@@ -28,31 +41,31 @@ enum Theme {
 
     // MARK: Colors
 
-    /// Sky blue accent, #2272B8. White text on it passes AA.
+    /// Solid blue accent: primary actions, focus, selection, running. White text on it.
     static let accent = color(Hex.accent)
-    /// Pale sky wash for selected rows and quiet accent fills; ink text on it.
+    /// Baby-blue wash for selected rows and quiet accent fills; ink text on it.
     static let accentSoft = color(Hex.accentSoft)
-    /// Text and icons on an accent fill.
+    /// Light blue tint (Blue 5) for selected thumbs and chips; `deep` text on it.
+    static let accentTint = color(Hex.accentTint)
+    /// Near-white baby blue.
+    static let sky = color(Hex.sky)
+    /// Deep blue: strong emphasis and "waiting for you".
+    static let deep = color(Hex.deep)
+    /// Text and icons on an accent or deep fill.
     static let onAccent = Color.white
-    /// Yellow secondary, #F5C443: details, badges, highlights. Ink text on it.
-    static let secondary = color(Hex.secondary)
-    /// Cream highlight, the sky's clouds: marks and soft emphasis.
-    static let cream = color(Hex.cream)
-    /// Text and icons on a secondary or cream fill.
-    static let onSecondary = color(Hex.ink)
     /// Primary text.
     static let ink = color(Hex.ink)
     /// Secondary text.
     static let inkMuted = color(Hex.inkMuted)
-    /// Behind content that isn't the sky: the paper color.
-    static let canvas = color(Hex.paper)
-    /// UI surfaces (cards, sidebar, panels, dialogs): paper.
+    /// Behind content that isn't the sky.
+    static let canvas = color(Hex.canvas)
+    /// UI surfaces (cards, panels, dialogs, top bar): white.
     static let surface = color(Hex.paper)
-    /// A recessed paper fill: control backgrounds, accordion headers, wells.
+    /// A light gray fill: control backgrounds, accordion headers, wells.
     static let surfaceDeep = color(Hex.paperDeep)
     /// Hairlines, tinted by ink. Use with opacity, and only where a stroke is required.
     static let line = color(Hex.ink)
-    /// Errors and destructive actions.
+    /// Errors and destructive actions: the one off-palette tone.
     static let danger = color(Hex.danger)
 
     // MARK: Shape
@@ -67,9 +80,6 @@ enum Theme {
         static let card: CGFloat = 8
         /// Dialogs and sheets.
         static let dialog: CGFloat = 10
-        /// The floating canvas toolbars (add bar, zoom bar): fully round, the one exception.
-        /// Larger than half their height, so the ends render as a capsule.
-        static let canvasToolbar: CGFloat = 40
     }
 
     /// Board elements separate from the sky by fill and contrast, not shadow. Where an element
@@ -84,13 +94,17 @@ enum Theme {
 
     /// Editorial scale at normal desktop sizes: hierarchy from weight and spacing, not size.
     enum Font {
-        static let headline = SwiftUI.Font.system(size: 21, weight: .semibold)
+        /// Bold 22pt counts as WCAG large text, so white headlines pass AA (3:1) on the sky.
+        static let headline = SwiftUI.Font.system(size: 22, weight: .bold)
         static let title = SwiftUI.Font.system(size: 15, weight: .semibold)
         static let heading = SwiftUI.Font.system(size: 13.5, weight: .semibold)
-        static let body = SwiftUI.Font.system(size: 13)
+        static let bodySize: CGFloat = 13
+        static let body = SwiftUI.Font.system(size: bodySize)
         /// Compact control labels: segments, chips, small buttons.
-        static let label = SwiftUI.Font.system(size: 12, weight: .semibold)
-        static let caption = SwiftUI.Font.system(size: 11)
+        static let labelSize: CGFloat = 12
+        static let label = SwiftUI.Font.system(size: labelSize, weight: .semibold)
+        static let captionSize: CGFloat = 11
+        static let caption = SwiftUI.Font.system(size: captionSize)
         /// Small uppercase labels above a section.
         static let eyebrow = SwiftUI.Font.system(size: 10.5, weight: .bold)
         static let headlineTracking: CGFloat = -0.4
@@ -109,11 +123,11 @@ enum Theme {
                                    colorSpaceName: .deviceRGB, bytesPerRow: side * 4, bitsPerPixel: 32)!
         let data = rep.bitmapData!
         for i in 0 ..< side * side {
-            // Ink-colored speckle at very low alpha; premultiplied.
-            let alpha = UInt8.random(in: 0 ... 14, using: &rng)
-            data[i * 4] = UInt8(UInt32(0x14) * UInt32(alpha) / 255)
-            data[i * 4 + 1] = UInt8(UInt32(0x23) * UInt32(alpha) / 255)
-            data[i * 4 + 2] = UInt8(UInt32(0x3D) * UInt32(alpha) / 255)
+            // Neutral ink speckle at very low alpha; premultiplied.
+            let alpha = UInt8.random(in: 0 ... 8, using: &rng)
+            data[i * 4] = UInt8(UInt32(0x1C) * UInt32(alpha) / 255)
+            data[i * 4 + 1] = UInt8(UInt32(0x20) * UInt32(alpha) / 255)
+            data[i * 4 + 2] = UInt8(UInt32(0x24) * UInt32(alpha) / 255)
             data[i * 4 + 3] = alpha
         }
         let image = NSImage(size: NSSize(width: side, height: side))
@@ -150,16 +164,3 @@ extension View {
     }
 }
 
-/// A square, fill-delimited icon button for the window's top bar: neutral fill, ink icon.
-struct TopBarButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .labelStyle(.iconOnly)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(Theme.ink)
-            .frame(width: 30, height: 26)
-            .background(Theme.surfaceDeep.opacity(configuration.isPressed ? 1 : 0.8),
-                        in: .rect(cornerRadius: Theme.Radius.control))
-            .contentShape(.rect(cornerRadius: Theme.Radius.control))
-    }
-}

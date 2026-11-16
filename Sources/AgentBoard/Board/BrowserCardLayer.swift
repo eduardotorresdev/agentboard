@@ -16,8 +16,8 @@ struct BrowserCardLayout {
 
     static let button: CGFloat = 22
     static let titleFont = CardFrame.titleFont
-    static let addressFont = NSFont.systemFont(ofSize: 12)
-    static let chipFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
+    static let addressFont = NSFont.systemFont(ofSize: Theme.Font.labelSize)
+    static let chipFont = NSFont.systemFont(ofSize: Theme.Font.captionSize, weight: .semibold)
 
     /// What the device chip says: the preset it follows, or the size of a custom one.
     static func chipLabel(_ device: BrowserDevice) -> String {
@@ -27,15 +27,19 @@ struct BrowserCardLayout {
 
     init(frame: CGRect, record: BrowserRecord) {
         let mid = frame.minY + CardMetrics.titleHeight / 2
-        let width = min(140, CardFrame.width(of: record.name, font: Self.titleFont) + 2)
-        title = CGRect(x: frame.minX + CardFrame.titleX, y: mid - 10, width: width, height: 20)
-        let chip = ceil((Self.chipLabel(record.device) as NSString).size(withAttributes: [.font: Self.chipFont]).width) + 16
-        device = CGRect(x: title.maxX + 8, y: mid - 11, width: min(150, chip), height: 22)
         let size = Self.button
+        let close = CardMetrics.close(of: frame)
+        let chip = min(150, ceil((Self.chipLabel(record.device) as NSString).size(withAttributes: [.font: Self.chipFont]).width) + 16)
+        // On a narrow card the name gives way first, so the controls never reach close.
+        let controls = 8 + chip + 6 + size * 3 + 4 + 8 + 40 + 16
+        let room = max(0, close.minX - frame.minX - CardFrame.titleX - controls)
+        let width = min(140, room, CardFrame.width(of: record.name, font: Self.titleFont) + 2)
+        title = CGRect(x: frame.minX + CardFrame.titleX, y: mid - 10, width: width, height: 20)
+        device = CGRect(x: title.maxX + 8, y: mid - 11, width: chip, height: 22)
         back = CGRect(x: device.maxX + 6, y: mid - size / 2, width: size, height: size)
         forward = back.offsetBy(dx: size + 2, dy: 0)
         reload = forward.offsetBy(dx: size + 2, dy: 0)
-        close = CardMetrics.close(of: frame)
+        self.close = close
         address = CGRect(x: reload.maxX + 8, y: mid - 12, width: max(0, close.minX - reload.maxX - 16), height: 24)
         content = CardMetrics.content(of: frame)
     }
@@ -70,7 +74,7 @@ final class BrowserCardLayer: CALayer {
         hover.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.1)
         hover.isHidden = true
         for text in [address, status] + glyphs {
-            text.fontSize = 12
+            text.fontSize = Theme.Font.labelSize
             text.truncationMode = .end
         }
         address.fontSize = BrowserCardLayout.addressFont.pointSize
@@ -93,7 +97,7 @@ final class BrowserCardLayer: CALayer {
         page.backgroundColor = BoardPalette.card
         page.masksToBounds = true
         page.cornerRadius = Theme.Radius.control
-        dim.backgroundColor = BoardPalette.rgb(0xFFFFFF, 0.8)
+        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.white, 0.8)
         ([bar, addressField, hover, chip, address, closeGlyph, page, dim, status] + glyphs).forEach(addSublayer)
         CardFrame.reveal([closeGlyph] + glyphs, visible: false)
         for handle in handles {
@@ -102,10 +106,6 @@ final class BrowserCardLayer: CALayer {
             handle.backgroundColor = BoardPalette.rgb(BoardPalette.accent)
             handle.borderColor = BoardPalette.card
             handle.borderWidth = 2
-            handle.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-            handle.shadowOpacity = 0.18
-            handle.shadowRadius = 3
-            handle.shadowOffset = CGSize(width: 0, height: 1)
             handle.isHidden = true
             handle.zPosition = 10
             addSublayer(handle)
@@ -175,7 +175,7 @@ final class BrowserCardLayer: CALayer {
         dim.isHidden = message == nil
         status.isHidden = message == nil
         status.string = message
-        status.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        status.font = NSFont.systemFont(ofSize: Theme.Font.labelSize, weight: .medium)
         status.foregroundColor = BoardPalette.rgb(ink, 0.6)
         status.frame = CGRect(x: layout.content.minX + 16, y: layout.content.midY - line, width: max(0, layout.content.width - 32), height: line * 2)
     }

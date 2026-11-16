@@ -27,13 +27,16 @@ final class ProjectTools {
     }
 
     private func setTitle(_ arguments: [String: Any], caller: UUID) -> ToolResult {
-        guard let path = agents.record(caller)?.worktree else { return .error("Your card isn't on the board.") }
-        guard let title = (arguments["title"] as? String).flatMap(WorktreeTitle.clean) else {
-            return .error("Give a `title`: a few words.")
+        guard let record = agents.record(caller) else { return .error("Your card isn't on the board.") }
+        let title = arguments["title"] as? String ?? ""
+        switch projects.setAgentTitle(title, path: record.worktree, in: record.organizationID) {
+        case .applied: return .text("The worktree is titled “\(WorktreeTitle.clean(title) ?? title)”.")
+        case .keptUserTitle(let user):
+            return .text("Kept the user's title “\(user)”: they named this worktree, so yours wasn't applied.")
+        case .unknownWorktree: return .error("Your card's folder isn't a worktree of a project in your organization.")
+        case .invalid: return .error("Give a `title` of a few visible words, other than a label the sidebar uses itself.")
+        case .failed(let reason): return .error("Couldn't save the title: \(reason)")
         }
-        let result = projects.setAgentTitle(title, path: path)
-        return .text(result.applied ? "The worktree is titled “\(title)”."
-                                    : "Kept the user's title “\(result.shown)”: they named this worktree, so yours wasn't applied.")
     }
 
     private func list(in organization: UUID) -> String {
@@ -56,7 +59,7 @@ final class ProjectTools {
                 ?? clone.map(AddProjectDialog.repositoryName(from:))?.nonEmpty
             guard let name else { return .error("Give a `name`, a `path`, or a `clone` URL.") }
             guard !name.contains("/") else { return .error("`name` can't contain “/”; use `path` for a full folder.") }
-            let location = UserDefaults.standard.string(forKey: "projectLocation") ?? AddProjectDialog.defaultLocation
+            let location = AppDefaults.shared.string(forKey: "projectLocation") ?? AddProjectDialog.defaultLocation
             destination = URL(fileURLWithPath: location).appendingPathComponent(name)
         }
         if projects.projects(in: organization).contains(where: { $0.path == destination.path }) {
@@ -72,8 +75,13 @@ final class ProjectTools {
             } else if let clone {
                 try await Git.clone(clone, into: destination) { _ in }
             } else {
-                try Git.createRepository(at: destination)
+                // Off the main actor: a commit-signing prompt mustn't freeze the board.
+                try await Task.detached { try Git.createRepository(at: destination) }.value
             }
+        } catch let failure as Git.InitialCommitFailed {
+            // The repository exists: keep it and add it, and say what's missing.
+            projects.addProject(at: destination, to: organization)
+            return .text("Created and added \(destination.path), but the initial commit failed: \(failure.cause) The repository was kept; fix the problem (often commit signing) and commit there.")
         } catch {
             if clone != nil { try? FileManager.default.removeItem(at: destination) }
             return .error(error.localizedDescription)

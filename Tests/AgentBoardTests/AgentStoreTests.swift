@@ -43,7 +43,7 @@ private func waitUntil(_ seconds: Double = 20, _ condition: @MainActor () -> Boo
     var handedOff = false
     old.onHandedOff = { handedOff = true }
 
-    let store = AgentStore(connect: { CoreClient.open(socketPath: path, timeout: 2) })
+    let store = AgentStore(connect: { CoreClient.open(socketPath: path, timeout: 10) })
     try await waitUntil { store.isLoaded }
     let record = store.addRunner(command: "i=0; while true; do i=$((i+1)); echo tick $i; sleep 0.05; done", name: "counter",
                                  directory: folder.path, to: folder.path, at: .zero)
@@ -118,19 +118,19 @@ private func tempFolder() throws -> URL {
     }
     let (server, orchestrator) = try core(at: path, folder: folder)
     defer { server.stop() }
-    let store = AgentStore(connect: { CoreClient.open(socketPath: path, timeout: 2) })
+    let store = AgentStore(connect: { CoreClient.open(socketPath: path, timeout: 10) })
     store.dataFolder = folder
-    let other = AgentStore(connect: { CoreClient.open(socketPath: path, timeout: 2) })
+    let other = AgentStore(connect: { CoreClient.open(socketPath: path, timeout: 10) })
     try await waitUntil { store.isLoaded && other.isLoaded }
 
-    let record = try store.addImage(.data(picture(800, 400)), named: "Image", to: folder.path, at: CGPoint(x: 10, y: 20))
+    let record = try await store.addImage(.data(picture(800, 400)), named: "Image", to: folder.path, at: CGPoint(x: 10, y: 20))
     #expect(store.images == [record])
     #expect(record.frame == CGRect(origin: CGPoint(x: 10, y: 20), size: ImageRecord.cardSize(for: CGSize(width: 800, height: 400))))
     #expect(FileManager.default.fileExists(atPath: ImageFiles.url(of: record.file, in: folder).path))
     try await waitUntil { orchestrator.image(record.id) != nil && other.image(record.id) != nil }
     #expect(orchestrator.image(record.id) == record)
     #expect(other.image(record.id) == record)
-    #expect(throws: ImageFiles.Failure.notAnImage) { try store.addImage(.data(Data("text".utf8)), named: "x", to: folder.path, at: .zero) }
+    await #expect(throws: ImageFiles.Failure.notAnImage) { try await store.addImage(.data(Data("text".utf8)), named: "x", to: folder.path, at: .zero) }
     #expect(store.images.count == 1)
 }
 

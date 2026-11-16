@@ -28,7 +28,7 @@ struct RunnerDialog: View {
                 }
                 FormRow(label: L("Command"), message: trimmedCommand.isEmpty ? L("Empty: opens a plain shell to type into.") : nil) {
                     TextField("", text: $command, prompt: Text("npm run dev"))
-                        .font(.callout.monospaced())
+                        .font(Theme.Font.body.monospaced())
                 }
                 FormRow(label: L("Folder")) { folderLine }
             }
@@ -39,6 +39,7 @@ struct RunnerDialog: View {
                 onDone(trimmedCommand, name.trimmingCharacters(in: .whitespaces), folder)
                 dismiss()
             }
+            .buttonStyle(DialogButtonStyle(prominent: true))
             .keyboardShortcut(.defaultAction)
         }
         .onAppear { folder = worktree }
@@ -49,8 +50,8 @@ struct RunnerDialog: View {
     private var folderLine: some View {
         HStack(spacing: 8) {
             Image(systemName: "folder")
-                .foregroundStyle(.secondary)
-            Text((folder as NSString).abbreviatingWithTildeInPath)
+                .foregroundStyle(Theme.inkMuted)
+            Text(DisplayPath.short(folder, base: worktree))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -61,6 +62,7 @@ struct RunnerDialog: View {
                     .help(L("Back to the worktree's folder"))
             }
             Button(L("Change…"), action: chooseFolder)
+                .buttonStyle(DialogButtonStyle())
         }
     }
 
@@ -103,15 +105,15 @@ private struct ScriptSelect: View {
         Button { isOpen.toggle() } label: {
             HStack(spacing: 8) {
                 Text(picked?.name ?? L("Choose a script"))
-                    .foregroundStyle(picked == nil ? .secondary : .primary)
+                    .foregroundStyle(picked == nil ? Theme.inkMuted : Theme.ink)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.inkMuted)
             }
             .padding(.horizontal, 8)
             .frame(height: 24)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Color.primary.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Theme.surfaceDeep))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -150,12 +152,12 @@ private struct ScriptRow: View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Text(script.name)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(picked ? Theme.accent : .primary)
+                    .font(Theme.Font.label)
+                    .foregroundStyle(picked ? Theme.accent : Theme.ink)
                 Spacer(minLength: 0)
                 Text(script.body)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.caption.monospaced())
+                    .foregroundStyle(Theme.inkMuted)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -172,7 +174,7 @@ private struct ScriptRow: View {
 
     private var fill: Color {
         if picked { return Theme.accent.opacity(0.1) }
-        return Color.primary.opacity(isHovered ? 0.06 : 0)
+        return isHovered ? Theme.surfaceDeep : .clear
     }
 }
 

@@ -31,10 +31,18 @@ final class Database {
     private var db: OpaquePointer?
 
     static func defaultURL() throws -> URL {
-        #if BENCH
-        if let url = BenchScenario.database { return url }
-        #endif
         let dir = DataFolder.url
+        #if BENCH
+        // A bench run once kept its cards in its own database but its media in the user's folder,
+        // and a sweep deleted their images: database, data folder and media share one base.
+        precondition(ProcessInfo.processInfo.environment["AGENTBOARD_HOME"]?.isEmpty == false,
+                     "bench builds need AGENTBOARD_HOME")
+        if let url = BenchScenario.database {
+            precondition(url.deletingLastPathComponent().standardizedFileURL.path == dir.standardizedFileURL.path,
+                         "the bench database must live in AGENTBOARD_HOME")
+            return url
+        }
+        #endif
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("agentboard.sqlite")
     }
@@ -107,12 +115,19 @@ final class Database {
         try execute("""
             INSERT OR IGNORE INTO organizations (id, name, color) VALUES ('\(OrganizationHome.defaultID.uuidString)', 'Default', 0)
             """)
-        if try !columns(of: "browsers").contains("profile") {
-            try execute("ALTER TABLE browsers ADD COLUMN profile TEXT")
-        }
-        if try !columns(of: "browsers").contains("organization") {
-            try execute("ALTER TABLE browsers ADD COLUMN organization TEXT")
-        }
+        try addColumn("browsers", "profile TEXT")
+        // Nullable: rows an older build writes without it load in the default organization.
+        try addColumn("browsers", "organization TEXT")
+    }
+
+    /// Adds a column unless it is there. Another process adding it at the same moment (both
+    /// saw it missing) is fine; any other failure isn't.
+    private func addColumn(_ table: String, _ definition: String) throws {
+        let name = String(definition.split(separator: " ")[0])
+        guard try !columns(of: table).contains(name) else { return }
+        do {
+            try execute("ALTER TABLE \(table) ADD COLUMN \(definition)")
+        } catch DatabaseError.sqlite(let message) where message.contains("duplicate column name") {}
     }
 
     private func columns(of table: String) throws -> Set<String> {
@@ -218,6 +233,16 @@ final class Database {
             result[String(cString: sqlite3_column_text(stmt, 0))] = String(cString: sqlite3_column_text(stmt, 1))
         }
         return result
+    }
+
+    /// Drops the user's and agents' titles for the worktree at `path`.
+    func forgetWorktreeNames(path: String) throws {
+        for table in ["worktree_aliases", "worktree_titles"] {
+            let stmt = try prepare("DELETE FROM \(table) WHERE path = ?")
+            defer { sqlite3_finalize(stmt) }
+            bind(stmt, 1, path)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+        }
     }
 
     func setWorktreeTitle(_ title: String, path: String) throws {

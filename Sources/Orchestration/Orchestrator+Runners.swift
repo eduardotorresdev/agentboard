@@ -41,6 +41,8 @@ extension Orchestrator {
 
     /// Stops a runner and everything it started; `completion` runs once it has exited.
     func stopRunner(_ id: UUID, then completion: (() -> Void)? = nil) {
+        // Still waiting for the PATH: stopping means never launching it.
+        pendingLaunches.removeAll { $0 == id }
         guard let session = session(id) else {
             completion?()
             return

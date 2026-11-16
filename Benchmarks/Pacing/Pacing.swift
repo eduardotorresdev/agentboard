@@ -26,6 +26,8 @@ let benchmarks = {
         let dirty: Set<Int> = [0, 3]
         for call in benchmark.scaledIterations { blackHole(pacer.select(dirty, at: Double(call) / 60)) }
     }
+
+    VideoPacing.register()
 }
 
 enum Policy: String, CaseIterable {

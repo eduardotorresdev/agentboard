@@ -93,7 +93,7 @@ final class ImageTools: ToolProvider {
 
     func call(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
         let word = medium.word
-        if name == "\(word)_create" { return create(arguments, caller: caller) }
+        if name == "\(word)_create" { return await create(arguments, caller: caller) }
         let element: any BoardElement
         switch resolve(arguments[word] as? String, for: caller) {
         case .success(let found): element = found
@@ -102,13 +102,13 @@ final class ImageTools: ToolProvider {
         guard let record = store.image(element.id) else { return .error("That \(word) is gone.") }
         switch name {
         case "video_read":
-            guard let frames = ImageFiles.readingVideo(record.file, in: store.dataFolder) else {
+            guard let frames = await ImageFiles.readingVideo(record.file, in: store.dataFolder) else {
                 return .error("The video \(record.name) can't be read.")
             }
             let length = String(format: "%.1f", record.duration ?? 0)
-            var content: [ToolContent] = [.text("\(record.name), \(Int(record.pixelSize.width))×\(Int(record.pixelSize.height)) pixels, \(length) s. \(frames.count) frames follow, each after its second.")]
+            var content: [ToolContent] = [.text("\(record.name), \(Int(record.pixelSize.width))×\(Int(record.pixelSize.height)) pixels, \(length) s. \(frames.count) frame\(frames.count == 1 ? "" : "s") follow\(frames.count == 1 ? "s" : ""), each after the second it shows.")]
             for frame in frames {
-                content.append(.text(String(format: "At %.1f s:", frame.second)))
+                content.append(.text(String(format: "At %.2f s:", frame.second)))
                 content.append(.image(frame.jpeg, mimeType: "image/jpeg"))
             }
             return ToolResult(content)
@@ -120,9 +120,14 @@ final class ImageTools: ToolProvider {
                                .image(picture.data, mimeType: picture.mimeType)])
         case "\(word)_replace":
             let stored: ImageFiles.Stored
-            switch storeFile(arguments, caller: caller) {
+            switch await storeFile(arguments, caller: caller) {
             case .success(let found): stored = found
             case .failure(let refusal): return .error(refusal.text)
+            }
+            // Removed while the file was copied: the copy goes too.
+            guard store.image(record.id) != nil else {
+                ImageFiles.remove(stored.file, in: store.dataFolder)
+                return .error("That \(word) is gone.")
             }
             store.updateImage(record.id) {
                 $0.file = stored.file
@@ -141,14 +146,23 @@ final class ImageTools: ToolProvider {
         }
     }
 
-    private func create(_ arguments: [String: Any], caller: UUID) -> ToolResult {
-        guard let agent = store.record(caller) else { return .error("Only agents on the board can add \(medium.word)s.") }
+    private func create(_ arguments: [String: Any], caller: UUID) async -> ToolResult {
+        guard store.record(caller) != nil else { return .error("Only agents on the board can add \(medium.word)s.") }
+        // The name first: a refused name must not leave a copied file behind.
+        let trimmed: String
+        switch BoardName.argument(arguments["name"]) {
+        case .success(let name): trimmed = name ?? ""
+        case .failure(let error): return .error("\(error)")
+        }
         let stored: ImageFiles.Stored
-        switch storeFile(arguments, caller: caller) {
+        switch await storeFile(arguments, caller: caller) {
         case .success(let found): stored = found
         case .failure(let refusal): return .error(refusal.text)
         }
-        let trimmed = (arguments["name"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        guard let agent = store.record(caller) else {
+            ImageFiles.remove(stored.file, in: store.dataFolder)
+            return .error("Only agents on the board can add \(medium.word)s.")
+        }
         let siblings = store.images.filter { $0.worktree == agent.worktree && $0.organizationID == agent.organizationID }
         let size = ImageRecord.cardSize(for: stored.pixelSize)
         let record = ImageRecord(id: UUID(), worktree: agent.worktree,
@@ -163,28 +177,36 @@ final class ImageTools: ToolProvider {
     }
 
     /// The file at `path`, stored with `ImageFiles`.
-    private func storeFile(_ arguments: [String: Any], caller: UUID) -> Result<ImageFiles.Stored, Refusal> {
+    private func storeFile(_ arguments: [String: Any], caller: UUID) async -> Result<ImageFiles.Stored, Refusal> {
         let path = (arguments["path"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
         guard !path.isEmpty else { return .failure(Refusal(text: "Give the \(medium == .image ? "picture" : "video")'s file with `path`.")) }
         let expanded = (path as NSString).expandingTildeInPath
         let url = expanded.hasPrefix("/") ? URL(fileURLWithPath: expanded)
             : URL(fileURLWithPath: store.record(caller)?.worktree ?? FileManager.default.currentDirectoryPath).appendingPathComponent(expanded)
-        // Each medium takes only its own files, so the agent's choice of tool is the card it gets.
-        let video = ImageFiles.isVideoFile(url)
-        if video != (medium == .video), FileManager.default.fileExists(atPath: url.path) {
-            return .failure(Refusal(text: video ? "\(url.path) is a video; put it on the board with video_create."
-                : "\(url.path) isn't a video; pictures go on the board with image_create."))
-        }
+        var video = medium == .video
         do {
-            return .success(try ImageFiles.store(contentsOf: url, in: store.dataFolder))
+            // Each medium takes only its own files, so the agent's choice of tool is the card it
+            // gets. The kind comes from the resolved file, decided once.
+            let file = try ImageFiles.inspect(url)
+            video = file.kind == .video
+            if video != (medium == .video) {
+                return .failure(Refusal(text: video ? "\(url.path) is a video; put it on the board with video_create."
+                    : "\(url.path) isn't a video; pictures go on the board with image_create."))
+            }
+            return .success(video ? try await ImageFiles.storeVideo(file, in: store.dataFolder)
+                : try ImageFiles.storePicture(file, in: store.dataFolder))
+        } catch ImageFiles.Failure.notAFile {
+            return .failure(Refusal(text: "\(url.path) isn't a regular file (a folder, a device or a pipe)."))
         } catch ImageFiles.Failure.tooLarge {
             return .failure(Refusal(text: "\(url.path) is larger than \(video ? ImageFiles.maximumVideoBytes / 1024 / 1024 : 20) MB."))
         } catch ImageFiles.Failure.notPlayable {
             return .failure(Refusal(text: "\(url.path) isn't a video the board can play; use MP4, MOV or M4V."))
         } catch ImageFiles.Failure.notAnImage {
             return .failure(Refusal(text: "\(url.path) isn't an image."))
-        } catch {
+        } catch ImageFiles.Failure.missing {
             return .failure(Refusal(text: "There is no file at \(url.path)."))
+        } catch {
+            return .failure(Refusal(text: "\(url.path) couldn't be stored: \(error.localizedDescription)"))
         }
     }
 
@@ -237,7 +259,7 @@ final class ImageTools: ToolProvider {
         let images = store.bus.peers(of: caller, kind: medium.kind)
         guard !images.isEmpty else { return .failure(Refusal(text: noneConnected)) }
         if let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            if let found = images.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame || $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
+            if let found = findElement(name, among: images) { return .success(found) }
             return .failure(Refusal(text: "No \(medium.word) named “\(name)” is connected to you. Connected: \(images.map(\.name).joined(separator: ", "))."))
         }
         guard images.count == 1, let only = images.first else {

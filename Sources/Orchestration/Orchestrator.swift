@@ -35,7 +35,9 @@ public final class Orchestrator: CoreService {
     private var toolsURL: URL?
     private var toolsResolved = false
     /// Cards whose program waits for the PATH and the tool server.
-    private var pendingLaunches: [UUID] = []
+    var pendingLaunches: [UUID] = []
+    /// Set when the saved board couldn't be read at launch: the stored lines are then never replaced.
+    private var connectionsReadOnly = false
     /// The boards' other elements (browsers).
     private var elements: [UUID: ElementInfo] = [:]
     /// Boards that got their welcome, which then get every change.
@@ -58,27 +60,47 @@ public final class Orchestrator: CoreService {
         self.server = server
         self.dataFolder = dataFolder
         self.providers = providers
-        database = try? CardDatabase(url: url ?? dataFolder.appendingPathComponent("agentboard.sqlite"))
-        var saved = (try? database?.agents()) ?? []
+        do {
+            database = try CardDatabase(url: url ?? dataFolder.appendingPathComponent("agentboard.sqlite"))
+        } catch {
+            // Running on without saving is better than not running, but never silently.
+            database = nil
+            FileHandle.standardError.write(Data("agentboard core: the cards database didn't open, nothing will be saved: \(error)\n".utf8))
+        }
+        // A read that fails must not look like an empty board: the lines are saved by replacing
+        // them all, so they stay unwritten until the next launch reads everything.
+        let stored = database
+        var readFailed = false
+        func read<T>(_ body: () throws -> T?, _ empty: T) -> T {
+            do { return try body() ?? empty } catch {
+                readFailed = true
+                FileHandle.standardError.write(Data("agentboard core: couldn't read the cards database, lines won't be saved: \(error)\n".utf8))
+                return empty
+            }
+        }
+        var saved = read({ try stored?.agents() }, [])
         // Cards saved before agents had names get one now.
         for index in saved.indices where saved[index].name.isEmpty {
             let base = providers.first { $0.id == saved[index].providerID }?.title ?? saved[index].providerID
             saved[index].name = AgentRecord.uniqueName(base, among: saved.filter { $0.worktree == saved[index].worktree })
             try? database?.saveAgent(saved[index])
         }
-        let savedPostIts = (try? database?.postIts()) ?? []
-        let savedImages = (try? database?.images()) ?? []
-        let ids = Set(saved.map(\.id)).union(savedPostIts.map(\.id)).union(savedImages.map(\.id)).union(database?.browserIDs() ?? [])
-        let stored = ((try? database?.connections()) ?? []).filter { ids.contains($0.a) && ids.contains($0.b) }
-        bus = MessageBus(graph: ConnectionGraph(stored))
+        let savedPostIts = read({ try stored?.postIts() }, [])
+        let savedImages = read({ try stored?.images() }, [])
+        let ids = Set(saved.map(\.id)).union(savedPostIts.map(\.id)).union(savedImages.map(\.id))
+            .union(read({ try stored?.browserIDs() }, []))
+        let lines = read({ try stored?.connections() }, []).filter { ids.contains($0.a) && ids.contains($0.b) }
+        connectionsReadOnly = readFailed
+        bus = MessageBus(graph: ConnectionGraph(lines))
         catalog = ToolCatalog([MessagingTools(bus: bus)])
         toolServer = ToolServer(catalog: catalog, secret: Self.toolSecret(in: dataFolder))
         if ProcessInfo.processInfo.environment["AGENTBOARD_CORE_VERBOSE"] == "1", let log = server.onLog {
             toolServer.onRequest = { log("tools: \($0)") }
         }
-        cards = saved
-        postIts = savedPostIts
-        images = savedImages
+        // Names reach agents' prompts and listings: cards saved by older builds are cleaned too.
+        cards = saved.map { var card = $0; card.name = BoardName.named(card.name, else: card.runner == nil ? "Agent" : "Runner"); return card }
+        postIts = savedPostIts.map { var note = $0; note.name = BoardName.named(note.name, else: "Post-it"); return note }
+        images = savedImages.map { var image = $0; image.name = BoardName.named(image.name, else: "Image"); return image }
         catalog.add(RunnerTools(store: self))
         catalog.add(PostItTools(store: self))
         catalog.add(ImageTools(store: self))
@@ -92,7 +114,7 @@ public final class Orchestrator: CoreService {
         catalog.add(ProjectRelay(store: self))
         catalog.add(WorktreeTools(store: self))
         bus.onGraphChange = { [weak self] graph in
-            try? self?.database?.saveConnections(graph.connections)
+            if self?.connectionsReadOnly == false { try? self?.database?.saveConnections(graph.connections) }
             self?.broadcast(.connections(graph.connections))
         }
         bus.onMessage = { [weak self] message in self?.broadcast(.message(message)) }
@@ -131,6 +153,13 @@ public final class Orchestrator: CoreService {
                     self.launchPending()
                 }
             }
+        }
+        tidyMedia()
+        // An agent whose program ended can't answer: it leaves Needs you.
+        server.onSessionStatus = { [weak self] id, status in
+            MainActor.assumeIsolated { self?.agentEndpoints[id]?.sessionChanged(status) }
+            guard status.processID == nil, status.state != .starting else { return }
+            MainActor.assumeIsolated { self?.dismissAttention(id) }
         }
     }
 
@@ -232,6 +261,10 @@ public final class Orchestrator: CoreService {
                           attention: attention, images: images).encoded
     }
 
+    public func input(_ bytes: [UInt8], to id: UUID) -> [UInt8] {
+        agentEndpoints[id]?.userTyped(bytes) ?? bytes
+    }
+
     public func boardDisconnected(_ board: CoreBoard) {
         boards.remove(board)
         for (call, pending) in toolCalls where pending.board == board {
@@ -241,22 +274,31 @@ public final class Orchestrator: CoreService {
     }
 
     public func received(_ payload: Data, from board: CoreBoard) {
-        guard let request = BoardRequest(payload) else { return }
+        guard let request = BoardRequest(payload)?.withCleanNames else {
+            server.onLog?("ignored a board request this core doesn't know (\(payload.count) bytes)")
+            return
+        }
         switch request {
         case .addCard(let record):
             guard self.record(record.id) == nil else { return }
             insert(record, from: board)
         case .updateCard(let record):
-            update(record.id, from: board) { $0 = record }
+            // Names reach agents' listings and prompts: one line of visible text, or the old one.
+            update(record.id, from: board) { let old = $0.name; $0 = record; $0.name = BoardName.clean(record.name) ?? old }
         case .removeCard(let id):
             remove(id, from: board)
         case .prompt(let id, let text):
             agentEndpoints[id]?.prompt(text)
+        case .deliverHeld(let id):
+            agentEndpoints[id]?.deliverHeld()
         case .deliver(let from, let text):
             for peer in bus.peers(of: from) where peer is any MessageEndpoint {
                 _ = try? bus.deliver(text, from: from, to: peer.id)
             }
         case .connect(let connection):
+            // Only within one board: a line across organizations would let an agent read the
+            // other's post-its.
+            guard MessageBus.sameBoard(bus.element(connection.a)?.board, bus.element(connection.b)?.board) else { return }
             bus.add(connection)
         case .disconnect(let id):
             bus.disconnect(id)
@@ -298,7 +340,7 @@ public final class Orchestrator: CoreService {
             insertPostIt(record, from: board)
         case .updatePostIt(let record):
             updatePostIt(record.id, from: board) {
-                $0.name = record.name
+                $0.name = BoardName.clean(record.name) ?? $0.name
                 $0.frame = record.frame
             }
         case .removePostIt(let id):
@@ -310,10 +352,13 @@ public final class Orchestrator: CoreService {
             guard image(record.id) == nil, !record.file.isEmpty, record.file != ".", record.file != "..",
                   (record.file as NSString).lastPathComponent == record.file,
                   FileManager.default.fileExists(atPath: ImageFiles.url(of: record.file, in: dataFolder).path) else { return }
+            // A dropped file's name reaches agents: no control or bidi characters.
+            var record = record
+            record.name = BoardName.clean(record.name) ?? (record.isVideo ? "Video" : "Image")
             insertImage(record, from: board)
         case .updateImage(let record):
             updateImage(record.id, from: board) {
-                $0.name = record.name
+                $0.name = BoardName.clean(record.name) ?? $0.name
                 $0.frame = record.frame
             }
         case .removeImage(let id):
@@ -515,7 +560,14 @@ public final class Orchestrator: CoreService {
     /// Whether the agent is answering the developer's questions or a prompt in its terminal:
     /// a message typed in now would land in that answer.
     fileprivate func isAwaitingDeveloper(_ id: UUID) -> Bool {
-        pendingQuestions[id] != nil || attention.contains { $0.id == id && $0.reason == .waiting }
+        // A permission prompt counts whether or not it said anything: a message typed in now
+        // could answer it.
+        pendingQuestions[id] != nil || attention.contains { $0.id == id && $0.needsUser }
+    }
+
+    /// `recipient` stopped before `sender`'s message went in: the sender hears so.
+    fileprivate func undelivered(from sender: UUID, to recipient: String) {
+        agentEndpoints[sender]?.notice("Your message to \(BoardName.quoted(recipient)) wasn't delivered: it stopped before it could read it.")
     }
 
     private func releaseHeldMessages() {
@@ -533,11 +585,31 @@ final class AgentEndpoint: MessageEndpoint {
     private weak var store: Orchestrator?
     /// Prompts waiting their turn: each is pasted and submitted before the next, so two
     /// messages arriving together don't merge into one prompt.
-    private var outbox: [String] = []
+    private var outbox: [Queued] = []
+    private struct Queued {
+        let text: String
+        /// Typed in the card's composer: given back to the board, never dropped silently.
+        let fromUser: Bool
+        /// The agent that sent it, told when it can't be delivered.
+        let sender: UUID?
+    }
     private var delivering = false
+    /// What the user types in the terminal meanwhile: held between a paste and its Enter, and
+    /// whether the line holds their unsent text, which a paste would join.
+    var line = TerminalLine()
+    /// When the user last typed in the terminal.
+    private var lastKey = Date.distantPast
+    private var idleCheckScheduled = false
+    /// Delivers even over the user's half-typed line, until the outbox empties (Deliver now).
+    private var forced = false
     /// Between the paste and the Enter that submits it: sent together, the agent may read the
     /// Enter as part of the pasted text.
     private static let submitDelay = 0.25
+    /// A line left untouched this long no longer holds messages back: a key the program took
+    /// without Enter (a menu) must not keep them forever.
+    static let idleLimit: TimeInterval = 30
+    /// Messages one agent can have waiting; past it senders are told it can't take more.
+    static let maxQueued = 20
 
     init(id: UUID, store: Orchestrator) {
         self.id = id
@@ -548,7 +620,8 @@ final class AgentEndpoint: MessageEndpoint {
     var kind: ElementKind { .agent }
     var board: String? { store?.record(id).map { boardKey($0.worktree, $0.organizationID) } }
 
-    var unavailableReason: String? {
+    /// Why its program can't take a prompt, or nil.
+    private var programReason: String? {
         switch store?.session(id)?.state {
         case .running: nil
         case .starting: "it is still starting"
@@ -559,32 +632,206 @@ final class AgentEndpoint: MessageEndpoint {
         }
     }
 
-    /// What the user wrote in the card's composer, typed in as their own prompt.
+    var unavailableReason: String? {
+        programReason ?? (outbox.count >= Self.maxQueued ? "it already has \(Self.maxQueued) messages waiting" : nil)
+    }
+
+    /// Why the last message given to it waits instead of going in, or nil when nothing waits.
+    var queueNote: String? {
+        guard !outbox.isEmpty else { return nil }
+        if store?.isAwaitingDeveloper(id) == true { return "they are waiting on their user" }
+        if line.hasDraft && !forced {
+            return "their user is typing in their terminal; it goes in once they submit, or after \(Int(Self.idleLimit)) seconds without typing"
+        }
+        return "it goes in after the messages before it"
+    }
+
+    /// What the user wrote in the card's composer, typed in as their own prompt. One it can't
+    /// take goes back to the board, which puts it back in the composer.
     func prompt(_ text: String) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        outbox.append(text)
+        if let reason = programReason ?? (store?.isAwaitingDeveloper(id) == true ? "it is waiting for your answer" : nil)
+            ?? (outbox.count >= Self.maxQueued ? "it already has \(Self.maxQueued) messages waiting" : nil) {
+            return giveBack(text, reason)
+        }
+        outbox.append(Queued(text: text, fromUser: true, sender: nil))
         deliverNext()
     }
 
     func receive(_ message: Message, from sender: any BoardElement) {
-        outbox.append("Message from \(sender.name) (if it needs an answer, reply with send_message to “\(sender.name)”):\n\n\(message.text)")
+        let name = BoardName.quoted(sender.name)
+        outbox.append(Queued(text: "Message from \(name) (if it needs an answer, reply with send_message to \(name)):\n\n\(message.text)",
+                             fromUser: false, sender: sender.id))
         deliverNext()
+    }
+
+    /// A note from the board itself (a message of theirs that couldn't be delivered).
+    func notice(_ text: String) {
+        guard programReason == nil else { return }
+        outbox.append(Queued(text: text, fromUser: false, sender: nil))
+        deliverNext()
+    }
+
+    private func giveBack(_ text: String, _ reason: String) {
+        store?.broadcast(.promptReturned(id: id, text: text, reason: reason))
+    }
+
+    /// The user's keystrokes on their way to the terminal: what to pass on now. Keys answering
+    /// the program's own question (a permission menu) don't write the line.
+    func userTyped(_ bytes: [UInt8]) -> [UInt8] {
+        let answering = store?.isAwaitingDeveloper(id) == true
+        let passed = line.typed(bytes, delivering: delivering, writesLine: !answering)
+        lastKey = Date()
+        if line.hasDraft { scheduleIdleCheck() } else { DispatchQueue.main.async { [weak self] in self?.deliverNext() } }
+        reportHeld()
+        return passed
+    }
+
+    /// Delivers what waits even though the user has text on the terminal's line; that text is
+    /// submitted with the first one.
+    func deliverHeld() {
+        forced = true
+        deliverNext()
+    }
+
+    /// The program started, stopped or ended. A new program has a new, empty line; what waited
+    /// for one that ended goes back (the composer's) or is reported to its sender, never typed
+    /// into the next program out of context.
+    func sessionChanged(_ status: SessionStatus) {
+        line = TerminalLine()
+        forced = false
+        if status.processID == nil, status.state != .starting {
+            let dropped = outbox
+            outbox = []
+            for item in dropped {
+                if item.fromUser {
+                    giveBack(item.text, "it stopped before it could read it")
+                } else if let sender = item.sender {
+                    store?.undelivered(from: sender, to: name)
+                }
+            }
+        }
+        reportHeld()
+    }
+
+    private func scheduleIdleCheck() {
+        guard !idleCheckScheduled, !outbox.isEmpty else { return }
+        idleCheckScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.idleLimit + 0.1) { [weak self] in
+            self?.idleCheckScheduled = false
+            self?.deliverNext()
+        }
     }
 
     /// Held while the agent waits on the developer; the store calls again once that changes.
     func deliverNext() {
-        guard !delivering, !outbox.isEmpty, let store, !store.isAwaitingDeveloper(id), let session = store.session(id) else { return }
+        defer { reportHeld() }
+        if outbox.isEmpty { forced = false }
+        let idle = Date().timeIntervalSince(lastKey) >= Self.idleLimit
+        guard !delivering, !outbox.isEmpty, let store, !store.isAwaitingDeveloper(id), let session = store.session(id),
+              programReason == nil else { return }
+        guard forced || idle || !line.hasDraft else { return scheduleIdleCheck() }
+        // Whatever was on the line goes in with this prompt.
+        line = TerminalLine()
         delivering = true
-        let prompt = outbox.removeFirst()
+        let prompt = TerminalLine.pasteable(outbox.removeFirst().text,
+                                            bracketed: session.withTerminal { $0.modes.contains(.bracketedPaste) })
         session.send(session.withTerminal { $0.encodePaste(prompt) })
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.submitDelay) { [weak self] in
             session.send([0x0D])
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.submitDelay) {
-                self?.delivering = false
-                self?.deliverNext()
+                guard let self else { return }
+                self.delivering = false
+                // What the user typed meanwhile goes in now, after the Enter.
+                let typed = self.line.releaseHeld()
+                if !typed.isEmpty { session.send(typed) }
+                self.deliverNext()
             }
         }
+    }
+
+    private var reportedHeld = 0
+
+    /// Tells the boards how many messages wait on the user's terminal line.
+    private func reportHeld() {
+        let held = line.hasDraft && !forced && programReason == nil ? outbox.count : 0
+        guard held != reportedHeld else { return }
+        reportedHeld = held
+        store?.broadcast(.held(id: id, count: held))
+    }
+}
+
+/// The user's side of an agent's terminal line, as the core sees their keystrokes: what they
+/// typed and haven't submitted, edited the way a shell or Claude Code's input would.
+struct TerminalLine {
+    private var pending = ""
+    /// Lone Escapes in a row; two clear the input.
+    private var escapes = 0
+    private var held: [UInt8] = []
+
+    /// Whether unsent text sits on the line: a paste now would join it.
+    var hasDraft: Bool { pending.contains { !$0.isWhitespace } }
+
+    private static let pasteStart: [UInt8] = Array("\u{1b}[200~".utf8)
+
+    /// Records `bytes`; returns what passes now. While `delivering`, all of it waits. With
+    /// `writesLine` false (the program asked something), keys answer it and leave the line be.
+    mutating func typed(_ bytes: [UInt8], delivering: Bool, writesLine: Bool = true) -> [UInt8] {
+        if writesLine { record(bytes) }
+        guard delivering else { return bytes }
+        held += bytes
+        return []
+    }
+
+    private mutating func record(_ bytes: [UInt8]) {
+        if bytes.starts(with: Self.pasteStart) {
+            // A paste is text on the line, bracketed or not.
+            escapes = 0
+            pending += "\u{FFFC}"
+            return
+        }
+        if bytes == [0x1B] {
+            escapes += 1
+            if escapes >= 2 { pending = ""; escapes = 0 }
+            return
+        }
+        escapes = 0
+        // Other escape sequences (arrows, focus and mouse reports) don't write on the line.
+        guard bytes.first != 0x1B else { return }
+        for scalar in String(decoding: bytes, as: UTF8.self).unicodeScalars {
+            switch scalar.value {
+            case 0x0D:
+                // A backslash before Enter continues the input on a new line.
+                if pending.last == "\\" { pending.removeLast(); pending += "\n" } else { pending = "" }
+            case 0x03, 0x15:
+                pending = ""
+            case 0x7F, 0x08:
+                if !pending.isEmpty { pending.removeLast() }
+            case 0x17:
+                while pending.last?.isWhitespace == true { pending.removeLast() }
+                while let last = pending.last, !last.isWhitespace { pending.removeLast() }
+            case 0..<0x20:
+                break
+            default:
+                pending.unicodeScalars.append(scalar)
+            }
+        }
+    }
+
+    mutating func releaseHeld() -> [UInt8] {
+        defer { held = [] }
+        return held
+    }
+
+    /// `text` safe to paste: no control characters but line breaks and tabs, and on one line
+    /// when the program doesn't bracket pastes (each break would be an Enter).
+    static func pasteable(_ text: String, bracketed: Bool) -> String {
+        let kept = text.unicodeScalars.filter { scalar in
+            scalar == "\n" || scalar == "\t" || !(scalar.properties.generalCategory == .control)
+        }
+        let clean = String(String.UnicodeScalarView(kept))
+        return bracketed ? clean : clean.split(whereSeparator: \.isNewline).joined(separator: " ")
     }
 }
 
@@ -668,5 +915,5 @@ private final class RemoteElement: BoardElement {
     var name: String { store?.element(id)?.name ?? "" }
     var kind: ElementKind { ElementKind(rawValue: store?.element(id)?.kind ?? "") }
     var detail: String? { store?.element(id)?.detail }
-    var board: String? { store?.element(id)?.worktree }
+    var board: String? { store?.element(id).map { info in info.organization.map { boardKey(info.worktree, $0) } ?? info.worktree } }
 }

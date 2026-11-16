@@ -7,6 +7,7 @@ private func repository() throws -> URL {
     let folder = FileManager.default.temporaryDirectory
         .appendingPathComponent("agentboard-git-\(UUID().uuidString)")
     let repository = folder.appendingPathComponent("repo")
+    _ = isolatedGitConfig
     try Git.createRepository(at: repository)
     return repository
 }
@@ -14,6 +15,7 @@ private func repository() throws -> URL {
 private func git(_ arguments: String...) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = Git.environment
     process.arguments = arguments
     process.standardOutput = Pipe()
     process.standardError = Pipe()

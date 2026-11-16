@@ -5,13 +5,17 @@ import SwiftUI
 
 /// The board's backdrop: a painted sky on canvas, generated in Metal. Two layers: the sky with
 /// its drifting clouds, drawn at a fraction of the screen's resolution a few times a second, and
-/// the canvas weave over it, drawn at full resolution only when the size changes.
+/// the canvas weave over it, a still image drawn at full resolution only when the size changes.
 /// It stays fixed while the board pans and zooms, like a painting hung behind the cards.
 struct SkyCanvas: NSViewRepresentable {
     func makeNSView(context: Context) -> SkyView {
         let view = SkyView()
-        // Card headers frost this sky: one blur per frame, shared by all of them.
-        view.onSkyFrame = { texture, commands in SkyBlur.shared.encode(texture, commands) }
+        // Card headers frost this sky: one blur per frame, shared by all of them, and none while
+        // no header is on screen.
+        view.onSkyFrame = { texture, commands in
+            if SkyBlur.shared.isNeeded { SkyBlur.shared.encode(texture, commands) }
+        }
+        SkyBlur.shared.sky = view.sky
         return view
     }
     func updateNSView(_ view: SkyView, context: Context) {}
@@ -28,15 +32,16 @@ final class SkyView: NSView {
     private let device: MTLDevice?
     private let queue: MTLCommandQueue?
     private let skyPipeline: MTLRenderPipelineState?
-    private let weavePipeline: MTLRenderPipelineState?
     private let squaresPipeline: MTLRenderPipelineState?
+    private let weavePipeline: MTLRenderPipelineState?
     /// The animated cloud layer, `skyScale` pixels per point.
     let sky = CAMetalLayer()
     /// Called with each new sky frame (drawn at a few frames a second) before it is presented,
     /// on the main thread: encode into `commands` to read `texture`, e.g. to blur it behind a card.
     var onSkyFrame: ((_ texture: MTLTexture, _ commands: MTLCommandBuffer) -> Void)?
-    private let weave = CAMetalLayer()
-    /// Twinkling squares over the sky, at one pixel per point; kept out of `sky` so blurs of it stay clean.
+    /// A plain image, not a Metal layer: it never changes, so it needs no spare drawables.
+    private let weave = CALayer()
+    /// Twinkling squares over the sky, at one pixel per two points; kept out of `sky` so blurs of it stay clean.
     private let squares = CAMetalLayer()
     private var timer: Timer?
     private var weaveSize: CGSize = .zero
@@ -64,22 +69,26 @@ final class SkyView: NSView {
             return try? device.makeRenderPipelineState(descriptor: descriptor)
         }
         skyPipeline = pipeline("sky_fragment")
-        weavePipeline = pipeline("weave_fragment")
         squaresPipeline = pipeline("squares_fragment")
+        weavePipeline = pipeline("weave_fragment")
         super.init(frame: .zero)
         wantsLayer = true
         layer = CALayer()
-        layer?.backgroundColor = CGColor(srgbRed: 0.84, green: 0.89, blue: 0.95, alpha: 1)
-        for metal in [sky, weave, squares] {
+        layer?.backgroundColor = BoardPalette.rgb(Theme.Hex.accentSoft)
+        weave.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull()]
+        for metal in [sky, squares] {
+            // Two buffers are enough at a few frames a second, and a full-screen buffer costs megabytes.
+            metal.maximumDrawableCount = 2
             metal.device = device
             metal.pixelFormat = .bgra8Unorm
             metal.framebufferOnly = metal !== sky
             metal.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull()]
             layer?.addSublayer(metal)
         }
+        // The weave sits over the sky, under the squares.
+        layer?.insertSublayer(weave, above: sky)
         sky.isOpaque = true
         sky.magnificationFilter = .linear
-        weave.isOpaque = false
         squares.isOpaque = false
         squares.magnificationFilter = .nearest
         NotificationCenter.default.addObserver(self, selector: #selector(tick), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
@@ -114,6 +123,12 @@ final class SkyView: NSView {
         tick()
     }
 
+    // Drawn once the size settles: redrawing it on every step of a live resize would stall it.
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        tick()
+    }
+
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         weaveSize = .zero
@@ -137,17 +152,41 @@ final class SkyView: NSView {
         skyTime += reduced ? elapsed / Self.reducedMotionSlowdown : elapsed
         lastTick = now
         guard isShown, bounds.width > 0, bounds.height > 0 else { return }
-        let scale = window?.backingScaleFactor ?? 2
-        if weaveSize != bounds.size {
+        if weaveSize != bounds.size, !inLiveResize {
             weaveSize = bounds.size
-            weave.contentsScale = scale
-            draw(weave, pipeline: weavePipeline, pixels: bounds.size.applying(.init(scaleX: scale, y: scale)), pointsPerPixel: 1 / scale)
+            weave.contents = drawWeave(pixels: bounds.size)
         }
         // A fixed epoch keeps the first frame of every launch different, never a still picture.
         draw(sky, pipeline: skyPipeline, pixels: bounds.size.applying(.init(scaleX: Self.skyScale, y: Self.skyScale)),
              pointsPerPixel: 1 / Self.skyScale, time: Float(skyTime + 40))
         // Under Reduce Motion the squares hold still.
-        draw(squares, pipeline: squaresPipeline, pixels: bounds.size, pointsPerPixel: 1, time: reduced ? 40 : Float(skyTime + 40))
+        // One pixel per 2 points: each 6-point cell is three pixels, two lit and one gap.
+        draw(squares, pipeline: squaresPipeline, pixels: bounds.size.applying(.init(scaleX: 0.5, y: 0.5)), pointsPerPixel: 2, time: reduced ? 40 : Float(skyTime + 40))
+    }
+
+    /// The weave drawn once straight into an IOSurface the layer shows: one full-screen buffer,
+    /// with no image copy beside it.
+    private func drawWeave(pixels: CGSize) -> IOSurface? {
+        let width = max(1, Int(pixels.width.rounded())), height = max(1, Int(pixels.height.rounded()))
+        guard let device, let queue, let weavePipeline,
+              let surface = IOSurface(properties: [.width: width, .height: height, .bytesPerElement: 4, .pixelFormat: kCVPixelFormatType_32BGRA]) else { return nil }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        descriptor.usage = .renderTarget
+        guard let texture = device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0),
+              let commands = queue.makeCommandBuffer() else { return nil }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .dontCare
+        pass.colorAttachments[0].storeAction = .store
+        guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return nil }
+        var uniforms = Uniforms(frame: SIMD4(Float(bounds.width), Float(bounds.height), 0, Float(bounds.width) / Float(width)))
+        encoder.setRenderPipelineState(weavePipeline)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        encoder.endEncoding()
+        commands.commit()
+        commands.waitUntilCompleted()
+        return surface
     }
 
     private func draw(_ target: CAMetalLayer, pipeline: MTLRenderPipelineState?, pixels: CGSize, pointsPerPixel: CGFloat, time: Float = 0) {
@@ -173,6 +212,11 @@ final class SkyView: NSView {
     /// `ImageRenderer`) can't see Metal layers and show only the plain fill. `size` is in points;
     /// draw it under the captured window.
     static func snapshot(size: CGSize, scale: CGFloat = 2, time: Float = 40) -> CGImage? {
+        image(["sky_fragment", "weave_fragment", "squares_fragment"], size: size, scale: scale, time: time)
+    }
+
+    /// `fragments` drawn in order into one image, each over the last with premultiplied alpha.
+    private static func image(_ fragments: [String], size: CGSize, scale: CGFloat, time: Float = 40) -> CGImage? {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
               let library = try? device.makeLibrary(source: source, options: nil), let commands = queue.makeCommandBuffer() else { return nil }
         let width = Int(size.width * scale), height = Int(size.height * scale)
@@ -185,8 +229,7 @@ final class SkyView: NSView {
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].storeAction = .store
         guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return nil }
-        // The three layers in order, each over the last with premultiplied alpha.
-        for (fragment, pointsPerPixel) in [("sky_fragment", 1 / skyScale), ("weave_fragment", 1 / scale), ("squares_fragment", 1)] {
+        for fragment in fragments {
             let pipeline = MTLRenderPipelineDescriptor()
             pipeline.vertexFunction = library.makeFunction(name: "sky_vertex")
             pipeline.fragmentFunction = library.makeFunction(name: fragment)
@@ -198,7 +241,7 @@ final class SkyView: NSView {
             attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
             attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
             guard let state = try? device.makeRenderPipelineState(descriptor: pipeline) else { return nil }
-            var uniforms = Uniforms(frame: SIMD4(Float(size.width), Float(size.height), time, Float(pointsPerPixel)))
+            var uniforms = Uniforms(frame: SIMD4(Float(size.width), Float(size.height), time, Float(1 / scale)))
             encoder.setRenderPipelineState(state)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
@@ -296,12 +339,12 @@ final class SkyView: NSView {
         sky = mix(sky, pale, smoothstep(0.55, 0.85, fbm(float3(p * 1.8 + 5, 2), 4)) * 0.5);
         sky += strokes(p, 11) * 0.03;
 
-        // Clouds: cream where the light falls (from the upper left), warm gray in their hollows.
+        // Clouds: white where the light falls (from the upper left), cool gray in their hollows.
         float d = cloud(p, t);
         float lit = d - cloud(p + float2(0.06, 0.09), t);
         float cover = smoothstep(-0.03, 0.12, d);
-        float3 shadow = float3(0.62, 0.63, 0.63), cream = float3(0.98, 0.95, 0.85);
-        float3 body = mix(shadow, cream, saturate(0.5 + lit * 4 + d * 1.2 - 0.1));
+        float3 shadow = float3(0.66, 0.69, 0.74), white = float3(0.99, 0.99, 1.0);
+        float3 body = mix(shadow, white, saturate(0.5 + lit * 4 + d * 1.2 - 0.1));
         body += strokes(p * 0.8 + 2, 23) * 0.045;
         // Thin edges let the blue through, as a dry brush does.
         float3 color = mix(sky, body, cover * (0.7 + 0.3 * saturate(d * 6)));
@@ -312,8 +355,7 @@ final class SkyView: NSView {
 
     // What stays put on the canvas, at full resolution: an over-and-under weave of slightly uneven
     // threads, and the fine marks the brush left in the paint.
-    fragment float4 weave_fragment(SkyVertex in [[stage_in]], constant SkyUniforms &u [[buffer(0)]]) {
-        float2 pt = in.uv * u.frame.xy;
+    static float4 weave(float2 pt) {
         float2 g = pt / 2.4;
         float2 cell = floor(g), f = fract(g);
         float warp = sin(f.x * 3.14159) * (0.8 + 0.4 * hash(float3(cell.x, 0, 1)));
@@ -324,8 +366,16 @@ final class SkyView: NSView {
         float2 p = pt / 520.0;
         light += strokes(p * 1.6, 31) * 0.55 + strokes(p * 4.0, 47) * 0.25;
         float highlight = saturate(light) * 0.09, shade = saturate(-light) * 0.07;
-        // Premultiplied: cream light on the ridges, a blue-gray shade in the furrows.
-        return float4(float3(1.0, 0.98, 0.94) * highlight + float3(0.20, 0.26, 0.38) * shade, highlight + shade);
+        // Premultiplied: white light on the ridges, a blue-gray shade in the furrows.
+        return float4(float3(1.0, 1.0, 1.0) * highlight + float3(0.20, 0.26, 0.38) * shade, highlight + shade);
+    }
+
+    // Drawn at one pixel per point, each pixel the average of four samples: as fine as a 2x
+    // drawing, without its aliasing or its memory.
+    fragment float4 weave_fragment(SkyVertex in [[stage_in]], constant SkyUniforms &u [[buffer(0)]]) {
+        float2 pt = in.uv * u.frame.xy;
+        return (weave(pt + float2(-0.25, -0.25)) + weave(pt + float2(0.25, -0.25))
+              + weave(pt + float2(-0.25, 0.25)) + weave(pt + float2(0.25, 0.25))) * 0.25;
     }
 
     // Small squares on a fixed 6-point grid, lit in clusters that swell, fade and drift with the

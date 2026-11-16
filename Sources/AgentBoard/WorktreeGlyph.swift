@@ -5,7 +5,6 @@ import SwiftUI
 struct WorktreeContents: Equatable {
     var agents: CardStatus?
     var runners: CardStatus?
-    var hasBrowsers = false
 }
 
 /// The worktree's branch, small and quiet in the canvas's top-leading corner: the one place it shows.

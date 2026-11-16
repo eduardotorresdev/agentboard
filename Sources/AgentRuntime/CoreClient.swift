@@ -180,6 +180,11 @@ public final class CoreClient: @unchecked Sendable {
         }
     }
 
+    /// Hears every session's status from now on (`onStatus`, `known`), not only the attached ones.
+    public func subscribeToStatuses() {
+        request(.subscribeStatuses)
+    }
+
     func request(_ request: CoreRequest) {
         socket.send(request)
     }

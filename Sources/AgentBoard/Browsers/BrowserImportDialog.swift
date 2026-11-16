@@ -34,7 +34,7 @@ struct BrowserImportDialog: View {
                         HStack(spacing: 6) {
                             TextField("", text: $newProfileName, prompt: Text(L("Profile name")))
                                 .onSubmit(commitNewProfile)
-                            Button(L("Add"), action: commitNewProfile)
+                            Button(L("Add"), action: commitNewProfile).buttonStyle(DialogButtonStyle())
                                 .disabled(newProfileName.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
                     } else {
@@ -42,8 +42,7 @@ struct BrowserImportDialog: View {
                             ForEach(browsers.profiles) { Text($0.name).tag($0.id) }
                         }
                         .labelsHidden()
-                        Button(L("New profile…")) { addingProfile = true }
-                            .buttonStyle(.link)
+                        Button(L("New profile…")) { addingProfile = true }.buttonStyle(DialogButtonStyle())
                     }
                 }
                 FormRow(label: L("From"),
@@ -51,8 +50,8 @@ struct BrowserImportDialog: View {
                     VStack(alignment: .leading, spacing: 0) {
                         if sources.isEmpty {
                             Text(L("No Chromium browser (Chrome, Arc, Edge…) found on this Mac."))
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                                .font(Theme.Font.body)
+                                .foregroundStyle(Theme.inkMuted)
                                 .padding(.vertical, 4)
                         } else {
                             ScrollView {
@@ -64,27 +63,32 @@ struct BrowserImportDialog: View {
                             }
                             .frame(maxHeight: sources.count > 5 ? 180 : .infinity)
                         }
-                        Divider().padding(.vertical, 8)
-                        Button(L("Import from a cookie file…"), action: chooseFile)
-                            .buttonStyle(.link)
+                        Spacer().frame(height: 12)
+                        Button(L("Import from a cookie file…"), action: chooseFile).buttonStyle(DialogButtonStyle())
                         if let result {
                             Text(result)
-                                .font(.callout)
-                                .foregroundStyle(isError ? Color.red : Theme.accent)
+                                .font(Theme.Font.body)
+                                .foregroundStyle(isError ? Theme.danger : Theme.accent)
                                 .padding(.top, 6)
                         }
                     }
                 }
                 Text(L("Cards on this profile browse with these logins, and so do the agents connected to them."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.inkMuted)
             }
         } footer: {
             Button(L("Done")) {
                 onDone()
                 dismiss()
             }
+            .buttonStyle(DialogButtonStyle(prominent: true))
             .keyboardShortcut(.defaultAction)
+        }
+        // Esc closes it like Done: imports already made stay either way.
+        .onExitCommand {
+            onDone()
+            dismiss()
         }
         .task { sources = browsers.chromiumProfiles() }
     }
@@ -155,22 +159,22 @@ private struct SourceRow: View {
                 if let icon = source.browser.icon {
                     Image(nsImage: icon).resizable().frame(width: 22, height: 22)
                 } else {
-                    Image(systemName: "globe").frame(width: 22, height: 22).foregroundStyle(.secondary)
+                    Image(systemName: "globe").frame(width: 22, height: 22).foregroundStyle(Theme.inkMuted)
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(source.name).font(.callout.weight(.medium))
-                    Text(source.browser.label).font(.caption).foregroundStyle(.secondary)
+                    Text(source.name).font(Theme.Font.label)
+                    Text(source.browser.label).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
                 }
                 Spacer(minLength: 8)
                 if busy {
                     ProgressView().controlSize(.small)
                 } else {
-                    Text(L("Import")).font(.callout).foregroundStyle(Theme.accent).opacity(isHovered ? 1 : 0.0)
+                    Text(L("Import")).font(Theme.Font.body).foregroundStyle(Theme.accent).opacity(isHovered ? 1 : 0.0)
                 }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Color.primary.opacity(isHovered ? 0.06 : 0)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(isHovered ? Theme.surfaceDeep : .clear))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

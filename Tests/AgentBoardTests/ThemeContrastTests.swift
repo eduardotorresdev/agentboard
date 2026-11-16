@@ -7,17 +7,20 @@ final class ThemeContrastTests: XCTestCase {
     func testKeyPairsPassWCAGAA() {
         let pairs: [(String, UInt32, UInt32)] = [
             ("white on accent", H.white, H.accent),
+            ("white on deep", H.white, H.deep),
+            ("deep on accentTint", H.deep, H.accentTint),
             ("ink on accentSoft", H.ink, H.accentSoft),
-            ("ink on secondary", H.ink, H.secondary),
-            ("ink on cream", H.ink, H.cream),
-            ("ink on paper", H.ink, H.paper),
-            ("inkMuted on paper", H.inkMuted, H.paper),
-            ("inkMuted on paperDeep", H.inkMuted, H.paperDeep),
-            ("accent on paper", H.accent, H.paper),
+            ("ink on sky", H.ink, H.sky),
+            ("ink on surface", H.ink, H.paper),
+            ("inkMuted on surface", H.inkMuted, H.paper),
+            ("inkMuted on surfaceDeep", H.inkMuted, H.paperDeep),
+            ("inkMuted on sky", H.inkMuted, H.sky),
+            ("accent on surface", H.accent, H.paper),
             ("white on danger", H.white, H.danger),
-            // The organization switcher in the white top bar: ink-tinted fills over white.
-            ("inkMuted on switcher rail", H.inkMuted, 0xF6F6F7),
-            ("ink on switcher thumb", H.ink, 0xDFE1E5),
+            ("inkMuted on surfaceDeep (organization menu row hover)", H.inkMuted, H.paperDeep),
+            ("white on deep (project tile)", H.white, H.deep),
+            ("white on ink (project tile)", H.white, H.ink),
+            ("white on inkMuted (project tile)", H.white, H.inkMuted),
         ]
         for (name, fg, bg) in pairs {
             XCTAssertGreaterThanOrEqual(Theme.contrast(fg, bg), 4.5, name)
@@ -34,16 +37,29 @@ final class ThemeContrastTests: XCTestCase {
                 return hex | UInt32((a * alpha + b * (1 - alpha)).rounded()) << UInt32(shift)
             }
         }
-        let backdrop = over(H.paper, darkestSky, SidebarBackdrop.tint)
-        XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, backdrop), 4.5, "inkMuted on sidebar")
-        XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, backdrop), 4.5, "ink on sidebar")
+        for sky in [darkestSky, H.sky] {
+            let backdrop = over(H.ink, over(H.paper, sky, SidebarBackdrop.tint), SidebarBackdrop.shade)
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, backdrop), 4.5, "inkMuted on sidebar")
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, backdrop), 4.5, "ink on sidebar")
+            // Status dots are graphics: 3:1.
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.accent, backdrop), 3, "running dot")
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.deep, backdrop), 3, "waiting dot")
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.danger, backdrop), 3, "crashed dot")
+        }
     }
 
     func testContrastMatchesWCAGReference() {
         XCTAssertEqual(Theme.contrast(0x000000, 0xFFFFFF), 21, accuracy: 0.01)
     }
 
-    /// The accent must read as sky blue, not drift toward teal.
+    /// The mascot (a graphic) needs 3:1 against the lightest and the bluest sky tones.
+    func testDeepBlueStandsOutOnTheSky() {
+        for sky in [H.sky, H.accentSoft, H.white] {
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.deep, sky), 3)
+        }
+    }
+
+    /// The accent must read as blue, not drift toward teal.
     func testAccentHueStaysBlue() {
         let c = NSColor(srgbRed: CGFloat(H.accent >> 16 & 0xFF) / 255, green: CGFloat(H.accent >> 8 & 0xFF) / 255,
                         blue: CGFloat(H.accent & 0xFF) / 255, alpha: 1)
@@ -60,9 +76,58 @@ final class ThemeContrastTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(Theme.contrast(fg, header), 4.5, "\(name) over \(String(sky, radix: 16))")
             }
             // Brand marks (Claude's orange) keep their color: logos are exempt from WCAG 1.4.11.
-            for (name, fg) in [("running accent", H.accent), ("icon inkMuted", H.inkMuted)] as [(String, UInt32)] {
+            // The state dots, at full color all the way through running's breath.
+            for (name, fg) in [("running accent", H.accent), ("waiting deep", H.deep), ("crashed danger", H.danger),
+                               ("icon inkMuted", H.inkMuted)] as [(String, UInt32)] {
                 XCTAssertGreaterThanOrEqual(Theme.contrast(fg, header), 3, "\(name) over \(String(sky, radix: 16))")
             }
         }
+    }
+
+    @MainActor
+    func testCardStyleRingsOnlyHighlightedCardsAndCastsNoShadow() {
+        let card = CALayer()
+        CardFrame.style(card, focused: true)
+        XCTAssertEqual(card.borderWidth, 2)
+        XCTAssertEqual(card.shadowOpacity, 0)
+        CardFrame.style(card, focused: false)
+        XCTAssertEqual(card.borderWidth, 0)
+    }
+
+    func testControlTargetsKeepTheirScreenSizeWhenZoomedOut() {
+        let close = CGRect(x: 100, y: 10, width: 20, height: 20)
+        XCTAssertEqual(close.target(zoom: 1), close)
+        let far = close.target(zoom: 0.25)
+        XCTAssertEqual(far.width, 80)
+        XCTAssertEqual(far.midX, close.midX)
+        XCTAssertEqual(far.midY, close.midY)
+    }
+
+    @MainActor
+    func testHeaderBackdropCropsTheSkyLayerNotTheWindow() throws {
+        // A window taller than the sky (a top bar above it): the crop is relative to the sky.
+        let window = CALayer()
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 852)
+        let sky = CALayer()
+        sky.frame = CGRect(x: 0, y: 52, width: 1000, height: 800)
+        sky.isGeometryFlipped = true
+        window.addSublayer(sky)
+        let header = CardTitleBar()
+        sky.addSublayer(header)
+        SkyBlur.shared.sky = sky
+        let surface = try XCTUnwrap(IOSurface(properties: [.width: 4, .height: 4, .bytesPerElement: 4, .pixelFormat: kCVPixelFormatType_32BGRA]))
+        SkyBlur.shared.setCurrentForTesting(surface)
+        header.update(size: CGSize(width: 200, height: 100), icon: .claude, status: nil, title: "A", detail: nil,
+                      focused: false, reserve: 0, scale: 1)
+        header.position = CGPoint(x: 100 + 100, y: 0 + CardMetrics.titleHeight / 2)
+        header.refreshBackdrop()
+        let crop = try XCTUnwrap(header.sublayers?.compactMap { $0.contents == nil ? nil : $0.contentsRect }.first)
+        XCTAssertEqual(crop.minX, 0.1, accuracy: 0.001)
+        XCTAssertEqual(crop.minY, 0, accuracy: 0.001)
+        XCTAssertEqual(crop.width, 0.2, accuracy: 0.001)
+        XCTAssertEqual(crop.height, CardMetrics.titleHeight / 800, accuracy: 0.001)
+        XCTAssertTrue(SkyBlur.shared.isNeeded)
+        header.removeFromSuperlayer()
+        XCTAssertFalse(SkyBlur.shared.isNeeded)
     }
 }

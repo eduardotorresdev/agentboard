@@ -55,13 +55,19 @@ struct AgentSessionTests {
         let deadline = Date().addingTimeInterval(30)
         while firstRow(session).count < 50, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(firstRow(session) == String(repeating: "x", count: 50))
+        // Notifications arrive on the main queue: wait for them, not a fixed time (load varies).
+        func count(reaching value: Int) async throws -> Int {
+            let deadline = Date().addingTimeInterval(30)
+            while await MainActor.run(body: { counter.value }) < value, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            // Long enough for a spurious extra one to show up too.
+            try await Task.sleep(for: .milliseconds(100))
+            return await MainActor.run { counter.value }
+        }
         // Nobody drew: the first notification is the only one.
-        #expect(await MainActor.run { counter.value } == 1)
+        #expect(try await count(reaching: 1) == 1)
         session.withTerminalForDisplay { _ in }
-        try await Task.sleep(for: .milliseconds(50))
         session.stop()
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(await MainActor.run { counter.value } == 2)
+        #expect(try await count(reaching: 2) == 2)
     }
 
     /// Stopping ends the program and what it started (same process group), counts as a stop
@@ -78,7 +84,7 @@ struct AgentSessionTests {
         let done = Counter()
         session.terminate { done.increment() }
         // The completion runs on the main queue, which other suites keep busy.
-        deadline = Date().addingTimeInterval(5)
+        deadline = Date().addingTimeInterval(30)
         while session.state != .stopped || done.value == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         try await Task.sleep(for: .milliseconds(100))
         #expect(session.state == .stopped)
@@ -103,7 +109,7 @@ struct AgentSessionTests {
         let done = Counter()
         session.terminate { done.increment() }
         // The completion runs on the main queue, which other suites keep busy.
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(30)
         while done.value == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         #expect(done.value == 1)
     }

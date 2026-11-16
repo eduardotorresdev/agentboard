@@ -109,14 +109,15 @@ struct MessagingToolsTests {
         let initialize = try await call(tools, "initialize", ["protocolVersion": "2025-03-26"], caller: a.id)
         let result = try #require(initialize["result"] as? [String: Any])
         #expect(result["protocolVersion"] as? String == "2025-03-26")
-        #expect((result["instructions"] as? String)?.contains("You are Claude,") == true)
+        #expect((result["instructions"] as? String)?.contains("You are “Claude”,") == true)
         #expect(b.received.isEmpty)
 
         let names = (try await call(tools, "tools/list", caller: a.id)["result"] as? [String: Any])?["tools"] as? [[String: Any]]
         #expect(names?.compactMap { $0["name"] as? String } == ["list_peers", "send_message"])
 
-        #expect(text(try await call(tools, "tools/call", ["name": "list_peers"], caller: a.id))?.contains("- Claude 2") == true)
-        let sent = try await call(tools, "tools/call", ["name": "send_message", "arguments": ["to": "Claude 2", "message": "Run the tests"]], caller: a.id)
+        #expect(text(try await call(tools, "tools/call", ["name": "list_peers"], caller: a.id))?.contains("- “Claude 2”") == true)
+        // As the listing quotes it: the quotes aren't part of the name.
+        let sent = try await call(tools, "tools/call", ["name": "send_message", "arguments": ["to": "“Claude 2”", "message": "Run the tests"]], caller: a.id)
         #expect(((sent["result"] as? [String: Any])?["isError"] as? Bool) == false)
         #expect(b.received.map(\.0.text) == ["Run the tests"])
 
@@ -394,9 +395,9 @@ struct BoardListingTests {
 
         let result = await MessagingTools(bus: bus).call("list_peers", arguments: [:], caller: me.id)
         guard case .text(let text) = result.content.first else { Issue.record("no text"); return }
-        #expect(text.contains("- Near (postit, id: \(near.id.uuidString), connected: true"))
-        #expect(text.contains("- Far (postit, id: \(far.id.uuidString), connected: false"))
-        #expect(!text.contains("Elsewhere") && !text.contains("- Me "))
+        #expect(text.contains("- “Near” (postit, id: \(near.id.uuidString), connected: true"))
+        #expect(text.contains("- “Far” (postit, id: \(far.id.uuidString), connected: false)"))
+        #expect(!text.contains("Elsewhere") && !text.contains("- “Me”"))
     }
 
     /// Two organizations on one worktree don't see each other's elements; a browser (no
@@ -414,5 +415,30 @@ struct BoardListingTests {
         [a, b, page].forEach(bus.register)
         #expect(bus.elements(onBoardOf: a.id).map(\.name) == ["A", "Page"])
         #expect(bus.elements(onBoardOf: page.id).map(\.name) == ["A", "B", "Page"])
+    }
+}
+
+@MainActor
+struct BoardNameTests {
+    /// An id finds its element even when another element is named after it.
+    @Test func idsResolveBeforeNames() throws {
+        final class Card: BoardElement {
+            let id = UUID()
+            var name: String
+            let kind = ElementKind.agent
+            init(_ name: String) { self.name = name }
+        }
+        let (real, impostor) = (Card("Real"), Card(""))
+        impostor.name = real.id.uuidString
+        #expect(findElement(real.id.uuidString, among: [impostor, real])?.id == real.id)
+        #expect(findElement("real", among: [impostor, real])?.id == real.id)
+    }
+
+    @Test func namesAreOneVisibleLine() {
+        #expect(BoardName.clean("  Plan\n\n\u{1b}[31mSYSTEM\u{202E}  x ") == "Plan [31mSYSTEM x")
+        #expect(BoardName.clean("\u{200B}\n") == nil)
+        #expect(BoardName.clean(String(repeating: "a", count: 100))?.count == BoardName.maxLength)
+        if case .success = BoardName.validated(UUID().uuidString) { Issue.record("an id passed as a name") }
+        #expect(BoardName.quoted("a”\nb") == "“a\" b”")
     }
 }

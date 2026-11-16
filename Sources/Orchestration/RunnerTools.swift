@@ -147,7 +147,11 @@ final class RunnerTools: ToolProvider {
             }
             directory = (path as NSString).standardizingPath
         }
-        let name = (arguments["name"] as? String)?.trimmingCharacters(in: .whitespaces)
+        let name: String?
+        switch BoardName.argument(arguments["name"]) {
+        case .success(let clean): name = clean
+        case .failure(let error): return .error("\(error)")
+        }
         // The same name again means the same runner, with a new command.
         if let name, !name.isEmpty,
            let existing = store.bus.peers(of: caller, kind: .runner).first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
@@ -244,7 +248,7 @@ final class RunnerTools: ToolProvider {
             return .failure(Refusal(text: "No runner is connected to you. Start one with runner_start."))
         }
         if let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            if let found = runners.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame || $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
+            if let found = findElement(name, among: runners) { return .success(found) }
             return .failure(Refusal(text: "No runner named “\(name)” is connected to you. Connected: \(runners.map(\.name).joined(separator: ", "))."))
         }
         guard runners.count == 1, let only = runners.first else {

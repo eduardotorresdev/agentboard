@@ -235,7 +235,7 @@ final class BrowserStore {
 
         var errorDescription: String? {
             switch self {
-            case .unreadable: L("That file isn't a cookie export AgentBoard can read.")
+            case .unreadable: L("That file isn't a cookie export that can be read.")
             case .noCookies: L("No cookies were found in that file.")
             }
         }
@@ -293,7 +293,7 @@ final class BrowserStore {
         browsers.map { record in
             let element = BrowserElement(id: record.id, store: self)
             return ElementInfo(id: record.id, name: record.name, kind: ElementKind.browser.rawValue, detail: element.detail,
-                               worktree: record.worktree, frame: record.frame)
+                               worktree: record.worktree, frame: record.frame, organization: record.organization)
         }
     }
 

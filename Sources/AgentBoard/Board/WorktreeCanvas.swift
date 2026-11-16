@@ -21,7 +21,7 @@ struct WorktreeCanvas: View {
                     .allowsHitTesting(false)
                     .transition(.opacity)
             } else if isEmpty {
-                SkyBotEmptyState()
+                SkyBlobEmptyState()
                 .padding(.leading, board.leadingInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
@@ -138,7 +138,7 @@ private struct CanvasToolbar: View {
         }
         .font(.system(size: 18, weight: .medium))
         .padding(5)
-        .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
+        .modifier(GlassCapsule())
     }
 
     /// A browser emulates one screen; the menu says what each gives.
@@ -216,7 +216,7 @@ private struct NavigationToolbar: View {
             if !board.isZen { zoomControls }
             Button { board.isZen.toggle() } label: {
                 Image(systemName: board.isZen ? "figure.walk" : "figure.mind.and.body")
-                    .foregroundStyle(board.isZen ? Theme.secondary : Theme.accent)
+                    .foregroundStyle(board.isZen ? Theme.deep : Theme.accent)
                     .contentTransition(.symbolEffect(.replace))
             }
             .buttonStyle(ToolbarButtonStyle(compact: true))
@@ -225,11 +225,11 @@ private struct NavigationToolbar: View {
 
             Button { caffeinate.isOn.toggle() } label: {
                 Image(systemName: caffeinate.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
-                    .foregroundStyle(caffeinate.isOn ? Theme.secondary : Theme.accent)
+                    .foregroundStyle(caffeinate.isOn ? Theme.deep : Theme.accent)
                     .contentTransition(.symbolEffect(.replace))
                     .overlay(alignment: .top) {
                         if caffeinate.isOn {
-                            CaffeinateSteam(color: Theme.secondary)
+                            CaffeinateSteam(color: Theme.deep)
                                 .offset(y: -12)
                                 .transition(.opacity)
                         }
@@ -243,7 +243,7 @@ private struct NavigationToolbar: View {
         }
         .font(.callout.weight(.medium))
         .padding(4)
-        .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
+        .modifier(GlassCapsule())
     }
 
     @ViewBuilder private var zoomControls: some View {
@@ -285,15 +285,12 @@ private struct NavigationToolbar: View {
 }
 
 /// Liquid Glass where the system has it, a translucent material before that.
-private struct GlassRoundedRectangle: ViewModifier {
-    var cornerRadius = Theme.Radius.control
-
+private struct GlassCapsule: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            content.glassEffect(.regular, in: .capsule)
         } else {
-            content
-                .background(.regularMaterial, in: .rect(cornerRadius: cornerRadius))
+            content.background(.regularMaterial, in: .capsule)
         }
     }
 }
@@ -335,7 +332,7 @@ private struct AppUsage: View {
                 .foregroundStyle(Theme.line.opacity(0.5))
                 .padding(.horizontal, 10)
                 .frame(height: 24)
-                .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
+                .modifier(GlassCapsule())
                 .help(L("CPU and memory the board uses, without its agents."))
                 .transition(.opacity)
             }
@@ -371,7 +368,7 @@ private struct ClaudeUsageToolbar: View {
                     Self.symbol.map { Image(nsImage: $0).resizable().scaledToFit() }
                         .frame(width: 16, height: 16)
                         .padding(.leading, 8)
-                        .accessibilityLabel("Claude")
+                        .accessibilityLabel(L("Agent usage"))
                     // Plans without a 5-hour limit get no session from the API: only the week shows.
                     if let session = usage.session {
                         item(L("5h"), session, help: L("Left of the current 5-hour session."), relative: true)
@@ -380,7 +377,7 @@ private struct ClaudeUsageToolbar: View {
                 }
                 .font(.callout.weight(.medium))
                 .padding(4)
-                .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
+                .modifier(GlassCapsule())
                 .transition(.opacity)
             }
         }
@@ -405,7 +402,7 @@ private struct ClaudeUsageToolbar: View {
             Text(title).foregroundStyle(.black.opacity(0.5))
             Text(remaining / 100, format: .percent.precision(.fractionLength(0)))
                 .monospacedDigit()
-                .foregroundStyle(remaining < 20 ? Theme.secondary : .black.opacity(0.85))
+                .foregroundStyle(remaining < 20 ? Theme.danger : .black.opacity(0.85))
                 .contentTransition(.numericText())
             if let reset = window?.resetsAt {
                 Text(resetText(reset, relative: relative))

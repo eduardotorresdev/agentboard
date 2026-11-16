@@ -62,7 +62,8 @@ final class CardDatabase {
         try migrateNotesBlocks()
         // Videos share the images table; a picture has no duration.
         if try !columns(of: "images").contains("duration") {
-            try execute("ALTER TABLE images ADD COLUMN duration REAL")
+            // Another process may add it between the check and here; that is success too.
+            do { try execute("ALTER TABLE images ADD COLUMN duration REAL") } catch CardDatabaseError.sqlite(let message) where message.contains("duplicate column") {}
         }
         if try !columns(of: "agents").contains("name") {
             try execute("ALTER TABLE agents ADD COLUMN name TEXT")
@@ -277,10 +278,15 @@ final class CardDatabase {
 
     /// Ids of the elements the board stored (browsers, file trees), so lines to them survive
     /// loading before any board has said which elements it has.
-    func browserIDs() -> Set<UUID> {
+    /// Throws when a table that exists can't be read; one the app hasn't created yet is empty.
+    func browserIDs() throws -> Set<UUID> {
         var result = Set<UUID>()
         for table in ["browsers", "file_trees"] {
-            guard let stmt = try? prepare("SELECT id FROM \(table)") else { continue }
+            let exists = try prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '\(table)'")
+            let found = sqlite3_step(exists) == SQLITE_ROW
+            sqlite3_finalize(exists)
+            guard found else { continue }
+            let stmt = try prepare("SELECT id FROM \(table)")
             defer { sqlite3_finalize(stmt) }
             while sqlite3_step(stmt) == SQLITE_ROW {
                 if let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) { result.insert(id) }

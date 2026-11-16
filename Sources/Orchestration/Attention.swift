@@ -13,6 +13,10 @@ public struct AttentionRequest: Codable, Equatable, Identifiable, Sendable {
         case said(String)
     }
 
+    /// Whether the agent is blocked on the user (a prompt, a permission, its questions), not
+    /// only done with its turn.
+    public var needsUser: Bool { reason != .turnEnded || questions?.isEmpty == false }
+
     /// The card's id.
     public let id: UUID
     public var reason: Reason

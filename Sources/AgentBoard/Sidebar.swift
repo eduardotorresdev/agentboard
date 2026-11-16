@@ -1,3 +1,4 @@
+import Orchestration
 import AgentRuntime
 import SwiftUI
 
@@ -10,12 +11,12 @@ struct Sidebar: View {
     @Binding var selection: WorktreeSelection?
     @Binding var renaming: Worktree?
     /// Folded projects, kept across launches as comma-separated ids.
-    @AppStorage("sidebar.collapsedProjects") private var collapsedIDs = ""
+    @AppStorage(Sidebar.collapsedKey, store: AppDefaults.shared) private var collapsedIDs = ""
+    /// Per data folder, like the other keys, so another instance keeps its own.
+    private static var collapsedKey: String { "sidebar.collapsedProjects:" + DataFolder.url.path }
     @State private var pendingRemoval: PendingRemoval?
     /// The project a worktree is being added to.
     @State private var addingWorktreeTo: Project?
-    /// The core's session statuses, for the marks; see `refreshStatuses`.
-    @State private var statuses: [UUID: SessionStatus] = [:]
     @Namespace private var selectionSpace
 
     static let width: CGFloat = 264
@@ -41,7 +42,6 @@ struct Sidebar: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .background { SidebarBackdrop() }
-        .task { await refreshStatuses() }
         .confirmationDialog(pendingRemoval.map { L("Remove \(store.displayName(of: $0.worktree))?") } ?? "",
                             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
                             presenting: pendingRemoval) { removal in
@@ -61,16 +61,6 @@ struct Sidebar: View {
                     selection = WorktreeSelection(projectID: project.id, worktree: worktree)
                 }
             }
-        }
-    }
-
-    /// shortcut: polls the core's statuses once a second, since sessions don't publish them to
-    /// the main thread while off screen; upgrade if the core gains an observed status feed.
-    private func refreshStatuses() async {
-        while !Task.isCancelled {
-            let known = agents.core?.known ?? [:]
-            if known != statuses { statuses = known }
-            try? await Task.sleep(for: .seconds(1))
         }
     }
 
@@ -124,17 +114,27 @@ struct Sidebar: View {
 
     private func row(for worktree: Worktree, in project: Project) -> some View {
         let tag = WorktreeSelection(projectID: project.id, worktree: worktree)
-        return WorktreeRow(name: store.displayName(of: worktree), contents: contents(of: worktree),
+        let source: WorktreeRow.Source = store.isNamedByUser(worktree) ? .user
+            : store.agentTitles[worktree.path] != nil ? .agent : .fallback
+        return WorktreeRow(name: store.displayName(of: worktree), source: source,
+                           isMain: store.isMain(worktree, in: project), contents: contents(of: worktree),
                            isSelected: selection == tag, isRenaming: renaming == worktree,
                            selectionSpace: selectionSpace,
                            onSelect: { withAnimation(.snappy(duration: 0.3)) { selection = tag } },
                            onStartRename: { renaming = worktree },
-                           onRename: { name in
-                               store.rename(worktree, to: name)
+                           onRename: { draft, opened, confirmed in
+                               if case .set(let name) = WorktreeTitle.renameAction(draft: draft, opened: opened,
+                                                                                    openedIsFallback: source == .fallback, confirmed: confirmed) {
+                                   store.rename(worktree, to: name)
+                               }
                                renaming = nil
                            })
             .contextMenu {
                 Button(L("Rename")) { renaming = worktree }
+                if source == .user {
+                    // Your name stays until you hand the title back.
+                    Button(L("Let Agents Rename")) { store.rename(worktree, to: "") }
+                }
                 if !store.isMain(worktree, in: project) {
                     Divider()
                     Button(L("Remove"), role: .destructive) { requestRemoval(of: worktree, in: project) }
@@ -145,14 +145,10 @@ struct Sidebar: View {
     /// What is on the worktree's canvas, each kind at its most pressing status.
     private func contents(of worktree: Worktree) -> WorktreeContents {
         let cards = agents.agents(in: worktree.path)
-        let waiting = Set(agents.attention.map(\.id))
-        return WorktreeContents(
-            agents: cards.filter { $0.runner == nil }
-                .map { CardStatus.agent(statuses[$0.id], waiting: waiting.contains($0.id)) }.max(),
-            runners: cards.filter { $0.runner != nil }
-                .map { CardStatus.runner(statuses[$0.id], running: agents.runningRunners.contains($0.id)) }.max(),
-            hasBrowsers: !browsers.browsers(in: worktree.path).isEmpty)
+        return WorktreeContents(agents: cards.filter { $0.runner == nil }.map(agents.cardStatus).max(),
+                                runners: cards.filter { $0.runner != nil }.map(agents.cardStatus).max())
     }
+
 }
 
 /// A worktree waiting on the user to confirm its removal, with what removing it would lose.
@@ -197,7 +193,7 @@ private struct ProjectHeader: View {
                             .foregroundStyle(Theme.inkMuted)
                     }
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(Theme.Font.caption.weight(.semibold))
                         .foregroundStyle(Theme.inkMuted)
                         .rotationEffect(.degrees(isCollapsed ? -90 : 0))
                         .opacity(isHovered || isCollapsed ? 1 : 0)
@@ -210,7 +206,7 @@ private struct ProjectHeader: View {
             if let onAddWorktree, isHovered {
                 Button(action: onAddWorktree) {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Theme.Font.caption.weight(.semibold))
                         .foregroundStyle(Theme.inkMuted)
                         .frame(width: 18, height: 18)
                         .contentShape(.rect)
@@ -233,8 +229,8 @@ struct ProjectTile: View {
     let name: String
     static let size: CGFloat = 20
 
-    /// Theme colors that carry white text; no green, teal or flat yellow.
-    private static let palette: [Color] = [Theme.accent, Theme.ink, Theme.inkMuted, Theme.danger]
+    /// Blue and slate steps that carry white text at AA; never red, which means an error.
+    private static let palette: [Color] = [Theme.accent, Theme.deep, Theme.ink, Theme.inkMuted]
 
     /// Stable across launches, unlike `hashValue`.
     static func colorIndex(for name: String) -> Int {
@@ -243,7 +239,7 @@ struct ProjectTile: View {
 
     var body: some View {
         Text(name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "•")
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .font(Theme.Font.label)
             .foregroundStyle(Theme.onAccent)
             .frame(width: Self.size, height: Self.size)
             .background(Self.palette[Self.colorIndex(for: name)], in: .rect(cornerRadius: Theme.Radius.thumb))
@@ -254,16 +250,24 @@ struct ProjectTile: View {
 /// A worktree: its title, text only, bold when it needs the user, with a small dot on the right
 /// while something runs or waits. Double-click renames.
 private struct WorktreeRow: View {
+    enum Source { case user, agent, fallback }
+
     let name: String
+    /// Who gave the title: the user's name locks agents out.
+    let source: Source
+    /// The project's own checkout: marked, so no title can pass for it.
+    let isMain: Bool
     let contents: WorktreeContents
     let isSelected: Bool
     let isRenaming: Bool
     let selectionSpace: Namespace.ID
     let onSelect: () -> Void
     let onStartRename: () -> Void
-    let onRename: (String) -> Void
+    /// The draft, the title the field opened on, and whether Return confirmed it.
+    let onRename: (_ draft: String, _ opened: String, _ confirmed: Bool) -> Void
     @State private var isHovered = false
     @State private var draft = ""
+    @State private var opened = ""
     @FocusState private var fieldFocused: Bool
 
     /// Where the title starts, under the project's name.
@@ -276,6 +280,11 @@ private struct WorktreeRow: View {
         HStack(spacing: 8) {
             title
             Spacer(minLength: 0)
+            if isMain && source != .fallback {
+                Text(L("main"))
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(isSelected ? Theme.ink : Theme.inkMuted)
+            }
             CardStatusDot(status: status ?? .stopped)
                 .help(status?.label ?? "")
         }
@@ -289,7 +298,7 @@ private struct WorktreeRow: View {
         .onHover { isHovered = $0 }
         .animation(.snappy(duration: 0.2), value: isHovered)
         .accessibilityElement(children: .combine)
-        .accessibilityValue(status?.label ?? "")
+        .accessibilityValue(status?.label ?? L("No cards"))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, onSelect)
     }
@@ -302,17 +311,19 @@ private struct WorktreeRow: View {
                 .focused($fieldFocused)
                 .onAppear {
                     draft = name
+                    opened = name
                     fieldFocused = true
                 }
-                .onSubmit { onRename(draft) }
-                .onExitCommand { onRename(name) }
-                .onChange(of: fieldFocused) { _, focused in if !focused { onRename(draft) } }
+                .onSubmit { onRename(draft, opened, true) }
+                .onExitCommand { onRename(opened, opened, false) }
+                .onChange(of: fieldFocused) { _, focused in if !focused { onRename(draft, opened, false) } }
         } else {
             Text(name)
                 .font(Theme.Font.body.weight(needsUser ? .bold : isSelected ? .medium : .regular))
                 .foregroundStyle(needsUser || isSelected ? Theme.ink : Theme.ink.opacity(0.82))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .help(source == .user ? L("\(name) · Named by you; agents can't rename it") : name)
         }
     }
 
@@ -327,17 +338,20 @@ private struct WorktreeRow: View {
     }
 }
 
-/// A very light layer over the canvas: the sky and its squares blurred, under a faint paper
-/// tint that keeps text AA over the darkest sky (see ThemeContrastTests).
+/// A light translucent layer over the canvas: the sky and its squares blurred, under a white
+/// tint and a faint slate one, so the sidebar reads as its own layer even over an empty, near-white
+/// sky. No border, no shadow. Text stays AA over the darkest sky (see ThemeContrastTests).
 struct SidebarBackdrop: View {
-    /// How much paper covers the blurred sky.
-    static let tint = 0.35
+    /// How much white covers the blurred sky.
+    static let tint = 0.55
+    /// The slate (ink) tint over that, which sets the sidebar apart.
+    static let shade = 0.05
 
     var body: some View {
         Rectangle()
             .fill(.ultraThinMaterial)
             .overlay(Theme.surface.opacity(Self.tint))
-            .shadow(color: Theme.line.opacity(0.08), radius: 16, x: 4)
+            .overlay(Theme.ink.opacity(Self.shade))
             .ignoresSafeArea()
     }
 }

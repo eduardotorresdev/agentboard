@@ -3,13 +3,15 @@ import AppKit
 import MetalPerformanceShaders
 import QuartzCore
 
-/// The one frame every card wears: soft corners, a soft shadow, and a translucent title bar with
+/// The one frame every card wears: firm corners, no shadow, and a translucent title bar with
 /// the card's icon, its name, its state and a quieter detail. Each card layer adds its own
 /// controls on top.
 enum CardFrame {
-    static let titleFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
-    static let detailFont = NSFont.systemFont(ofSize: 12, weight: .regular)
-    static let controlFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    static let titleFont = NSFont.systemFont(ofSize: Theme.Font.bodySize, weight: .semibold)
+    /// A card waiting on the user says so by weight.
+    static let waitingFont = NSFont.systemFont(ofSize: Theme.Font.bodySize, weight: .heavy)
+    static let detailFont = NSFont.systemFont(ofSize: Theme.Font.labelSize, weight: .regular)
+    static let controlFont = NSFont.systemFont(ofSize: Theme.Font.labelSize, weight: .medium)
     /// Where the name starts, after the icon.
     static var titleX: CGFloat { CardMetrics.inset + glyphSize + 8 }
 
@@ -19,17 +21,14 @@ enum CardFrame {
         ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 
-    /// Corners, a very short discreet shadow, and the highlighted look (focus, and selection
+    /// Corners and the highlighted look (focus, and selection
     /// through the same flag): a solid accent ring, with the accent cap the title bar draws. No
     /// blurred glow. The card has no background of its own: its title bar draws header and body.
     static func style(_ card: CALayer, focused highlighted: Bool) {
         card.backgroundColor = nil
         card.cornerRadius = CardMetrics.radius
-        card.shadowPath = CGPath(roundedRect: card.bounds, cornerWidth: CardMetrics.radius, cornerHeight: CardMetrics.radius, transform: nil)
-        card.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        card.shadowOpacity = 0.08
-        card.shadowRadius = 2
-        card.shadowOffset = CGSize(width: 0, height: 1)
+        // No shadow: the card's contrast against the sky separates it.
+        card.shadowOpacity = 0
         card.borderColor = BoardPalette.rgb(BoardPalette.accent)
         card.borderWidth = highlighted ? 2 : 0
     }
@@ -191,7 +190,11 @@ final class CardTitleBar: CALayer {
         backdrop.frame = bounds
         backdrop.cornerRadius = CardMetrics.radius
         // Over the frosted sky: mostly white with a breath of ink, a translucent light gray.
-        tint.backgroundColor = BoardPalette.rgb(Theme.Hex.white, CardFrame.headerWhite)
+        // Reduce Transparency makes it solid; Increase Contrast darkens the quieter text.
+        let solid = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        backdrop.isHidden = solid
+        tint.backgroundColor = BoardPalette.rgb(Theme.Hex.white, solid ? 1 : CardFrame.headerWhite)
         tint.sublayers?.first?.frame = tint.bounds
         body.frame = CGRect(x: 0, y: height, width: width, height: max(0, size.height - height))
         body.cornerRadius = CardMetrics.radius
@@ -205,34 +208,39 @@ final class CardTitleBar: CALayer {
         let ink = BoardPalette.ink
         let available = max(0, width - CardFrame.titleX - reserve - 8)
         let titleLine = CardFrame.lineHeight(CardFrame.titleFont)
-        let markSize: CGFloat = status == nil ? 0 : 16
-        let titleWidth = min(max(0, available - (status == nil ? 0 : markSize + 6)), CardFrame.width(of: text, font: CardFrame.titleFont) + 2)
+        let shown = status.flatMap { $0 == .stopped ? nil : $0 }
+        let markSize: CGFloat = shown == nil ? 0 : 14
+        let titleFont = status == .waiting ? CardFrame.waitingFont : CardFrame.titleFont
+        // A state that needs the user (waiting, crashed) keeps its words; the name gives way.
+        let urgent = status == .waiting || status == .crashed
+        let keep = urgent && info != nil ? CardFrame.width(of: info!, font: CardFrame.detailFont) + 8 : 0
+        let nameRoom = max(0, available - (markSize == 0 ? 0 : markSize + 6) - keep)
+        let titleWidth = min(nameRoom, CardFrame.width(of: text, font: titleFont) + 2)
         title.string = text
+        title.font = titleFont
         title.contentsScale = scale
         title.foregroundColor = BoardPalette.rgb(ink)
         title.frame = CGRect(x: CardFrame.titleX, y: (height - titleLine) / 2, width: titleWidth, height: titleLine)
 
-        // The state sits next to the name, apart from the icon: a brand mark keeps its color.
-        mark.isHidden = status == nil
-        if let status {
+        // The state sits next to the name, apart from the icon, as the same dot the sidebar
+        // shows: running accent, waiting deep blue (and a bolder name), crashed red; stopped nothing.
+        mark.isHidden = shown == nil
+        mark.backgroundColor = nil
+        if let shown {
+            let dot: CGFloat = 8
+            let color = shown == .crashed ? Theme.Hex.danger : shown == .waiting || contrast ? Theme.Hex.deep : BoardPalette.accent
             mark.frame = CGRect(x: title.frame.maxX + 6, y: (height - markSize) / 2, width: markSize, height: markSize)
-            let (fill, color): (CGColor?, UInt32) = switch status {
-            case .running: (nil, BoardPalette.accent)
-            case .waiting, .crashed: (BoardPalette.rgb(BoardPalette.secondary), ink)
-            case .stopped: (nil, Theme.Hex.inkMuted)
-            }
-            mark.backgroundColor = fill
-            let m: CGFloat = 10
-            markGlyph.frame = CGRect(x: (markSize - m) / 2, y: (markSize - m) / 2, width: m, height: m)
-            markGlyph.contents = CardIcon.symbol(status.symbol(for: kind), color: color).image(size: m, scale: scale)
-            markGlyph.contentsScale = scale
+            markGlyph.contents = nil
+            markGlyph.backgroundColor = BoardPalette.rgb(color)
+            markGlyph.cornerRadius = dot / 2
+            markGlyph.frame = CGRect(x: (markSize - dot) / 2, y: (markSize - dot) / 2, width: dot, height: dot)
         }
         let detailLine = CardFrame.lineHeight(CardFrame.detailFont)
-        let detailX = (status == nil ? title.frame.maxX : mark.frame.maxX) + 8
+        let detailX = (mark.isHidden ? title.frame.maxX : mark.frame.maxX) + 8
         detail.string = info
         detail.isHidden = info == nil || detailX + 24 > CardFrame.titleX + available
         detail.contentsScale = scale
-        detail.foregroundColor = BoardPalette.rgb(status == .crashed || status == .waiting ? ink : Theme.Hex.inkMuted)
+        detail.foregroundColor = BoardPalette.rgb(status == .crashed ? Theme.Hex.danger : status == .waiting || contrast ? ink : Theme.Hex.inkMuted)
         detail.frame = CGRect(x: detailX, y: (height - detailLine) / 2 + 1, width: max(0, CardFrame.titleX + available - detailX), height: detailLine)
         // Focus caps the card's top edge; no line ever splits the bar from the content.
         rule.frame = CGRect(x: CardMetrics.radius, y: 0, width: max(0, width - CardMetrics.radius * 2), height: 3)
@@ -245,9 +253,9 @@ final class CardTitleBar: CALayer {
 
     /// Shows the blurred sky's patch that lies behind this header, wherever the camera put it.
     func refreshBackdrop() {
-        var root: CALayer = self
-        while let parent = root.superlayer { root = parent }
-        guard let surface = SkyBlur.shared.current, root.bounds.width > 0, root.bounds.height > 0 else { return }
+        // The blur is of the sky layer, which may be shorter than the window (under the top bar).
+        guard let surface = SkyBlur.shared.current, let root = SkyBlur.shared.sky, superlayer != nil,
+              root.bounds.width > 0, root.bounds.height > 0 else { return }
         let rect = convert(bounds, to: root)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -259,15 +267,16 @@ final class CardTitleBar: CALayer {
         CATransaction.commit()
     }
 
-    /// Running breathes and waiting nudges, as in the sidebar; crashed and stopped hold still.
+    /// Running breathes by size at full color (as in the sidebar, so it keeps its contrast);
+    /// waiting nudges; crashed and stopped hold still.
     private func animate(_ new: CardStatus?) {
         guard new != status else { return }
         status = new
         mark.removeAllAnimations()
         guard new == .running || new == .waiting, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let spring = CASpringAnimation(keyPath: new == .running ? "opacity" : "transform.scale")
+        let spring = CASpringAnimation(keyPath: "transform.scale")
         spring.fromValue = 1
-        spring.toValue = new == .running ? 0.45 : 1.18
+        spring.toValue = new == .running ? 0.65 : 1.18
         spring.stiffness = new == .running ? 30 : 180
         spring.damping = new == .running ? 9 : 10
         spring.duration = spring.settlingDuration
@@ -291,7 +300,20 @@ final class SkyBlur: @unchecked Sendable {
     private(set) var current: IOSurface?
     private let headers = NSHashTable<CardTitleBar>.weakObjects()
 
+    /// The sky layer the blurred frames are of; headers place their patch relative to it.
+    weak var sky: CALayer?
+
     func register(_ header: CardTitleBar) { headers.add(header) }
+
+    func setCurrentForTesting(_ surface: IOSurface) { current = surface }
+
+    /// Whether any header is on screen over the sky, so the sky can skip the blur otherwise.
+    var isNeeded: Bool {
+        guard let sky else { return false }
+        return headers.allObjects.contains { header in
+            header.superlayer != nil && !header.isHidden && header.convert(header.bounds, to: sky).intersects(sky.bounds)
+        }
+    }
 
     /// Encodes the blur of a sky frame into the sky's own command buffer (`SkyView.onSkyFrame`).
     func encode(_ texture: MTLTexture, _ commands: MTLCommandBuffer) {
@@ -321,5 +343,14 @@ final class SkyBlur: @unchecked Sendable {
                 for header in self.headers.allObjects { header.refreshBackdrop() }
             }
         }
+    }
+}
+
+extension CGRect {
+    /// This control's hit area at `zoom`: grown around its center so it never gets smaller on
+    /// screen than `CardMetrics.minimumTarget`, as the resize handles already do.
+    func target(zoom: CGFloat) -> CGRect {
+        let side = CardMetrics.minimumTarget / max(zoom, 0.01)
+        return insetBy(dx: -max(0, side - width) / 2, dy: -max(0, side - height) / 2)
     }
 }

@@ -103,13 +103,18 @@ public struct ElementInfo: Hashable, Codable, Sendable {
     public var detail: String?
     public var worktree: String
     public var frame: CGRect
+    /// The organization it belongs to; nil from a board that predates organizations here, which
+    /// puts it on the worktree's board in every organization.
+    public var organization: UUID?
 
-    public init(id: UUID, name: String, kind: String, detail: String?, worktree: String, frame: CGRect) {
+    public init(id: UUID, name: String, kind: String, detail: String?, worktree: String, frame: CGRect,
+                organization: UUID? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
         self.detail = detail
         self.worktree = worktree
         self.frame = frame
+        self.organization = organization
     }
 }

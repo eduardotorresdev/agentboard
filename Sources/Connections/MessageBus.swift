@@ -41,6 +41,12 @@ public protocol MessageEndpoint: BoardElement {
     var unavailableReason: String? { get }
     /// Hands `message`, sent by `sender`, to the element.
     func receive(_ message: Message, from sender: any BoardElement)
+    /// Why what it was last given waits instead of going in now, or nil once it went in.
+    var queueNote: String? { get }
+}
+
+public extension MessageEndpoint {
+    var queueNote: String? { nil }
 }
 
 public struct Message: Identifiable, Hashable, Sendable, Codable {
@@ -146,7 +152,7 @@ public final class MessageBus {
             .sorted { ($0.kind.rawValue, $0.name.lowercased()) < ($1.kind.rawValue, $1.name.lowercased()) }
     }
 
-    static func sameBoard(_ a: String?, _ b: String?) -> Bool {
+    public static func sameBoard(_ a: String?, _ b: String?) -> Bool {
         guard let a, let b, a != b else { return true }
         let (x, y) = (a.split(separator: "\u{0}", omittingEmptySubsequences: false), b.split(separator: "\u{0}", omittingEmptySubsequences: false))
         return (x.count == 1 || y.count == 1) && x[0] == y[0]
@@ -164,8 +170,7 @@ public final class MessageBus {
         guard elements[sender] != nil else { throw MessageError.unknownSender }
         let peers = peers(of: sender)
         let wanted = address.trimmingCharacters(in: .whitespaces)
-        guard let target = peers.first(where: { $0.name.caseInsensitiveCompare(wanted) == .orderedSame })
-            ?? peers.first(where: { $0.id.uuidString.caseInsensitiveCompare(wanted) == .orderedSame }) else {
+        guard let target = findElement(wanted, among: peers) else {
             throw MessageError.notConnected(to: wanted, peers: peers.map(\.name))
         }
         return try deliver(text, from: sender, to: target.id)

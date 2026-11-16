@@ -18,11 +18,11 @@ enum OpenWorktree {
     private static var legacyKey: String { "openWorktree:" + DataFolder.url.path }
 
     static func path(in organization: UUID) -> String? {
-        UserDefaults.standard.string(forKey: key(organization)) ?? UserDefaults.standard.string(forKey: legacyKey)
+        AppDefaults.shared.string(forKey: key(organization)) ?? AppDefaults.shared.string(forKey: legacyKey)
     }
 
     static func set(_ path: String, in organization: UUID) {
-        UserDefaults.standard.set(path, forKey: key(organization))
+        AppDefaults.shared.set(path, forKey: key(organization))
     }
 }
 
@@ -71,12 +71,7 @@ struct ContentView: View {
                 ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
             }
             if !boardController.isZen {
-                if #available(macOS 26, *) {
-                    ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
-                        .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store) }
-                }
+                ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store, agents: agents) }
             }
         }
         .onChange(of: store.organizationID, initial: true) { old, id in
@@ -137,35 +132,30 @@ struct ContentView: View {
         }
         .toolbar {
             // The sidebar and the project actions, one group beside the title.
-            if !boardController.isZen {
+            if !boardController.isZen { ToolbarItemGroup(placement: .navigation) {
+                Button(action: toggleSidebar) { Label(L("Toggle Sidebar"), systemImage: "sidebar.left") }
+                    .keyboardShortcut("s", modifiers: [.command, .control])
+                Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
+                    .help(L("Clone, create, or open a project."))
+                Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
+                    .help(L("Reloads the projects and their worktrees."))
+            } }
+            // A build of the checkout (`./run`) says so, to tell it apart from the installed app.
+            if Bundle.main.bundleURL.pathExtension != "app" {
                 if #available(macOS 26, *) {
-                    ToolbarItem(placement: .navigation) { projectActions }.sharedBackgroundVisibility(.hidden)
+                    // Plain text beside the glass group, not inside it.
+                    ToolbarItem(placement: .navigation) { devLabel }.sharedBackgroundVisibility(.hidden)
                 } else {
-                    ToolbarItem(placement: .navigation) { projectActions }
+                    ToolbarItem(placement: .navigation) { devLabel }
                 }
             }
         }
     }
 
-    /// Square, fill-delimited buttons instead of the toolbar's glass capsule.
-    private var projectActions: some View {
-        HStack(spacing: 4) {
-            Button(action: toggleSidebar) { Label(L("Toggle Sidebar"), systemImage: "sidebar.left") }
-                .keyboardShortcut("s", modifiers: [.command, .control])
-                .help(L("Toggle Sidebar"))
-            Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
-                .help(L("Clone, create, or open a project."))
-            Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
-                .help(L("Reloads the projects and their worktrees."))
-            // A build of the checkout (`./run`) says so, to tell it apart from the installed app.
-            if Bundle.main.bundleURL.pathExtension != "app" {
-                Text(verbatim: "dev")
-                    .font(Theme.Font.caption.weight(.semibold))
-                    .foregroundStyle(Theme.inkMuted)
-                    .padding(.leading, 6)
-            }
-        }
-        .buttonStyle(TopBarButtonStyle())
+    private var devLabel: some View {
+        Text(verbatim: "dev")
+            .font(Theme.Font.caption.weight(.semibold))
+            .foregroundStyle(Theme.inkMuted)
     }
 
     /// Zen mode hides the sidebar without forgetting whether it was open.
@@ -179,11 +169,8 @@ struct ContentView: View {
         if let selection {
             WorktreeCanvas(agents: agents, browsers: browsers, fileTrees: fileTrees, worktree: selection.worktree, board: boardController)
         } else {
-            EmptyCanvas(
-                symbol: "sidebar.left",
-                title: L("Select a worktree"),
-                message: L("Pick a worktree in the sidebar to open it on the canvas.")
-            ) { EmptyView() }
+            SkyBlobEmptyState(title: L("Select a worktree"),
+                              message: L("Pick a worktree in the sidebar to open it on the canvas."))
             // Centered on the canvas the sidebar leaves uncovered.
             .padding(.leading, showsSidebar ? sidebarInset : 0)
         }

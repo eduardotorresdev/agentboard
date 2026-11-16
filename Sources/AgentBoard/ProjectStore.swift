@@ -21,15 +21,22 @@ final class ProjectStore {
     var errorMessage: String?
 
     let database: Database?
+    /// Title writes go through their own connection on this queue, so a database another
+    /// process holds locked (it waits up to the busy timeout, 3 s) never stalls the UI.
+    @ObservationIgnored private let titleWriter: TitleWriter?
 
-    init() {
+    /// `databaseURL`: the data folder's database by default; another in tests.
+    init(databaseURL: URL? = nil) {
         do {
-            database = try Database(url: Database.defaultURL())
+            let url = try databaseURL ?? Database.defaultURL()
+            database = try Database(url: url)
+            titleWriter = TitleWriter(url: url)
         } catch {
             database = nil
+            titleWriter = nil
             errorMessage = L("Failed to open database: \(String(describing: error))")
         }
-        if let stored = UserDefaults.standard.string(forKey: Self.organizationKey).flatMap(UUID.init) {
+        if let stored = AppDefaults.shared.string(forKey: Self.organizationKey).flatMap(UUID.init) {
             organizationID = stored
         }
         reload()
@@ -56,26 +63,87 @@ final class ProjectStore {
         perform { try $0.deleteProject(id: project.id) }
     }
 
-    /// The user's name for the worktree, else an agent's title, else its folder made readable.
+    /// The user's name for the worktree, else the title an agent or its creation gave it, else
+    /// a fallback that never shows a branch (see `WorktreeTitle`).
     func displayName(of worktree: Worktree) -> String {
-        WorktreeTitle.resolve(user: aliases[worktree.path], agent: agentTitles[worktree.path], folder: worktree.name)
+        displayName(ofPath: worktree.path)
     }
 
-    /// Names a worktree inside the app only. The name is the user's: agents can't replace it.
-    /// An empty name hands the title back to agents; an unchanged one changes nothing.
-    /// Also the hook for a name typed when creating the worktree.
+    /// The same for a worktree that may not be in the shown organization (Needs you).
+    func displayName(ofPath path: String) -> String {
+        WorktreeTitle.resolve(user: aliases[path], agent: agentTitles[path],
+                              folder: URL(fileURLWithPath: path).lastPathComponent, isMain: isMainCheckout(path))
+    }
+
+    /// Whether `path` is a project's own checkout, in the shown organization.
+    func isMainCheckout(_ path: String) -> Bool {
+        worktrees.values.contains { $0.first?.path == path }
+    }
+
+    /// Whether the user named the worktree, which agents then can't retitle.
+    func isNamedByUser(_ worktree: Worktree) -> Bool {
+        aliases[worktree.path] != nil
+    }
+
+    /// The user named the worktree in the sidebar: the name is theirs, and agents can't replace
+    /// it. An empty name hands the title back to agents.
     func rename(_ worktree: Worktree, to name: String) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != displayName(of: worktree) || trimmed.isEmpty else { return }
-        perform { try $0.setAlias(WorktreeTitle.clean(trimmed), path: worktree.path) }
+        let alias = WorktreeTitle.clean(name), path = worktree.path, before = aliases[path]
+        aliases[path] = alias
+        titleWriter?.write({ try $0.setAlias(alias, path: path) }) { [weak self] error in
+            guard let self, aliases[path] == alias else { return }
+            aliases[path] = before
+            errorMessage = "\(error)"
+        }
     }
 
-    /// An agent's title for the worktree at `path`. Returns the user's name instead when they
-    /// gave one, which the agent's never replaces.
-    func setAgentTitle(_ title: String, path: String) -> (applied: Bool, shown: String) {
-        if let user = aliases[path] { return (false, user) }
-        perform { try $0.setWorktreeTitle(title, path: path) }
-        return (true, title)
+    enum TitleResult: Equatable {
+        case applied
+        /// The user named it; their name stays.
+        case keptUserTitle(String)
+        case unknownWorktree
+        /// Nothing visible was left once cleaned, or it would pass for a label the app shows.
+        case invalid
+        case failed(String)
+    }
+
+    /// The name typed when the worktree was created: its first title, which agents may refine
+    /// with `worktree_set_title` (unlike a rename, it doesn't lock). `organization`: where the
+    /// worktree's project is, when not the shown one.
+    @discardableResult
+    func setInitialTitle(_ title: String, path: String, in organization: UUID? = nil) -> TitleResult {
+        setTitle(title, path: path, in: organization)
+    }
+
+    /// An agent's title for the worktree at `path` (in its card's organization), unless the user
+    /// named it.
+    func setAgentTitle(_ title: String, path: String, in organization: UUID? = nil) -> TitleResult {
+        setTitle(title, path: path, in: organization)
+    }
+
+    private func setTitle(_ title: String, path: String, in organization: UUID?) -> TitleResult {
+        guard isWorktree(path, in: organization ?? organizationID) else { return .unknownWorktree }
+        guard let title = WorktreeTitle.clean(title), !WorktreeTitle.isReserved(title) else { return .invalid }
+        if let user = aliases[path] { return .keptUserTitle(user) }
+        guard let titleWriter else { return .failed("The app's database isn't open.") }
+        let before = agentTitles[path]
+        agentTitles[path] = title
+        // Shown at once; a write that fails puts the old title back.
+        titleWriter.write({ try $0.setWorktreeTitle(title, path: path) }) { [weak self] error in
+            guard let self, agentTitles[path] == title else { return }
+            agentTitles[path] = before
+            errorMessage = "\(error)"
+        }
+        return .applied
+    }
+
+    /// Waits for the title writes sent so far (tests, before reading the database back).
+    func finishTitleWrites() { titleWriter?.finish() }
+
+    /// Whether `path` is a worktree of one of `organization`'s projects.
+    private func isWorktree(_ path: String, in organization: UUID) -> Bool {
+        if organization == organizationID, worktrees.values.contains(where: { $0.contains { $0.path == path } }) { return true }
+        return projects(in: organization).contains { Git.worktrees(at: $0.path)?.contains { $0.path == path } == true }
     }
 
     /// Whether the worktree is the repository's own checkout, which can't be removed.
@@ -85,8 +153,13 @@ final class ProjectStore {
 
     /// Adds a worktree on `branch` to the project and returns it.
     func addWorktree(branch: String, to project: Project) throws -> Worktree? {
-        let path = try Git.addWorktree(branch: branch, to: project.path)
-        reload()
+        worktree(at: try Git.addWorktree(branch: branch, to: project.path), in: project)
+    }
+
+    /// The project's worktree at `path`, after rereading the project's worktrees (only this
+    /// project's, which is one quick git call) so a just-added one is there.
+    func worktree(at path: String, in project: Project) -> Worktree? {
+        if let list = Git.worktrees(at: project.path) { worktrees[project.id] = list }
         // git reports the path resolved (e.g. /private/var for /var): match on the folder.
         let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         return worktrees[project.id]?.first {
@@ -97,6 +170,8 @@ final class ProjectStore {
     func removeWorktree(_ worktree: Worktree, from project: Project, force: Bool) {
         do {
             try Git.removeWorktree(at: worktree.path, from: project.path, force: force)
+            // A worktree made again at this path starts without the old one's titles.
+            try? database?.forgetWorktreeNames(path: worktree.path)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -120,6 +195,8 @@ final class ProjectStore {
             organizations = try database.organizations()
             if !organizations.contains(where: { $0.id == organizationID }) { organizationID = OrganizationHome.defaultID }
             projects = try database.projects(in: organizationID)
+            // Names of paths missing on disk stay: a volume may be unmounted. Only removing the
+            // worktree in the app forgets them.
             aliases = try database.aliases()
             agentTitles = try database.worktreeTitles()
             worktrees = projects.reduce(into: [:]) { $0[$1.id] = Git.worktrees(at: $1.path) }
@@ -137,7 +214,7 @@ final class ProjectStore {
     func selectOrganization(_ id: UUID) {
         guard id != organizationID else { return }
         organizationID = id
-        UserDefaults.standard.set(id.uuidString, forKey: Self.organizationKey)
+        AppDefaults.shared.set(id.uuidString, forKey: Self.organizationKey)
         reload()
     }
 
@@ -202,4 +279,27 @@ final class ProjectStore {
         }
         reload()
     }
+}
+
+/// Writes worktree titles on a queue of its own, through a connection only that queue uses.
+private final class TitleWriter: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "worktree-titles", qos: .userInitiated)
+    private let url: URL
+    private var database: Database?
+
+    init(url: URL) { self.url = url }
+
+    /// `failed` runs on the main actor when the write throws.
+    func write(_ body: @escaping (Database) throws -> Void, failed: @escaping @MainActor (Error) -> Void) {
+        queue.async { [self] in
+            do {
+                if database == nil { database = try Database(url: url) }
+                try body(database!)
+            } catch {
+                DispatchQueue.main.async { MainActor.assumeIsolated { failed(error) } }
+            }
+        }
+    }
+
+    func finish() { queue.sync {} }
 }

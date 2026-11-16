@@ -18,9 +18,9 @@ struct RunnerChromeLayout {
     static let stripHeight: CGFloat = 30
     static let buttonGap: CGFloat = 6
     static let chipHeight: CGFloat = 20
-    static let chipFont = NSFont.systemFont(ofSize: 11, weight: .medium)
-    static let commandFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-    static let metricsFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    static let chipFont = NSFont.systemFont(ofSize: Theme.Font.captionSize, weight: .medium)
+    static let commandFont = NSFont.monospacedSystemFont(ofSize: Theme.Font.captionSize, weight: .regular)
+    static let metricsFont = NSFont.monospacedDigitSystemFont(ofSize: Theme.Font.captionSize, weight: .regular)
     /// Room the title leaves for the two buttons next to close.
     static let titleReserve = (CardMetrics.closeSize + buttonGap) * 2
 
@@ -157,8 +157,8 @@ final class RunnerChromeLayer: CALayer {
         for (chip, item) in zip(chips, layout.chips) {
             let lit = hovered == .link(item.link.url)
             chip.background.frame = item.rect
-            // Localhost is the main address (sky blue); the network one is secondary (yellow).
-            let tint = item.link.network ? BoardPalette.secondary : BoardPalette.accent
+            // Localhost is the main address (sky blue); the network one deep blue.
+            let tint = item.link.network ? BoardPalette.deep : BoardPalette.accent
             chip.background.backgroundColor = BoardPalette.rgb(tint, lit ? 0.45 : 0.22)
             chip.label.string = item.link.label + " ↗"
             // Yellow text doesn't read on paper: the network chip writes in ink.

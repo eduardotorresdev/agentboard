@@ -85,6 +85,8 @@ struct FormRow<Field: View>: View {
     let label: String
     var message: String?
     var isError = false
+    /// Keeps a line for the message even when there is none, so the dialog doesn't jump.
+    var reservesMessage = false
     @ViewBuilder let field: Field
 
     var body: some View {
@@ -94,10 +96,10 @@ struct FormRow<Field: View>: View {
                 .frame(width: DialogLayout.labelWidth, alignment: .trailing)
             VStack(alignment: .leading, spacing: 6) {
                 field
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.large)
-                if let message {
+                if let message = message ?? (reservesMessage ? " " : nil) {
                     Text(message)
+                        // Reserved rows keep the room of the longest message, so the dialog doesn't jump.
+                        .lineLimit(reservesMessage ? 3 : 12, reservesSpace: reservesMessage)
                         .font(Theme.Font.caption)
                         .foregroundStyle(isError ? Theme.danger : Theme.inkMuted)
                         .fixedSize(horizontal: false, vertical: true)

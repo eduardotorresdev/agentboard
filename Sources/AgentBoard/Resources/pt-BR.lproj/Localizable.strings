@@ -29,7 +29,6 @@
 "Change…" = "Alterar…";
 "Starting…" = "Iniciando…";
 "Back" = "Voltar";
-"Name can't contain “/”." = "O nome não pode conter “/”.";
 "A folder with this name already exists here. Pick another name or location." = "Já existe uma pasta com esse nome aqui. Escolha outro nome ou local.";
 "Choose" = "Escolher";
 
@@ -46,13 +45,25 @@
 "New Worktree" = "Nova worktree";
 "Branch" = "Branch";
 "Fix the login redirect" = "Corrigir o redirecionamento do login";
-"Use at least one letter or number." = "Use ao menos uma letra ou número.";
-"This name can't be used for a branch. Try other words." = "Esse nome não serve para uma branch. Tente outras palavras.";
 "%@ already exists. Pick another name." = "%@ já existe. Escolha outro nome.";
+"The worktree was created, but git reported a problem: %@" = "A worktree foi criada, mas o git relatou um problema: %@";
+"Open Worktree" = "Abrir worktree";
+"%@ is already open in %@." = "%@ já está aberta em %@.";
+"Too many worktrees already use this name. Pick another name." = "Muitas worktrees já usam esse nome. Escolha outro nome.";
+"Add to List" = "Adicionar à lista";
+"The repository has no commits yet. Make a first commit, then add worktrees." = "O repositório ainda não tem commits. Faça um primeiro commit e depois adicione worktrees.";
+"the branch %@" = "a branch %@";
+"Left in place: %@." = "Mantido no lugar: %@.";
+"git took too long and was stopped." = "O git demorou demais e foi interrompido.";
+"git stopped without saying why; often a hook that failed without output." = "O git parou sem dizer por quê; geralmente um hook que falhou sem mensagem.";
+"Open Project" = "Abrir projeto";
+"Initial commit failed: %@ The project was added without it; fix the problem (often commit signing) and commit in its folder." = "O commit inicial falhou: %@ O projeto foi adicionado sem ele; corrija o problema (muitas vezes a assinatura de commits) e faça o commit na pasta dele.";
+"Name can't contain “/” or “:”." = "O nome não pode conter “/” nem “:”.";
+"Name can't start with “.”." = "O nome não pode começar com “.”.";
+"The repository is at %@, but it couldn't be added to the list. Try again, or add it later with Open Folder." = "O repositório está em %@, mas não foi possível adicioná-lo à lista. Tente de novo, ou adicione depois com Abrir pasta.";
 "Continues the existing branch %@." = "Continua a branch %@, que já existe.";
 "Starts %@ from %@." = "Começa %@ a partir de %@.";
 "Starts %@ from the current commit." = "Começa %@ a partir do commit atual.";
-"Couldn't add %@ to the list." = "Não foi possível adicionar %@ à lista.";
 "Detached HEAD" = "HEAD destacado";
 "Select a worktree" = "Selecione uma worktree";
 "Pick a worktree in the sidebar to open it on the canvas." = "Escolha uma worktree na barra lateral para abri-la no canvas.";
@@ -60,9 +71,7 @@
 
 /* Worktree canvas */
 "Rename" = "Renomear";
-"Name" = "Nome";
 "Add agent" = "Adicionar agente";
-"No agents yet" = "Nenhum agente ainda";
 "Add an agent from the bar below. It starts in this worktree's folder." = "Adicione um agente pela barra abaixo. Ele começa na pasta desta worktree.";
 "Fits every agent on screen." = "Enquadra todos os agentes na tela.";
 "Organize: lays each agent out with what it's connected to on its right, and packs the groups in rows." = "Organizar: põe à direita de cada agente o que está conectado a ele e arruma os grupos em linhas.";
@@ -159,12 +168,11 @@
 "A cookie file exported from your browser (JSON). On a site you're signed in to, export with a cookie-export extension." = "Um arquivo de cookies exportado do seu navegador (JSON). Num site onde você está logado, exporte com uma extensão de exportar cookies.";
 "Choose a cookie file…" = "Escolha um arquivo de cookies…";
 "Cards on this profile browse with these logins, and so do the agents connected to them." = "Cards neste perfil navegam com estes logins, e os agentes conectados a eles também.";
-"Done" = "Concluir";
 "Import" = "Importar";
 "Choose a cookie file to import into this profile." = "Escolha um arquivo de cookies para importar neste perfil.";
 "Imported %lld cookies and %lld sites' data." = "Importados %lld cookies e dados de %lld sites.";
 "Imported %lld cookies." = "Importados %lld cookies.";
-"That file isn't a cookie export AgentBoard can read." = "Esse arquivo não é uma exportação de cookies que o AgentBoard saiba ler.";
+"That file isn't a cookie export that can be read." = "Esse arquivo não é uma exportação de cookies legível.";
 "No cookies were found in that file." = "Nenhum cookie foi encontrado nesse arquivo.";
 "%@ has no cookie key in the Keychain yet; open it once." = "%@ ainda não tem a chave de cookies no Keychain; abra-o uma vez.";
 "Couldn't read %@'s cookie database." = "Não consegui ler o banco de cookies do %@.";
@@ -189,19 +197,24 @@
 /* Organizations */
 "Default" = "Padrão";
 "New Organization" = "Nova organização";
-"New organization: its own projects and its own Claude login" = "Nova organização: projetos e login do Claude próprios";
+"New organization: its own projects and its own agent login" = "Nova organização: projetos e login dos agentes próprios";
 "Organization %@" = "Organização %@";
 "Edit Organization…" = "Editar organização…";
-"%@ — hold to edit" = "%@ — segure para editar";
-"Organization" = "Organização";
-"Edit %@…" = "Editar %@…";
+"%lld waiting for you" = "%lld esperando você";
+"%lld crashed" = "%lld com falha";
+"Organizations: switch, edit or add" = "Organizações: trocar, editar ou adicionar";
+"Organization: %@" = "Organização: %@";
+"Opens the list of organizations" = "Abre a lista de organizações";
+"Organizations" = "Organizações";
+"Its own projects and its own agent login" = "Projetos próprios e login próprio dos agentes";
 "Color" = "Cor";
 "Choose Image…" = "Escolher imagem…";
 "Use Initial" = "Usar inicial";
 "Use Image" = "Usar imagem";
 "An image replaces the initial and color." = "Uma imagem substitui a inicial e a cor.";
 "Remove Organization" = "Remover organização";
-"Its project list goes; the folders and its Claude login stay on disk." = "A lista de projetos sai; as pastas e o login do Claude ficam no disco.";
+"Its project list goes; the folders and its agent login stay on disk." = "A lista de projetos sai; as pastas e o login dos agentes ficam no disco.";
+"Agent usage" = "Uso dos agentes";
 "That file isn't an image." = "Esse arquivo não é uma imagem.";
 
 /* Needs you */
@@ -317,3 +330,38 @@
 "Crashed" = "Falhou";
 "Our sky is still empty" = "Nosso céu ainda está vazio";
 "Add your first agent or card from the bar below." = "Adicione seu primeiro agente ou card pela barra abaixo.";
+"Main checkout" = "Checkout principal";
+
+/* Media: images and videos */
+"Add media" = "Adicionar mídia";
+"Puts pictures or videos from your files on the board; agents connected to one see it." = "Coloca imagens ou vídeos dos seus arquivos no quadro; os agentes conectados a um deles o veem.";
+"A picture from your files; connected agents see its pixels." = "Uma imagem dos seus arquivos; os agentes conectados veem os pixels.";
+"Video" = "Vídeo";
+"An MP4, MOV or M4V clip that plays on the card, muted until you turn the sound on." = "Um vídeo MP4, MOV ou M4V que toca no card, sem som até você ligar.";
+"%@ is larger than %lld MB." = "%@ tem mais de %lld MB.";
+"%@ isn't a video the board can play. Use MP4, MOV or M4V." = "%@ não é um vídeo que o quadro consegue tocar. Use MP4, MOV ou M4V.";
+"Couldn't add the file" = "Não foi possível adicionar o arquivo";
+"Couldn't add %lld files" = "Não foi possível adicionar %lld arquivos";
+"No cards" = "Sem cards";
+"Let Agents Rename" = "Deixar agentes renomearem";
+"main" = "principal";
+"%@ · Named by you; agents can't rename it" = "%@ · Nome dado por você; agentes não podem renomear";
+"%@ isn't a file." = "%@ não é um arquivo.";
+
+"1 message waiting · Deliver now" = "1 mensagem esperando · Entregar agora";
+"%lld messages waiting · Deliver now" = "%lld mensagens esperando · Entregar agora";
+"Messages wait while you have text typed in the terminal. Delivers them now; your typed text is submitted with the first one." = "Mensagens esperam enquanto há texto digitado no terminal. Entrega agora; o texto digitado é enviado junto com a primeira.";
+"Not sent: %@." = "Não enviado: %@.";
+"Send" = "Enviar";
+"Write to the agent; @ mentions a card" = "Escreva ao agente; @ menciona um card";
+"The running core is older than this board; reopen the app to send from here." = "O núcleo em execução é mais antigo que este quadro; reabra o app para enviar daqui.";
+"It is waiting for your answer." = "Ele está esperando sua resposta.";
+"It is still starting." = "Ele ainda está iniciando.";
+"It exited. Click the card to restart it." = "Ele encerrou. Clique no card para reiniciá-lo.";
+"It hasn't started yet." = "Ele ainda não iniciou.";
+
+"Agent" = "Agente";
+"Runner" = "Runner";
+"Browser" = "Navegador";
+"File tree" = "Árvore de arquivos";
+"Forward" = "Avançar";

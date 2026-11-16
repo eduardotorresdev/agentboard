@@ -26,7 +26,6 @@ struct EmptyCanvas<Actions: View>: View {
                 .padding(.top, 20)
         }
         .padding(32)
-        .background(Theme.paper.clipShape(.rect(cornerRadius: Theme.Radius.dialog))
-            .shadow(color: Theme.ink.opacity(0.14), radius: 16, y: 4))
+        .background(Theme.paper.clipShape(.rect(cornerRadius: Theme.Radius.dialog)))
     }
 }

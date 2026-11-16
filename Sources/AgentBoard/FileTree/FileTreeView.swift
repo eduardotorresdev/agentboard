@@ -130,7 +130,7 @@ private struct FileRow: View {
         switch status {
         case "U", "A": Theme.accent
         case "D": .red
-        default: Theme.secondary
+        default: Theme.inkMuted
         }
     }
 
@@ -330,7 +330,7 @@ private struct FileContentView: View {
         .padding(12)
         .frame(width: 440, alignment: .leading)
         .background(Theme.canvas, in: .rect(cornerRadius: Theme.Radius.dialog))
-        .shadow(color: Theme.line.opacity(0.14), radius: 10, y: 4)
+        .shadow(color: Theme.line.opacity(Double(Theme.Shadow.opacity)), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
         .padding(.vertical, 6)
         .onAppear { isWriting = true }
         .onExitCommand { withAnimation(.snappy(duration: 0.2)) { selection = [] } }
@@ -405,7 +405,7 @@ struct SendAnnotationsBar: View {
         }
         .padding(4)
         .background(.regularMaterial, in: .rect(cornerRadius: Theme.Radius.control))
-        .shadow(color: Theme.line.opacity(0.14), radius: 10, y: 4)
+        .shadow(color: Theme.line.opacity(Double(Theme.Shadow.opacity)), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

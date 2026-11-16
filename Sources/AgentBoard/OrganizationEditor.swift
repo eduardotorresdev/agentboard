@@ -23,7 +23,7 @@ struct OrganizationEditor: View {
                         .onSubmit { commitName(organization); onDone() }
                 }
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(L("Color")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    Text(L("Color")).font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.inkMuted)
                     HStack(spacing: 7) {
                         ForEach(OrganizationAvatar.palette.indices, id: \.self) { index in
                             swatch(index, in: organization)
@@ -38,7 +38,7 @@ struct OrganizationEditor: View {
                         }
                     }
                     Text(L("An image replaces the initial and color."))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
                 }
                 if !organization.isDefault {
                     VStack(alignment: .leading, spacing: 6) {
@@ -46,8 +46,8 @@ struct OrganizationEditor: View {
                             onDone()
                             store.removeOrganization(organization)
                         }
-                        Text(L("Its project list goes; the folders and its Claude login stay on disk."))
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(L("Its project list goes; the folders and its agent login stay on disk."))
+                            .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -63,7 +63,7 @@ struct OrganizationEditor: View {
     }
 
     private func swatch(_ index: Int, in organization: Organization) -> some View {
-        let isChosen = organization.color == index && organization.icon == nil
+        let isChosen = organization.color % OrganizationAvatar.palette.count == index && organization.icon == nil
         return Button {
             var updated = organization
             updated.color = index

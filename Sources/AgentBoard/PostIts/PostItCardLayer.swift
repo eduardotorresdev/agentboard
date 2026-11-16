@@ -29,8 +29,8 @@ struct PostItCardLayout {
     let content: CGRect
 
     static let titleFont = CardFrame.titleFont
-    static let modeFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
-    static let placeholderFont = NSFont.systemFont(ofSize: 12)
+    static let modeFont = NSFont.systemFont(ofSize: Theme.Font.captionSize, weight: .semibold)
+    static let placeholderFont = NSFont.systemFont(ofSize: Theme.Font.labelSize)
 
     init(size: CGSize) {
         let bounds = CGRect(origin: .zero, size: size)
@@ -48,8 +48,8 @@ struct PostItCardLayout {
                          height: max(0, size.height - CardMetrics.titleHeight - CardMetrics.inset - 8))
     }
 
-    func control(at point: CGPoint) -> PostItControl? {
-        if close.contains(point) { return .close }
+    func control(at point: CGPoint, zoom: CGFloat = 1) -> PostItControl? {
+        if close.target(zoom: zoom).contains(point) { return .close }
         if view.contains(point) { return .mode(.view) }
         if code.contains(point) { return .mode(.code) }
         if content.contains(point) { return .text }
@@ -99,10 +99,6 @@ final class PostItCardLayer: CALayer {
             handle.backgroundColor = BoardPalette.rgb(BoardPalette.accent)
             handle.borderColor = BoardPalette.card
             handle.borderWidth = 2
-            handle.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-            handle.shadowOpacity = 0.18
-            handle.shadowRadius = 3
-            handle.shadowOffset = CGSize(width: 0, height: 1)
             handle.isHidden = true
             handle.zPosition = 10
             addSublayer(handle)
@@ -246,7 +242,7 @@ private final class PostItTextLayer: CALayer {
         guard !model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             let empty = (model.form == .rendered ? L("Empty. Double-click to write.") : L("Write in markdown…")) as NSString
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: PostItCardLayout.placeholderFont, .foregroundColor: NSColor(cgColor: BoardPalette.rgb(BoardPalette.ink, 0.4)) ?? .gray,
+                .font: PostItCardLayout.placeholderFont, .foregroundColor: NSColor(cgColor: BoardPalette.rgb(Theme.Hex.inkMuted, 1)) ?? .gray,
             ]
             if model.form == .rendered {
                 let size = empty.size(withAttributes: attributes)

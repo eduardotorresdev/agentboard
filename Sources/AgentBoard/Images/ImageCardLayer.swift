@@ -47,10 +47,6 @@ final class ImageCardLayer: CALayer {
             handle.backgroundColor = BoardPalette.rgb(BoardPalette.accent)
             handle.borderColor = BoardPalette.card
             handle.borderWidth = 2
-            handle.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-            handle.shadowOpacity = 0.18
-            handle.shadowRadius = 3
-            handle.shadowOffset = CGSize(width: 0, height: 1)
             handle.isHidden = true
             handle.zPosition = 10
             addSublayer(handle)
@@ -74,7 +70,17 @@ final class ImageCardLayer: CALayer {
         CardFrame.closeButton(closeHover, closeGlyph, in: layout.close, hovered: closeHovered, scale: scale)
         picture.frame = layout.picture
 
+        if !record.isVideo, let video {
+            // No longer a video: the player goes, the picture shows.
+            video.invalidate()
+            video.layer.removeFromSuperlayer()
+            self.video = nil
+        }
         if record.isVideo {
+            if shownFile != nil {
+                shownFile = nil
+                picture.contents = nil
+            }
             let video = video ?? {
                 let made = VideoPlayback()
                 addSublayer(made.layer)

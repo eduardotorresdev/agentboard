@@ -10,7 +10,7 @@ struct AddProjectDialog: View {
     let initialStep: Step
 
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("projectLocation") private var location = AddProjectDialog.defaultLocation
+    @AppStorage("projectLocation", store: AppDefaults.shared) private var location = AddProjectDialog.defaultLocation
 
     @State private var step: Step
     @State private var cloneURL = ""
@@ -19,9 +19,14 @@ struct AddProjectDialog: View {
     @State private var isWorking = false
     @State private var progress: String?
     @State private var errorMessage: String?
+    /// The full path an error's short form names, for its tooltip.
+    @State private var errorPath: String?
     @State private var cloneTask: Task<Void, Never>?
-    /// Set once the destination folder is ours, so it never reads back as a conflict.
-    @State private var created = false
+    /// The repository this dialog made or cloned, once it exists: it never reads back as a
+    /// conflict, and Create then only retries adding it to the list.
+    @State private var created: URL?
+    /// Added although its first commit failed: the dialog stays to say so.
+    @State private var addedWithoutCommit: Project?
 
     static let defaultLocation = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("agentboard/projects").path
@@ -73,6 +78,8 @@ struct AddProjectDialog: View {
             VStack(alignment: .leading, spacing: 14) {
                 FormRow(label: L("URL")) {
                     TextField("", text: $cloneURL, prompt: Text("https://github.com/owner/repo.git"))
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.large)
                         .onChange(of: cloneURL) { _, url in
                             if !nameEdited { name = Self.repositoryName(from: url) }
                         }
@@ -112,10 +119,23 @@ struct AddProjectDialog: View {
             Spacer()
             Button(L("Cancel"), role: .cancel) { dismiss() }
                 .keyboardShortcut(.cancelAction)
-            Button(L("Create"), action: create)
+            if let project = addedWithoutCommit {
+                Button(L("Open Project")) {
+                    dismiss()
+                    onAdded(project)
+                }
                 .buttonStyle(DialogButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
-                .disabled(!canSubmit || isWorking)
+            } else if let created {
+                Button(L("Add to List")) { finish(with: created) }
+                    .buttonStyle(DialogButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+            } else {
+                Button(L("Create"), action: create)
+                    .buttonStyle(DialogButtonStyle(prominent: true))
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canSubmit)
+            }
         }
     }
 
@@ -125,6 +145,8 @@ struct AddProjectDialog: View {
         FormRow(label: L("Name"), message: destinationConflict, isError: destinationConflict != nil) {
             TextField("", text: Binding(get: { name }, set: { name = $0; nameEdited = true }),
                       prompt: Text("my-project"))
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
         }
     }
 
@@ -132,18 +154,22 @@ struct AddProjectDialog: View {
         FormRow(label: L("Location"), message: destination.map { L("Creates \(abbreviated($0.path))") }) {
             HStack(spacing: 8) {
                 Text(abbreviated(location))
+                    .help(location)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button(L("Change…"), action: chooseLocation)
+                    .buttonStyle(DialogButtonStyle())
             }
         }
+        .help(destination?.path ?? location)
     }
 
     @ViewBuilder
     private var statusLine: some View {
         if let errorMessage {
             DialogError(message: errorMessage)
+                .help(errorPath ?? "")
         } else if isWorking {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
@@ -161,6 +187,7 @@ struct AddProjectDialog: View {
         if initialStep == .choose {
         Button {
             errorMessage = nil
+            errorPath = nil
             go(.choose)
         } label: {
             Label(L("Back"), systemImage: "chevron.left")
@@ -174,17 +201,25 @@ struct AddProjectDialog: View {
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
     private var destination: URL? {
-        guard !trimmedName.isEmpty, !trimmedName.contains("/") else { return nil }
+        guard !trimmedName.isEmpty, Self.nameProblem(trimmedName) == nil else { return nil }
         return URL(fileURLWithPath: location).appendingPathComponent(trimmedName)
     }
 
     private var destinationConflict: String? {
-        if trimmedName.contains("/") { return L("Name can't contain “/”.") }
-        guard !created, !isWorking, let destination, FileManager.default.fileExists(atPath: destination.path) else { return nil }
+        if let problem = Self.nameProblem(trimmedName) { return problem }
+        guard created == nil, !isWorking, let destination, FileManager.default.fileExists(atPath: destination.path) else { return nil }
         return L("A folder with this name already exists here. Pick another name or location.")
     }
 
-    private var canSubmit: Bool { !created && !isWorking && destination != nil && destinationConflict == nil }
+    private var canSubmit: Bool { created == nil && !isWorking && destination != nil && destinationConflict == nil }
+
+    /// Why `name` can't be a project folder's name: "." and ".." aren't new folders, a leading
+    /// dot hides it, and "/" or ":" would make it a path.
+    static func nameProblem(_ name: String) -> String? {
+        if name.contains("/") || name.contains(":") { return L("Name can't contain “/” or “:”.") }
+        if name.hasPrefix(".") { return L("Name can't start with “.”.") }
+        return nil
+    }
 
     // MARK: Actions
 
@@ -216,12 +251,30 @@ struct AddProjectDialog: View {
     private func create() {
         guard canSubmit, let destination else { return }
         errorMessage = nil
-        do {
-            try Git.createRepository(at: destination)
-            created = true
-            finish(with: destination)
-        } catch {
-            errorMessage = error.localizedDescription
+        errorPath = nil
+        isWorking = true
+        Task {
+            do {
+                // Off the main thread; on failure it removes the folder it made, so a retry works.
+                try await Task.detached { try Git.createRepository(at: destination) }.value
+                created = destination
+                isWorking = false
+                finish(with: destination)
+            } catch let failure as Git.InitialCommitFailed {
+                // The repository exists: keep it, add it, and say what's missing.
+                isWorking = false
+                created = destination
+                guard let project = store.addProject(at: destination) else {
+                    errorPath = destination.path
+                    errorMessage = L("The repository is at \(abbreviated(destination.path)), but it couldn't be added to the list. Try again, or add it later with Open Folder.")
+                    return
+                }
+                addedWithoutCommit = project
+                errorMessage = L("Initial commit failed: \(WorktreeDraft.cause(of: failure.cause)) The project was added without it; fix the problem (often commit signing) and commit in its folder.")
+            } catch {
+                isWorking = false
+                errorMessage = WorktreeDraft.cause(of: error.localizedDescription)
+            }
         }
     }
 
@@ -229,6 +282,7 @@ struct AddProjectDialog: View {
         guard canSubmit, let destination else { return }
         let url = cloneURL.trimmingCharacters(in: .whitespaces)
         errorMessage = nil
+        errorPath = nil
         progress = nil
         isWorking = true
         cloneTask = Task {
@@ -236,7 +290,7 @@ struct AddProjectDialog: View {
                 try await Git.clone(url, into: destination) { line in
                     Task { @MainActor in progress = line }
                 }
-                created = true
+                created = destination
                 isWorking = false
                 finish(with: destination)
             } catch is CancellationError {
@@ -253,7 +307,8 @@ struct AddProjectDialog: View {
 
     private func finish(with url: URL) {
         guard let project = store.addProject(at: url) else {
-            errorMessage = L("Couldn't add \(abbreviated(url.path)) to the list.")
+            errorPath = url.path
+            errorMessage = L("The repository is at \(abbreviated(url.path)), but it couldn't be added to the list. Try again, or add it later with Open Folder.")
             return
         }
         dismiss()
@@ -263,7 +318,7 @@ struct AddProjectDialog: View {
     // MARK: Helpers
 
     private func abbreviated(_ path: String) -> String {
-        (path as NSString).abbreviatingWithTildeInPath
+        DisplayPath.short(path)
     }
 
     /// "https://github.com/owner/repo.git" or "git@host:owner/repo" → "repo".

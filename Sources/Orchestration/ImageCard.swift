@@ -21,10 +21,12 @@ public struct ImageRecord: Identifiable, Hashable, Codable, Sendable {
     public var pixelSize: CGSize
     /// The organization it was added in.
     public var organization: UUID?
-    /// Seconds of video when the card plays one (see `ImageFiles.storeVideo`); nil for a picture.
+    /// Seconds of video when the card plays one (see `ImageFiles.storeVideo`). A build that
+    /// predates videos may have saved the card without it, so `isVideo` reads the file instead.
     public var duration: Double?
 
-    public var isVideo: Bool { duration != nil }
+    /// Whether the stored file is a video: told by its extension, which the store chose.
+    public var isVideo: Bool { ImageFiles.videoExtensions.contains((file as NSString).pathExtension.lowercased()) }
 
     public init(id: UUID, worktree: String, name: String, frame: CGRect, file: String, pixelSize: CGSize,
                 organization: UUID? = nil, duration: Double? = nil) {
@@ -83,6 +85,8 @@ public enum ImageFiles {
 
     public enum Failure: Error, Equatable {
         case missing
+        /// A folder, a device, a pipe: not a regular file.
+        case notAFile
         case tooLarge
         case notAnImage
         /// A video AVFoundation can't play, or not MP4, MOV or M4V.
@@ -104,14 +108,17 @@ public enum ImageFiles {
         folder(in: dataFolder).appendingPathComponent(file)
     }
 
-    /// Copies the picture at `source` into the folder under a new name, as it is.
+    /// Copies the picture at `source` into the folder under a new name, as it is. A video is
+    /// refused here; `storeMedia` takes both.
     public static func store(contentsOf source: URL, in dataFolder: URL) throws -> Stored {
-        let source = source.resolvingSymlinksInPath()
-        let size = (try? source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]))
-        guard size?.isRegularFile == true, let bytes = size?.fileSize else { throw Failure.missing }
-        if isVideoFile(source) { return try storeVideo(at: source, bytes: bytes, in: dataFolder) }
-        guard bytes <= maximumBytes else { throw Failure.tooLarge }
-        guard let data = try? Data(contentsOf: source) else { throw Failure.missing }
+        let file = try inspect(source)
+        guard file.kind == .picture else { throw Failure.notAnImage }
+        return try storePicture(file, in: dataFolder)
+    }
+
+    static func storePicture(_ file: Inspected, in dataFolder: URL) throws -> Stored {
+        guard file.bytes <= maximumBytes else { throw Failure.tooLarge }
+        guard let data = try? Data(contentsOf: file.url) else { throw Failure.missing }
         return try store(data, in: dataFolder)
     }
 

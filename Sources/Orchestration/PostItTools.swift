@@ -112,7 +112,11 @@ final class PostItTools: ToolProvider {
 
     private func create(_ arguments: [String: Any], caller: UUID, named me: String) -> ToolResult {
         guard let agent = store.record(caller) else { return .error("Only agents on the board can add post-its.") }
-        let trimmed = (arguments["name"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        let trimmed: String
+        switch BoardName.argument(arguments["name"]) {
+        case .success(let name): trimmed = name ?? ""
+        case .failure(let error): return .error("\(error)")
+        }
         let siblings = store.postIts.filter { $0.worktree == agent.worktree && $0.organizationID == agent.organizationID }
         var record = PostItRecord(id: UUID(), worktree: agent.worktree,
                                   name: PostItRecord.uniqueName(trimmed.isEmpty ? "Post-it" : trimmed, among: siblings),
@@ -183,7 +187,7 @@ final class PostItTools: ToolProvider {
         let postIts = store.bus.peers(of: caller, kind: .postIt)
         guard !postIts.isEmpty else { return .failure(Refusal(text: Self.noneConnected)) }
         if let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            if let found = postIts.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame || $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
+            if let found = findElement(name, among: postIts) { return .success(found) }
             return .failure(Refusal(text: "No post-it named “\(name)” is connected to you. Connected: \(postIts.map(\.name).joined(separator: ", "))."))
         }
         guard postIts.count == 1, let only = postIts.first else {

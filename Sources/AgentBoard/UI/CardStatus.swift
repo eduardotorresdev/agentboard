@@ -1,3 +1,4 @@
+import Orchestration
 import AgentRuntime
 import SwiftUI
 
@@ -10,22 +11,31 @@ enum CardStatus: Int, Comparable, Equatable {
 
     static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 
-    /// An agent card: waiting when it asked for the user, running while its program is alive.
+    /// An agent card: waiting when it asked for the user while its program runs; a crash beats
+    /// waiting, since an agent that ended can't answer.
     static func agent(_ status: SessionStatus?, waiting: Bool) -> Self {
-        if waiting { return .waiting }
+        let state = from(status)
+        return waiting && state == .running ? .waiting : state
+    }
+
+    /// A runner card, from its session's status. `running` (the core's runner report) only
+    /// counts when no status is known yet: the report says a runner has run, not that it runs.
+    static func runner(_ status: SessionStatus?, running: Bool) -> Self {
+        guard status != nil else { return running ? .running : .stopped }
+        return from(status)
+    }
+
+    /// Running while the program is alive. Crashed when it failed to start, exited with an
+    /// error code (1–127), or was killed outright (137, SIGKILL, as an out-of-memory kill) without
+    /// being asked to stop. A stop the user asked for arrives as `.stopped`; other signals
+    /// (Ctrl-C 130, SIGTERM 143, SIGHUP 129) count as stopped.
+    static func from(_ status: SessionStatus?) -> Self {
         switch status?.state {
         case .starting, .running: return .running
         case .failed: return .crashed
-        default: return .stopped
-        }
-    }
-
-    /// A runner card: crashed when it failed to start or exited with an error, as its strip says.
-    static func runner(_ status: SessionStatus?, running: Bool) -> Self {
-        if running { return .running }
-        switch status?.state {
-        case .failed: return .crashed
-        case .exited: return (status?.exitCode ?? 0) != 0 ? .crashed : .stopped
+        case .exited:
+            let code = status?.exitCode ?? 0
+            return (1 ..< 128).contains(code) || code == 137 ? .crashed : .stopped
         default: return .stopped
         }
     }
@@ -48,7 +58,7 @@ enum CardStatus: Int, Comparable, Equatable {
     var color: Color {
         switch self {
         case .running: Theme.accent
-        case .waiting: Theme.onSecondary
+        case .waiting: Theme.deep
         case .crashed: Theme.danger
         case .stopped: Theme.inkMuted.opacity(0.45)
         }
@@ -64,62 +74,39 @@ enum CardStatus: Int, Comparable, Equatable {
     }
 }
 
-/// A card kind's mark in its status: running breathes, waiting nudges, crashed and stopped hold still.
-struct CardStatusIcon: View {
-    let kind: CardStatus.Kind
-    let status: CardStatus
-    var size: CGFloat = 10
-    /// Quiet ink marks without motion, for where a status bar already carries the state.
-    var monochrome = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var chip: Bool { status == .waiting && kind != .browser && !monochrome }
-
-    var body: some View {
-        let image = Image(systemName: status.symbol(for: kind))
-            .font(.system(size: size, weight: .semibold))
-            .foregroundStyle(monochrome ? Theme.inkMuted.opacity(status == .stopped ? 0.6 : 1)
-                             : kind == .browser ? Theme.inkMuted : status.color)
-            // Waiting sits on a yellow chip, the one mark that asks for the user.
-            .padding(chip ? 2 : 0)
-            .background(chip ? Theme.secondary : .clear,
-                        in: .rect(cornerRadius: Theme.Radius.thumb))
-        Group {
-            if (status == .running || status == .waiting) && kind != .browser && !reduceMotion && !monochrome {
-                PhaseAnimator([false, true]) { phase in
-                    image
-                        .opacity(status == .running && phase ? 0.45 : 1)
-                        .scaleEffect(status == .waiting && phase ? 1.18 : 1)
-                } animation: { _ in
-                    status == .waiting ? .bouncy(duration: 0.6) : .smooth(duration: 1.1)
-                }
-            } else {
-                image
-            }
-        }
-        .frame(width: size + 4, height: size + 4)
-        .help(status.label)
-    }
-}
-
 /// A small dot that speaks only when there is something to say: running breathes in the
-/// accent, waiting and crashed hold still in their attention colors, stopped shows nothing.
+/// accent, waiting (deep blue) and crashed (red) hold still, stopped shows nothing.
 struct CardStatusDot: View {
     let status: CardStatus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let dot = Circle()
-            .fill(status == .waiting ? Theme.secondary : status.color)
+            .fill(status.color)
             .frame(width: 6, height: 6)
         if status == .stopped {
             EmptyView()
         } else if status == .running && !reduceMotion {
             PhaseAnimator([false, true]) { phase in
-                dot.scaleEffect(phase ? 0.6 : 1).opacity(phase ? 0.45 : 1)
+                dot.scaleEffect(phase ? 0.65 : 1) // breathes by size only: full color keeps 3:1 at every phase
             } animation: { _ in .smooth(duration: 1.1) }
         } else {
             dot
         }
+    }
+}
+
+/// Card states from the one feed (the core's statuses, the runner report, Needs you), for every
+/// card of every organization: the sidebar, card frames and the organization switcher read here.
+extension AgentStore {
+    func cardStatus(_ record: AgentRecord) -> CardStatus {
+        record.runner != nil
+            ? CardStatus.runner(statuses[record.id], running: runningRunners.contains(record.id))
+            : CardStatus.agent(statuses[record.id], waiting: attention.contains { $0.id == record.id && $0.needsUser })
+    }
+
+    /// The most pressing state among `organization`'s cards; nil when it has none.
+    func status(ofOrganization organization: UUID) -> CardStatus? {
+        agents.filter { $0.organizationID == organization }.map(cardStatus).max()
     }
 }

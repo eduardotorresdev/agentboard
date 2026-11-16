@@ -8,6 +8,11 @@ enum CanvasSelection {
         base.union(frames.filter { $0.frame.intersects(box) }.map(\.id))
     }
 
+    /// A card's frame grown down to cover what shows just below it (an agent's composer), `extra` world points.
+    static func extended(_ frame: CGRect, below extra: CGFloat) -> CGRect {
+        CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height + extra)
+    }
+
     /// Shift- or Command-clicking a card adds it, or takes it out if it was in.
     static func toggling(_ id: UUID, in selection: Set<UUID>) -> Set<UUID> {
         selection.symmetricDifference([id])

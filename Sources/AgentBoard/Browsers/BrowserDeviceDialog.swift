@@ -37,7 +37,7 @@ struct BrowserDeviceDialog: View {
                 FormRow(label: L("Size"), message: sizeMessage, isError: sizeInvalid) {
                     HStack(spacing: 6) {
                         TextField("", text: $width).frame(width: 70)
-                        Text("×").foregroundStyle(.secondary)
+                        Text("×").foregroundStyle(Theme.inkMuted)
                         TextField("", text: $height).frame(width: 70)
                     }
                 }
@@ -60,7 +60,7 @@ struct BrowserDeviceDialog: View {
                 FormRow(label: L("User agent"), message: L("What pages see in navigator.userAgent.")) {
                     TextField("", text: $userAgent, axis: .vertical)
                         .lineLimit(2...4)
-                        .font(.callout.monospaced())
+                        .font(Theme.Font.body.monospaced())
                 }
             }
         } footer: {
@@ -70,6 +70,7 @@ struct BrowserDeviceDialog: View {
                 onDone(device)
                 dismiss()
             }
+            .buttonStyle(DialogButtonStyle(prominent: true))
             .keyboardShortcut(.defaultAction)
             .disabled(sizeInvalid)
         }

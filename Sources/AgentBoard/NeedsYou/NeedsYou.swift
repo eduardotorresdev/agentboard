@@ -85,7 +85,7 @@ struct NeedsYouDeck: View {
     /// What had the keyboard before the deck opened, to give it back on close.
     @State private var previousResponder: NSResponder?
     /// The hint shows until the first card is dragged away.
-    @AppStorage("needsYou.hasSwiped") private var hasSwiped = false
+    @AppStorage("needsYou.hasSwiped", store: AppDefaults.shared) private var hasSwiped = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// How far opening has come: 1 once the board is blurred away, 2 once the cards are in.
     @State private var stage = 0
@@ -249,7 +249,7 @@ struct NeedsYouDeck: View {
         }
         let worktree = projects.worktrees.values.joined().first { $0.path == record.worktree }
         var place = [project?.name ?? worktreeURL.deletingLastPathComponent().lastPathComponent,
-                     worktree.map(projects.displayName(of:)) ?? worktreeURL.lastPathComponent]
+                     worktree.map(projects.displayName(of:)) ?? projects.displayName(ofPath: record.worktree)]
         if projects.organizations.count > 1,
            let organization = projects.organizations.first(where: { $0.id == record.organization }) {
             place.insert(organization.name, at: 0)
@@ -345,7 +345,7 @@ private struct NeedsYouCard: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Label(place[place.count - 1], systemImage: "arrow.triangle.branch")
+                    Text(place[place.count - 1])
                         .font(.system(size: 22, weight: .bold))
                         .foregroundStyle(Theme.line)
                         .layoutPriority(1)
@@ -365,7 +365,7 @@ private struct NeedsYouCard: View {
                     // Its orchestrator can't give this one: it waits on the developer directly.
                     Label(L("Via \(orchestrators.joined(separator: ", "))"), systemImage: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.secondary)
+                        .foregroundStyle(Theme.deep)
                 }
             }
             .lineLimit(1)

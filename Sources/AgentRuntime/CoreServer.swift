@@ -21,6 +21,8 @@ public protocol CoreService: AnyObject {
     @MainActor func handOffFailed()
     /// Session `id`'s program sent desktop notifications (OSC 9 or 777).
     @MainActor func sessionNotified(_ id: UUID, _ notifications: [String])
+    /// What a board typed into session `id`: returns what to pass to it now (all of it by default).
+    @MainActor func input(_ bytes: [UInt8], to id: UUID) -> [UInt8]
 }
 
 extension CoreService {
@@ -29,6 +31,7 @@ extension CoreService {
     @MainActor public func handedOff() {}
     @MainActor public func handOffFailed() {}
     @MainActor public func sessionNotified(_ id: UUID, _ notifications: [String]) {}
+    @MainActor public func input(_ bytes: [UInt8], to id: UUID) -> [UInt8] { bytes }
 }
 
 /// The core: owns the agents' sessions and serves them to boards over a Unix socket. Programs
@@ -57,6 +60,8 @@ public final class CoreServer: @unchecked Sendable {
     public var onHandedOff: (() -> Void)?
     /// Called with what's worth a line in the core's log.
     public var onLog: ((String) -> Void)?
+    /// Every session's status change, on the server's queue (the service's view of it).
+    public var onSessionStatus: ((UUID, SessionStatus) -> Void)?
     /// The protocol versions this core speaks (another build's, in tests).
     public var versions = CoreProtocol.versions
     /// The lock file that makes this the only core on the socket, handed to a newer core with
@@ -114,7 +119,18 @@ public final class CoreServer: @unchecked Sendable {
                 MainActor.assumeIsolated { service.sessionNotified(id, notifications) }
             }
         }
-        return Hosted(id: id, session: session)
+        let hosted = Hosted(id: id, session: session)
+        // Subscribed boards hear every status, not only those mirroring the session: a board
+        // lists the states of cards it hasn't opened (its sidebar).
+        hosted.onStatusForOthers = { [weak self, weak hosted] status in
+            self?.queue.async {
+                guard let self, let hosted else { return }
+                self.onSessionStatus?(id, status)
+                let event = CoreEvent.status(id: id, status: status)
+                for client in self.clients.values where client.hearsAllStatuses && !hosted.has(client) { client.socket.send(event) }
+            }
+        }
+        return hosted
     }
 
     // MARK: For the service (on `queue`)
@@ -189,7 +205,9 @@ public final class CoreServer: @unchecked Sendable {
             handle(request, from: client)
         case .data:
             guard let id = UUID(bytes: payload) else { return }
-            sessions[id]?.session.send(Array(payload.dropFirst(16)))
+            let bytes = Array(payload.dropFirst(16))
+            let passed = service.map { service in MainActor.assumeIsolated { service.input(bytes, to: id) } } ?? bytes
+            sessions[id]?.session.send(passed)
         case .service:
             guard let service else { return }
             MainActor.assumeIsolated { service.received(Data(payload), from: client) }
@@ -222,6 +240,8 @@ public final class CoreServer: @unchecked Sendable {
             }
             hosted.session.resize(cols: cols, rows: rows)
             hosted.session.start(spec)
+        case .subscribeStatuses:
+            client.hearsAllStatuses = true
         case .attach(let id):
             guard let hosted = sessions[id] else {
                 return client.socket.send(CoreEvent.status(id: id, status: SessionStatus(state: .stopped, processID: nil, exitCode: nil)))
@@ -381,6 +401,9 @@ public final class CoreBoard: Hashable, @unchecked Sendable {
     let socket: CoreSocket
     /// The protocol version agreed on with it, once it said hello.
     public internal(set) var version: Int?
+    /// Set by `subscribeStatuses`: it then hears every session's status. Other clients (an
+    /// agent's own connection) never get events they didn't ask for.
+    var hearsAllStatuses = false
     /// In the order the core accepted boards, for its log.
     let number: Int
     init(socket: CoreSocket, number: Int) {
@@ -405,6 +428,12 @@ private final class Hosted {
     private var observers: Set<ObjectIdentifier> = []
     /// Called once the program has ended (set by `close`).
     var onEnded: (() -> Void)?
+    /// Sends a status event to the boards that don't mirror this session.
+    var onStatusForOthers: ((SessionStatus) -> Void)? {
+        get { lock.withLock { _onStatusForOthers } }
+        set { lock.withLock { _onStatusForOthers = newValue } }
+    }
+    private var _onStatusForOthers: ((SessionStatus) -> Void)?
 
     init(id: UUID, session: AgentSession) {
         self.id = id
@@ -413,6 +442,7 @@ private final class Hosted {
         session.onStatus = { [weak self] status in
             guard let self else { return }
             self.send(CoreEvent.status(id: id, status: status))
+            self.onStatusForOthers?(status)
             if status.processID == nil, status.state != .starting, let ended = self.lock.withLock({ self.onEnded }) {
                 self.lock.withLock { self.onEnded = nil }
                 ended()
