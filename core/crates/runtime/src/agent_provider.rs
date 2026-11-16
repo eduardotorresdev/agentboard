@@ -225,7 +225,9 @@ impl ClaudeCode {
                 hooks["PreToolUse"] = json!([{"matcher": "AskUserQuestion", "hooks": [Self::question_hook(tools)]}]);
             }
         }
-        json!({ "hooks": hooks }).to_string()
+        // Fullscreen is where Claude takes the mouse: selecting and copying terminal text on the
+        // card only works there, whatever the host's own settings say.
+        json!({ "hooks": hooks, "tui": "fullscreen" }).to_string()
     }
 
     /// Claude Code writes each conversation to ~/.claude/projects/<escaped cwd>/<session>.jsonl

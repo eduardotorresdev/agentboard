@@ -153,7 +153,9 @@ public struct ClaudeCode: AgentProvider {
                                     "UserPromptSubmit": entry([attention, context])]
         if let context { hooks["SessionStart"] = entry([context]); hooks["PostToolUse"] = entry([context]) }
         if let tools { hooks["PreToolUse"] = [["matcher": "AskUserQuestion", "hooks": [questionHook(tools)]]] }
-        return String(decoding: try! JSONSerialization.data(withJSONObject: ["hooks": hooks]), as: UTF8.self)
+        // Fullscreen is where Claude takes the mouse: selecting and copying terminal text on the
+        // card only works there, whatever the host's own settings say.
+        return String(decoding: try! JSONSerialization.data(withJSONObject: ["hooks": hooks, "tui": "fullscreen"] as [String: Any]), as: UTF8.self)
     }
 
     /// Drops markers inherited when the app itself was launched from Claude Code, so the child
