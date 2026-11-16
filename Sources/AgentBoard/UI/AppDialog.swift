@@ -10,16 +10,17 @@ struct AppDialog<Content: View, Footer: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.title3.weight(.semibold))
+                    .font(Theme.Font.title)
+                    .tracking(Theme.Font.titleTracking)
+                    .foregroundStyle(Theme.ink)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.inkMuted)
                 }
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 24)
 
             content
 
@@ -27,10 +28,13 @@ struct AppDialog<Content: View, Footer: View>: View {
                 footer
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.top, 24)
+            .padding(.top, 28)
+            .buttonStyle(DialogButtonStyle())
         }
-        .padding(24)
-        .frame(width: 560)
+        .font(Theme.Font.body)
+        .padding(28)
+        .frame(width: 580)
+        .paperSurface(radius: Theme.Radius.dialog)
     }
 }
 
@@ -47,24 +51,25 @@ struct ChoiceTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 Image(systemName: symbol)
-                    .font(.system(size: 20, weight: .regular))
+                    .font(Theme.Font.title)
                     .foregroundStyle(Theme.accent)
                     .frame(height: 24)
                     .padding(.bottom, 14)
                 Text(title)
-                    .font(.headline)
+                    .font(Theme.Font.heading)
+                    .foregroundStyle(Theme.ink)
                     .padding(.bottom, 4)
                 Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
             .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.primary.opacity(isHovered ? 0.08 : 0.04))
+                RoundedRectangle(cornerRadius: Theme.Radius.card)
+                    .fill(isHovered ? Theme.accentSoft : Theme.surfaceDeep)
             )
             .contentShape(.rect)
         }
@@ -83,18 +88,50 @@ struct FormRow<Field: View>: View {
     @ViewBuilder let field: Field
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: DialogLayout.gap) {
             Text(label)
-                .foregroundStyle(.secondary)
-                .frame(width: 72, alignment: .trailing)
-            VStack(alignment: .leading, spacing: 4) {
+                .foregroundStyle(Theme.inkMuted)
+                .frame(width: DialogLayout.labelWidth, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 6) {
                 field
+                    .textFieldStyle(.roundedBorder)
+                    .controlSize(.large)
                 if let message {
                     Text(message)
-                        .font(.caption)
-                        .foregroundStyle(isError ? Color.red : .secondary)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(isError ? Theme.danger : Theme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
+    }
+}
+
+enum DialogLayout {
+    /// Width of a FormRow's label column.
+    static let labelWidth: CGFloat = 84
+    /// Space between the label column and the field.
+    static let gap: CGFloat = 12
+}
+
+/// Square, solidly filled dialog buttons. `prominent` is the one action the dialog is for.
+struct DialogButtonStyle: ButtonStyle {
+    var prominent = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Theme.Font.heading)
+            .foregroundStyle(prominent ? Theme.onAccent : Theme.ink)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.control)
+                    .fill(prominent ? Theme.accent : Theme.surfaceDeep)
+                    .brightness(configuration.isPressed ? -0.06 : 0)
+            )
+            .opacity(isEnabled ? 1 : 0.45)
+            .contentShape(.rect)
+            .animation(.snappy(duration: 0.15), value: configuration.isPressed)
     }
 }

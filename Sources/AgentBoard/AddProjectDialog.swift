@@ -20,6 +20,8 @@ struct AddProjectDialog: View {
     @State private var progress: String?
     @State private var errorMessage: String?
     @State private var cloneTask: Task<Void, Never>?
+    /// Set once the destination folder is ours, so it never reads back as a conflict.
+    @State private var created = false
 
     static let defaultLocation = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("agentboard/projects").path
@@ -91,6 +93,7 @@ struct AddProjectDialog: View {
                     .keyboardShortcut(.cancelAction)
             }
             Button(L("Clone"), action: clone)
+                .buttonStyle(DialogButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSubmit || Self.repositoryName(from: cloneURL).isEmpty || isWorking)
         }
@@ -110,6 +113,7 @@ struct AddProjectDialog: View {
             Button(L("Cancel"), role: .cancel) { dismiss() }
                 .keyboardShortcut(.cancelAction)
             Button(L("Create"), action: create)
+                .buttonStyle(DialogButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSubmit || isWorking)
         }
@@ -139,20 +143,16 @@ struct AddProjectDialog: View {
     @ViewBuilder
     private var statusLine: some View {
         if let errorMessage {
-            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                .font(.callout)
-                .foregroundStyle(.red)
-                .textSelection(.enabled)
-                .padding(.leading, 84)
+            DialogError(message: errorMessage)
         } else if isWorking {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text(progress ?? L("Starting…"))
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .font(Theme.Font.caption.monospacedDigit())
+                    .foregroundStyle(Theme.inkMuted)
                     .lineLimit(1)
             }
-            .padding(.leading, 84)
+            .padding(.leading, DialogLayout.labelWidth + DialogLayout.gap)
         }
     }
 
@@ -180,11 +180,11 @@ struct AddProjectDialog: View {
 
     private var destinationConflict: String? {
         if trimmedName.contains("/") { return L("Name can't contain “/”.") }
-        guard let destination, FileManager.default.fileExists(atPath: destination.path) else { return nil }
+        guard !created, !isWorking, let destination, FileManager.default.fileExists(atPath: destination.path) else { return nil }
         return L("A folder with this name already exists here. Pick another name or location.")
     }
 
-    private var canSubmit: Bool { destination != nil && destinationConflict == nil }
+    private var canSubmit: Bool { !created && !isWorking && destination != nil && destinationConflict == nil }
 
     // MARK: Actions
 
@@ -214,10 +214,11 @@ struct AddProjectDialog: View {
     }
 
     private func create() {
-        guard let destination else { return }
+        guard canSubmit, let destination else { return }
         errorMessage = nil
         do {
             try Git.createRepository(at: destination)
+            created = true
             finish(with: destination)
         } catch {
             errorMessage = error.localizedDescription
@@ -225,7 +226,7 @@ struct AddProjectDialog: View {
     }
 
     private func clone() {
-        guard let destination else { return }
+        guard canSubmit, let destination else { return }
         let url = cloneURL.trimmingCharacters(in: .whitespaces)
         errorMessage = nil
         progress = nil
@@ -235,6 +236,7 @@ struct AddProjectDialog: View {
                 try await Git.clone(url, into: destination) { line in
                     Task { @MainActor in progress = line }
                 }
+                created = true
                 isWorking = false
                 finish(with: destination)
             } catch is CancellationError {
@@ -250,7 +252,10 @@ struct AddProjectDialog: View {
     }
 
     private func finish(with url: URL) {
-        guard let project = store.addProject(at: url) else { return }
+        guard let project = store.addProject(at: url) else {
+            errorMessage = L("Couldn't add \(abbreviated(url.path)) to the list.")
+            return
+        }
         dismiss()
         onAdded(project)
     }
