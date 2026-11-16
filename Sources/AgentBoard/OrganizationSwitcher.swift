@@ -1,36 +1,252 @@
-import AppKit
 import SwiftUI
 
-/// The organizations as round avatars in the toolbar: clicking one switches to it, holding one
-/// edits it, and the last one adds an organization.
+/// The organizations by name in a segmented switch, styled like the other top bar controls. A
+/// quiet thumb marks the current one; it
+/// can be clicked or dragged, follows the pointer while dragged and switches on release to the
+/// name under it. Holding a name (or its context menu) edits it; the plus adds an organization.
+/// The pointer logic is `OrganizationSwitchGesture`; this view only feeds it and draws.
 struct OrganizationSwitcher: View {
     let store: ProjectStore
     @State private var editing: UUID?
+    /// Each name's frame in the track.
+    @State private var frames: [UUID: CGRect] = [:]
+    /// The thumb's edges. Moved by separate springs, so the edge in front leads and the thumb
+    /// stretches while it travels and settles to the width of the name it lands on.
+    @State private var leading: CGFloat = 0
+    @State private var trailing: CGFloat = 0
+    @State private var gesture = OrganizationSwitchGesture()
+    @State private var hovered: UUID?
+    @State private var isAddHovered = false
+    /// Name under the pointer while dragging, scrolled into view.
+    @State private var dragOver: UUID?
+    @GestureState private var isPointerDown = false
+    @FocusState private var isFocused: Bool
+
+    /// Longer names truncate; the full name is in their tooltip.
+    static let maxLabelWidth: CGFloat = 120
+    /// Wider than this, the track scrolls sideways.
+    static let maxTrackWidth: CGFloat = 440
+    /// The thumb; with the inset, the rail is as tall as the other top bar controls (30).
+    private static let height: CGFloat = 24
+    /// Space between the rail's edge and the thumb.
+    private static let inset: CGFloat = 3
+    private static let holdDuration: Duration = .seconds(0.45)
+    private static let space = "organizationTrack"
+    /// Neutral fills matching the other top bar controls: the rail, and the darker thumb on it.
+    private static let railFill = Theme.line.opacity(0.04)
+    private static let thumbFill = Theme.line.opacity(0.1)
+
+    private var organizations: [Organization] { store.organizations }
+
+    private var segments: [OrganizationSwitchGesture.Segment] {
+        organizations.compactMap { organization in
+            frames[organization.id].map { .init(id: organization.id, minX: $0.minX, maxX: $0.maxX) }
+        }
+    }
+
+    private var trackWidth: CGFloat { (segments.last?.maxX ?? 0) + Self.inset * 2 }
+
+    private var isPressing: Bool {
+        if case .pressed = gesture.phase { return true }
+        return gesture.phase == .dragging
+    }
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(store.organizations) { organization in
-                OrganizationBubble(organization: organization,
-                                   isSelected: organization.id == store.organizationID,
-                                   onSelect: { withAnimation(.snappy(duration: 0.3)) { store.selectOrganization(organization.id) } },
-                                   onEdit: { editing = organization.id })
-                    .popover(isPresented: binding(for: organization.id), arrowEdge: .bottom) {
-                        OrganizationEditor(store: store, id: organization.id, onDone: { editing = nil })
+            ScrollViewReader { scroller in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    track.padding(Self.inset)
+                }
+                .frame(width: min(trackWidth, Self.maxTrackWidth), height: Self.height + Self.inset * 2)
+                .onChange(of: store.organizationID) { _, id in
+                    withAnimation(.smooth) { scroller.scrollTo(id, anchor: .center) }
+                }
+                .onChange(of: dragOver) { _, id in
+                    if let id { withAnimation(.smooth) { scroller.scrollTo(id) } }
+                }
+                // Once the names are measured, the current one in view (it may be far right).
+                .task(id: trackWidth > 0) { if trackWidth > 0 { scroller.scrollTo(store.organizationID, anchor: .center) } }
+            }
+            .background(Self.railFill, in: .rect(cornerRadius: Theme.Radius.control))
+            .overlay {
+                // Keyboard focus: the one place a stroke is needed.
+                RoundedRectangle(cornerRadius: Theme.Radius.control)
+                    .strokeBorder(Theme.accent, lineWidth: 2)
+                    .opacity(isFocused ? 1 : 0)
+                    .animation(.snappy(duration: 0.2), value: isFocused)
+            }
+            .focusable()
+            .focused($isFocused)
+            .focusEffectDisabled()
+            .onKeyPress(.leftArrow) { step(-1) }
+            .onKeyPress(.rightArrow) { step(1) }
+            .onKeyPress(.escape) {
+                guard gesture.isActive else { return .ignored }
+                apply(gesture.cancel())
+                return .handled
+            }
+            .accessibilityRepresentation {
+                Picker(L("Organization"), selection: Binding(get: { store.organizationID }, set: select)) {
+                    ForEach(organizations) { Text(OrganizationAvatar.displayName($0)).tag($0.id) }
+                }
+                .pickerStyle(.segmented)
+                .accessibilityActions {
+                    ForEach(organizations) { organization in
+                        Button(L("Edit \(OrganizationAvatar.displayName(organization))…")) { editing = organization.id }
                     }
+                }
             }
             Button(action: add) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: OrganizationBubble.size, height: OrganizationBubble.size)
-                    .background(Theme.accent.opacity(0.12), in: .circle)
-                    .contentShape(.circle)
+                    .font(Theme.Font.label)
+                    .foregroundStyle(isAddHovered ? Theme.ink : Theme.inkMuted)
+                    .frame(width: Self.height + Self.inset * 2, height: Self.height + Self.inset * 2)
+                    .background(Theme.line.opacity(isAddHovered ? 0.08 : 0.04), in: .rect(cornerRadius: Theme.Radius.control))
+                    .contentShape(.rect(cornerRadius: Theme.Radius.control))
             }
             .buttonStyle(.plain)
+            .onHover { inside in withAnimation(.snappy(duration: 0.2)) { isAddHovered = inside } }
             .help(L("New organization: its own projects and its own Claude login"))
             .accessibilityLabel(L("New Organization"))
         }
         .padding(.horizontal, 4)
+        .onChange(of: organizations.map(\.id)) { _, ids in
+            frames = frames.filter { ids.contains($0.key) }
+        }
+    }
+
+    /// Names in muted ink, the thumb, then the same names in full ink clipped to the thumb, so the
+    /// color changes exactly where the thumb is, without toggling anything.
+    private var track: some View {
+        let thumb = RoundedRectangle(cornerRadius: Theme.Radius.thumb)
+            .frame(width: max(trailing - leading, 0), height: Self.height)
+            .position(x: (leading + trailing) / 2, y: Self.height / 2)
+        return ZStack(alignment: .topLeading) {
+            interactiveLabels
+            thumb.foregroundStyle(Self.thumbFill)
+                .scaleEffect(y: isPressing ? 0.9 : 1)
+                .animation(.bouncy(duration: 0.3), value: isPressing)
+                .allowsHitTesting(false)
+            highlightedLabels
+                .mask { thumb.scaleEffect(y: isPressing ? 0.9 : 1).animation(.bouncy(duration: 0.3), value: isPressing) }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .coordinateSpace(.named(Self.space))
+        .contentShape(.rect)
+        .gesture(drag)
+        .onChange(of: isPointerDown) { _, down in if !down { apply(gesture.end()) } }
+        .onChange(of: frames) { place(animated: false) }
+        .onChange(of: store.organizationID) { place(animated: true) }
+    }
+
+    /// The names that measure, hover, edit and get scrolled to.
+    private var interactiveLabels: some View {
+        HStack(spacing: 0) {
+            ForEach(organizations) { organization in
+                let name = OrganizationAvatar.displayName(organization)
+                label(organization, ink: hovered == organization.id ? Theme.ink : Theme.inkMuted)
+                    .background(Theme.line.opacity(hovered == organization.id ? 0.04 : 0),
+                                in: .rect(cornerRadius: Theme.Radius.thumb))
+                    .animation(.snappy(duration: 0.2), value: hovered)
+                    .id(organization.id)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frames[organization.id] = $0 }
+                    .onHover { inside in
+                        if inside { hovered = organization.id } else if hovered == organization.id { hovered = nil }
+                    }
+                    .help(L("\(name) — hold to edit"))
+                    .contextMenu { Button(L("Edit Organization…")) { editing = organization.id } }
+                    .popover(isPresented: binding(for: organization.id), arrowEdge: .bottom) {
+                        OrganizationEditor(store: store, id: organization.id, onDone: { editing = nil })
+                    }
+            }
+        }
+    }
+
+    /// Drawing only: the same names in full ink, shown through the thumb.
+    private var highlightedLabels: some View {
+        HStack(spacing: 0) {
+            ForEach(organizations) { label($0, ink: Theme.ink) }
+        }
+    }
+
+    /// Name only: avatars in a quiet bar would fight it. The editor still shows the avatar.
+    private func label(_ organization: Organization, ink: Color) -> some View {
+        Text(OrganizationAvatar.displayName(organization))
+            .font(Theme.Font.label)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: Self.maxLabelWidth)
+            .fixedSize()
+            .foregroundStyle(ink)
+            .padding(.horizontal, 10)
+            .frame(height: Self.height)
+    }
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
+            .updating($isPointerDown) { _, down, _ in down = true }
+            .onChanged { value in
+                if gesture.phase == .idle, let press = gesture.press(at: value.startLocation.x, in: segments) {
+                    Task {
+                        try? await Task.sleep(for: Self.holdDuration)
+                        apply(gesture.holdTimeout(press: press))
+                    }
+                }
+                apply(gesture.move(to: value.location.x, in: segments))
+            }
+            .onEnded { value in
+                apply(gesture.release(at: value.location.x, in: segments, current: store.organizationID))
+            }
+    }
+
+    private func apply(_ effect: OrganizationSwitchGesture.Effect) {
+        switch effect {
+        case .none:
+            break
+        case let .follow(minX, maxX, over):
+            dragOver = over
+            move(to: minX, maxX, front: .interactiveSpring(response: 0.18, dampingFraction: 0.8),
+                 back: .interactiveSpring(response: 0.3, dampingFraction: 0.75))
+        case .snap:
+            dragOver = nil
+            place(animated: true)
+        case let .select(id):
+            dragOver = nil
+            select(id)
+            place(animated: true)
+        case let .openEditor(id):
+            editing = id
+        }
+    }
+
+    /// Settles the thumb on the current organization.
+    private func place(animated: Bool) {
+        guard gesture.phase != .dragging, let frame = frames[store.organizationID] else { return }
+        if animated {
+            move(to: frame.minX, frame.maxX, front: .bouncy(duration: 0.32, extraBounce: 0.1), back: .bouncy(duration: 0.48))
+        } else {
+            leading = frame.minX
+            trailing = frame.maxX
+        }
+    }
+
+    private func move(to newLeading: CGFloat, _ newTrailing: CGFloat, front: Animation, back: Animation) {
+        let forward = newLeading > leading
+        withAnimation(forward ? front : back) { trailing = newTrailing }
+        withAnimation(forward ? back : front) { leading = newLeading }
+    }
+
+    private func step(_ offset: Int) -> KeyPress.Result {
+        guard let id = OrganizationSwitchGesture.step(from: store.organizationID, by: offset, in: organizations.map(\.id))
+        else { return .ignored }
+        select(id)
+        return .handled
+    }
+
+    /// Exactly what the avatar switcher did.
+    private func select(_ id: UUID) {
+        withAnimation(.snappy(duration: 0.3)) { store.selectOrganization(id) }
     }
 
     private func binding(for id: UUID) -> Binding<Bool> {
@@ -38,206 +254,9 @@ struct OrganizationSwitcher: View {
     }
 
     private func add() {
-        let number = store.organizations.count + 1
+        let number = organizations.count + 1
         let organization = store.addOrganization(named: L("Organization \(number)"))
         // Straight to naming it.
         editing = organization.id
-    }
-}
-
-/// One organization in the switcher. Held for a moment, it opens its editor.
-private struct OrganizationBubble: View {
-    let organization: Organization
-    let isSelected: Bool
-    let onSelect: () -> Void
-    let onEdit: () -> Void
-    @State private var isHovered = false
-    @State private var isPressing = false
-
-    static let size: CGFloat = 30
-
-    var body: some View {
-        OrganizationAvatar(organization: organization, size: Self.size)
-            .saturation(isSelected || isHovered ? 1 : 0.15)
-            .opacity(isSelected || isHovered ? 1 : 0.6)
-            .scaleEffect(isPressing ? 0.86 : isSelected ? 1 : 0.9)
-            .shadow(color: Theme.line.opacity(isSelected ? 0.22 : 0), radius: 3, y: 1.5)
-            .contentShape(.circle)
-            .onHover { hovering in withAnimation(.snappy(duration: 0.2)) { isHovered = hovering } }
-            .onTapGesture(perform: onSelect)
-            .onLongPressGesture(minimumDuration: 0.45, perform: onEdit) { pressing in
-                withAnimation(.bouncy(duration: 0.35)) { isPressing = pressing }
-            }
-            .contextMenu { Button(L("Edit Organization…"), action: onEdit) }
-            .animation(.snappy(duration: 0.3), value: isSelected)
-            .help(L("\(OrganizationAvatar.displayName(organization)) — hold to edit"))
-            .accessibilityElement()
-            .accessibilityLabel(OrganizationAvatar.displayName(organization))
-            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-            .accessibilityAction { onSelect() }
-            .accessibilityAction(named: Text(L("Edit Organization…")), onEdit)
-    }
-}
-
-/// An organization's round avatar: its image, or its initial on its color.
-struct OrganizationAvatar: View {
-    let organization: Organization
-    let size: CGFloat
-
-    /// Avatar colors. No greens or teals; amber takes dark ink.
-    static let palette: [(fill: Color, ink: Color)] = [
-        (Theme.accent, .white),
-        (Theme.secondary, .white),
-        (Color(red: 0x00 / 255, green: 0x90 / 255, blue: 0xFF / 255), .white),
-        (Color(red: 0xD6 / 255, green: 0x40 / 255, blue: 0x9F / 255), .white),
-        (Color(red: 0xE5 / 255, green: 0x48 / 255, blue: 0x4D / 255), .white),
-        (Color(red: 0x3E / 255, green: 0x63 / 255, blue: 0xDD / 255), .white),
-        (Color(red: 0xFF / 255, green: 0xB2 / 255, blue: 0x24 / 255), Color(red: 0x4E / 255, green: 0x2A / 255, blue: 0x00 / 255)),
-        (Color(red: 0xAD / 255, green: 0x7F / 255, blue: 0x58 / 255), .white),
-    ]
-
-    /// The stored name, with the default organization's translated until the user renames it.
-    static func displayName(_ organization: Organization) -> String {
-        organization.isDefault && organization.name == "Default" ? L("Default") : organization.name
-    }
-
-    var body: some View {
-        let colors = Self.palette[organization.color % Self.palette.count]
-        Group {
-            if let path = organization.icon, let image = NSImage(contentsOfFile: path) {
-                Image(nsImage: image).resizable().scaledToFill()
-            } else {
-                Text(Self.displayName(organization).first.map { String($0).uppercased() } ?? "?")
-                    .font(.system(size: size * 0.48, weight: .bold, design: .rounded))
-                    .foregroundStyle(colors.ink)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(colors.fill)
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(.circle)
-    }
-}
-
-/// Name, color and image of an organization, opened by holding its avatar.
-private struct OrganizationEditor: View {
-    let store: ProjectStore
-    let id: UUID
-    let onDone: () -> Void
-    @State private var name = ""
-    @FocusState private var isNameFocused: Bool
-
-    private var organization: Organization? { store.organizations.first { $0.id == id } }
-
-    var body: some View {
-        if let organization {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 12) {
-                    OrganizationAvatar(organization: organization, size: 44)
-                        .animation(.snappy(duration: 0.25), value: organization)
-                    TextField(L("Name"), text: $name)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isNameFocused)
-                        .onSubmit { commitName(organization); onDone() }
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L("Color")).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                    HStack(spacing: 7) {
-                        ForEach(OrganizationAvatar.palette.indices, id: \.self) { index in
-                            swatch(index, in: organization)
-                        }
-                    }
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Button(L("Choose Image…")) { chooseImage(organization) }
-                        if organization.icon != nil {
-                            Button(L("Use Initial")) { store.clearIcon(of: organization) }
-                        }
-                    }
-                    Text(L("An image replaces the initial and color."))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                if !organization.isDefault {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Button(L("Remove Organization"), role: .destructive) {
-                            onDone()
-                            store.removeOrganization(organization)
-                        }
-                        Text(L("Its project list goes; the folders and its Claude login stay on disk."))
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .padding(16)
-            .frame(width: 280)
-            .onAppear {
-                name = OrganizationAvatar.displayName(organization)
-                isNameFocused = true
-            }
-            .onDisappear { commitName(organization) }
-        }
-    }
-
-    private func swatch(_ index: Int, in organization: Organization) -> some View {
-        let isChosen = organization.color == index && organization.icon == nil
-        return Button {
-            var updated = organization
-            updated.color = index
-            store.updateOrganization(updated)
-            if organization.icon != nil { store.clearIcon(of: updated) }
-        } label: {
-            Circle()
-                .fill(OrganizationAvatar.palette[index].fill)
-                .frame(width: 20, height: 20)
-                .overlay {
-                    if isChosen {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundStyle(OrganizationAvatar.palette[index].ink)
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                }
-                .scaleEffect(isChosen ? 1.1 : 1)
-                .animation(.bouncy(duration: 0.3), value: isChosen)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func commitName(_ organization: Organization) {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != OrganizationAvatar.displayName(organization),
-              let current = store.organizations.first(where: { $0.id == id }) else { return }
-        var updated = current
-        updated.name = trimmed
-        store.updateOrganization(updated)
-    }
-
-    private func chooseImage(_ organization: Organization) {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
-        panel.canChooseDirectories = false
-        panel.prompt = L("Use Image")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        store.setIcon(of: organization, from: url)
-    }
-}
-
-extension NSImage {
-    /// The image cropped to a centered square and scaled to `side` points, as PNG data.
-    func squarePNG(side: CGFloat) -> Data? {
-        guard let source = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let length = min(source.width, source.height)
-        let crop = CGRect(x: (source.width - length) / 2, y: (source.height - length) / 2, width: length, height: length)
-        guard let square = source.cropping(to: crop) else { return nil }
-        let pixels = Int(side * 2)
-        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
-                                      samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                      bytesPerRow: 0, bitsPerPixel: 0)
-        guard let bitmap, let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return nil }
-        context.imageInterpolation = .high
-        context.cgContext.draw(square, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
-        return bitmap.representation(using: .png, properties: [:])
     }
 }
