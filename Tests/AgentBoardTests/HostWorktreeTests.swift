@@ -357,7 +357,9 @@ struct Rig {
                            connect: { .failure(.noCore) })
     let hosts = HostStores(local: local, account: account) { _ in { .failure(.noCore) } }
     let store = hosts.store(for: UUID())
-    try await waitUntil { store.notice != nil }
+    // The notice and the cards' state change together (`show`); it comes after the link's patience, later on a busy machine.
+    try await waitUntil(60) { store.notice != nil }
+    try #require(store.notice != nil, "the store says its host can't be reached")
     #expect(!store.isLoaded, "no core in this process stood in for the host's")
     #expect(!hosts.connected.contains { $0 === store })
     // A card shown meanwhile says the same.

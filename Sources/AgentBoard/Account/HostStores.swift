@@ -22,8 +22,26 @@ final class HostStores {
     @ObservationIgnored private var synced: Set<UUID> = []
     /// How the sync to each host is going or went, for its row in the account menu.
     private(set) var syncNotes: [UUID: String] = [:]
-    /// The host whose first sync waits for the user's word (see `answerSync`).
-    private(set) var syncQuestion: UUID?
+    /// The vault waits for the user's word, asked once per account (see `answerVault`).
+    private(set) var vaultQuestion = false
+    /// How the last write to the account's vault went.
+    private(set) var vaultNote: String?
+    /// The last write's size: the plain bytes of the chunks it uploaded, and all it sent.
+    private(set) var vaultSent: (plain: Int, sent: Int)?
+    /// What each host said of its last pull, and the manifest as last written or read: what a
+    /// host's "MCP servers" sheet lists.
+    private(set) var reports: [UUID: Vault.Report] = [:]
+    private(set) var vaultManifest: Vault.Manifest?
+    /// This Mac's servers that can't go to a host, and why.
+    private(set) var skippedServers: [String: String] = [:]
+    /// The host whose "MCP servers" sheet is open.
+    var editingServers: UUID?
+    /// The account server's vault (another in tests), where its key is kept, the file holding
+    /// what this Mac last wrote, and this Mac's GitHub login.
+    @ObservationIgnored var vaultServer: Vault.Server?
+    @ObservationIgnored var vaultKeys: TokenVault = .memory()
+    @ObservationIgnored var vaultState = FileManager.default.temporaryDirectory.appendingPathComponent("vault-\(UUID().uuidString).base")
+    @ObservationIgnored var githubLogin: @Sendable () -> (user: String, token: String)? = { nil }
     @ObservationIgnored private let connect: (UUID) -> @Sendable () -> Result<CoreClient, CoreClient.Failure>
     @ObservationIgnored private let channels = Channels()
     /// A connection to a host's core that isn't a store's own.
@@ -185,7 +203,11 @@ final class HostStores {
             self?.homes = [:]
             self?.synced = []
             self?.syncNotes = [:]
-            self?.syncQuestion = nil
+            self?.vaultQuestion = false
+            self?.vaultNote = nil
+            self?.reports = [:]
+            self?.vaultManifest = nil
+            self?.editingServers = nil
         }
         account.onHosts = { [weak self] in
             self?.remote.values.forEach { $0.explainDown() }
@@ -220,7 +242,7 @@ final class HostStores {
     /// When each host was last asked, unprompted, whether it trusts this Mac.
     @ObservationIgnored private var knocked: [UUID: Date] = [:]
 
-    /// Pairing without the menu or a worktree: a host online that never let this Mac in is
+    /// Pairing without the menu or a worktree: a host online that has no store here is
     /// asked once, so this Mac shows there as waiting, and again every `boardInterval` while it
     /// waits. Called whenever the hosts were refreshed; a host with a store asks by itself.
     private func knock() {
@@ -231,8 +253,8 @@ final class HostStores {
                 if waiting[host.id] != nil { waiting[host.id] = nil }
                 continue
             }
-            let due = waiting[host.id] != nil ? knocked[host.id].map { $0.timeIntervalSinceNow <= 1 - boardInterval } ?? true
-                : knocked[host.id] == nil && !account.wasTrusted(by: host.id)
+            // Also a host that once let this Mac in: it may have forgotten it since.
+            let due = waiting[host.id] != nil ? knocked[host.id].map { $0.timeIntervalSinceNow <= 1 - boardInterval } ?? true : knocked[host.id] == nil
             guard due, remote[host.id] == nil else { continue }
             knocked[host.id] = Date()
             Task { await listBoards(of: host.id) }
@@ -255,7 +277,17 @@ final class HostStores {
     /// For screenshots of a build under test (see docs/core.md): what only a host's answer
     /// causes, on the account's first host.
     func showSample() {
+        if DebugShow.items.contains("vault-question") { vaultQuestion = true }
         guard let host = account.hosts.first?.id, let own = account.boardPublicKey else { return }
+        if DebugShow.items.contains("host-servers") {
+            vaultManifest = ["mcp": ["gitlab": ["command": "npx", "args": ["-y", "gitlab-mcp"]], "search": ["type": "http", "url": "https://mcp.example.com"],
+                                     "papers": ["command": "uvx", "args": ["paper-search"]], "notes": ["command": "npx", "args": ["-y", "notes-mcp"]]],
+                             "hosts": [host.uuidString.lowercased(): ["mcp": ["dokk": ["command": "/usr/local/bin/dokk", "args": ["mcp"]], "builds": ["command": "builds-mcp"]],
+                                                                      "without": ["notes"]]]]
+            reports[host] = Vault.Report(Data(#"{"version":3,"files":0,"removed":0,"servers":["builds","dokk","gitlab","papers","search"],"lacking":[{"server":"papers","command":"uvx"}],"github":true}"#.utf8))
+            skippedServers = ["filmcraft": L("a program built for the Mac")]
+            editingServers = host
+        }
         if DebugShow.items.contains("host-waiting") { waiting[host] = 1 }
         if DebugShow.items.contains("host-approval") {
             let other = Data(repeating: 7, count: 32).base64EncodedString(), asking = Data(repeating: 9, count: 32).base64EncodedString()
@@ -267,10 +299,10 @@ final class HostStores {
     /// One request to `host` about its boards (see `Boards.request`), on a channel of its own;
     /// nil when the host doesn't trust this Mac or doesn't answer.
     // shortcut: a channel per request (a handshake each); keep one open per host if listing every 30 seconds ever shows up as load.
-    private func ask(_ host: UUID, _ request: Data) async -> Data? {
+    private func ask(_ host: UUID, _ request: Data, carrying: HostChannel.Carrying = .boards) async -> Data? {
         let open = open
         return await Task.detached {
-            guard let channel = open(host, .boards).channel else { return nil }
+            guard let channel = open(host, carrying).channel else { return nil }
             defer { close(channel) }
             var patience = timeval(tv_sec: 10, tv_usec: 0)
             setsockopt(channel, SOL_SOCKET, SO_RCVTIMEO, &patience, socklen_t(MemoryLayout<timeval>.size))
@@ -328,13 +360,75 @@ final class HostStores {
         }
     }
 
-    /// The user's answer to `syncQuestion`: yes syncs now and lets later syncs to that host
-    /// run by themselves.
-    func answerSync(_ allowed: Bool) {
-        guard let host = syncQuestion else { return }
-        syncQuestion = nil
-        guard allowed, let syncHome else { return }
-        Task { await sync(host, from: syncHome) }
+    /// The user's answer to `vaultQuestion`: yes keeps this Mac's skills, servers and GitHub
+    /// login in the account now, and from then on whenever they change.
+    func answerVault(_ allowed: Bool) {
+        vaultQuestion = false
+        guard allowed else { return }
+        Task { await syncVault() }
+    }
+
+    /// Writes what changed on this Mac into the account's vault (`edit`: a change to a host's
+    /// own servers, applied to what the account holds) and has every connected host apply it.
+    /// Called for the user (their yes, "Sync now", a save in a host's sheet), which allows the
+    /// vault for the account; a host that connects later then gets it unasked.
+    func syncVault(edit: (@Sendable (inout Vault.Manifest) -> Void)? = nil) async {
+        guard let syncHome, let token = account.token, let board = account.boardPublicKey else { return }
+        account.vaultAllowed = true
+        vaultNote = L("Syncing…")
+        let trusted = account.hosts.filter { $0.online && !account.identityChanged($0.id) && waiting[$0.id] == nil }.map(\.id)
+        do {
+            let server = vaultServer ?? .http(server: account.server, token: token)
+            var key = vaultKeys.read().flatMap { Data(base64Encoded: $0) }
+            if key == nil {
+                if try await server.get() == nil {
+                    key = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
+                } else {
+                    // The account has one, sealed with a key this Mac never held: a host that trusts it gives it.
+                    for host in trusted where key == nil {
+                        let answer = await ask(host, Data(#"{"get":{}}"#.utf8), carrying: .vault).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+                        key = (answer?["key"] as? String).flatMap { Data(base64Encoded: $0) }.flatMap { $0.count == 32 ? $0 : nil }
+                    }
+                }
+                guard let key, vaultKeys.write(key.base64EncodedString()) else {
+                    throw Vault.Failure(message: L("This Mac doesn't have your account's key yet. It gets it from a host that is online and trusts this Mac."))
+                }
+            }
+            guard let key else { return }
+            let github = githubLogin
+            let local = await Task.detached { Vault.local(home: syncHome, key: key, github: github(), git: HostSync.gitIdentity()) }.value
+            skippedServers = local.skipped
+            let written = try await Vault.write(local, key: key, to: server, state: vaultState, by: AccountStore.fingerprint(of: board), edit: edit)
+            vaultSent = written.map { ($0.plainBytes, $0.sentBytes) }
+            vaultManifest = written?.manifest ?? Vault.state(at: vaultState, key: key)?.whole
+            vaultNote = written.map { L("Kept in your account (version \($0.version)).") } ?? L("Up to date.")
+            // Every host this Mac reaches holds the key before it is asked to apply anything.
+            let handed = try JSONSerialization.data(withJSONObject: ["set": ["key": key.base64EncodedString()]])
+            for host in trusted {
+                _ = await ask(host, handed, carrying: .vault)
+                if remote[host]?.core != nil { await pull(host) }
+            }
+        } catch {
+            vaultNote = L("Not synced: \(error.localizedDescription)")
+        }
+    }
+
+    /// Has `host` apply the account's vault (`agentboard vault pull`, which fetches what it
+    /// lacks from the account server itself), saying how it went in `syncNotes`.
+    func pull(_ host: UUID) async {
+        guard let store = remote[host] else { return }
+        let name = store.host?.name ?? L("the host")
+        syncNotes[host] = L("Syncing skills…")
+        // The host fetches and writes for as long as that takes; nothing large travels here.
+        guard let ran = await store.run("agentboard", ["vault", "pull"], patience: 600) else {
+            return syncNotes[host] = L("Not synced: \(L("Couldn't reach \(name). It may be offline."))")
+        }
+        guard ran.status == 0, let report = Vault.Report(ran.output) else {
+            let said = String(decoding: ran.error, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return syncNotes[host] = L("Not synced: \(String(said.prefix(300)))")
+        }
+        reports[host] = report
+        syncNotes[host] = report.note(on: name, skipped: skippedServers)
     }
 
     /// Removes `host` from the account (see `AccountStore.forgetHost`) and from this board.
@@ -344,7 +438,8 @@ final class HostStores {
         homes[host] = nil
         synced.remove(host)
         syncNotes[host] = nil
-        if syncQuestion == host { syncQuestion = nil }
+        reports[host] = nil
+        if editingServers == host { editingServers = nil }
         return true
     }
 
@@ -375,30 +470,13 @@ final class HostStores {
             return self?.waiting[host] == nil ? nil : L("\(name) is waiting to approve this Mac. The account menu says how.")
         }
         store.onConnect = { [weak self] in
-            guard let self, let syncHome, synced.insert(host).inserted else { return }
-            // Skills and keys go to a host only after the user said so once.
-            guard account.isSyncAllowed(to: host) else { return syncQuestion = host }
-            Task { await self.sync(host, from: syncHome) }
+            guard let self, syncHome != nil, synced.insert(host).inserted else { return }
+            // Skills and keys are kept in the account only after the user said so, once.
+            guard account.vaultAllowed else { return vaultQuestion = true }
+            Task { await self.syncVault() }
         }
         remote[host] = store
         return store
-    }
-
-    /// Copies `home`'s skills and MCP servers to `host` (see `HostSync`), saying how it went
-    /// in `syncNotes`. Called for the user (the menu's row, or their yes to `syncQuestion`):
-    /// later syncs to the host, as it is pinned, then run by themselves.
-    func sync(_ host: UUID, from home: URL) async {
-        account.allowSync(to: host)
-        let store = store(for: host)
-        syncNotes[host] = L("Syncing skills…")
-        do {
-            guard let files = store.files, let dataFolder = await store.askHostDataFolder() else {
-                throw HostSync.Failure(message: L("Couldn't reach \(store.host?.name ?? L("the host")). It may be offline."))
-            }
-            syncNotes[host] = try await HostSync.run(from: home, to: files, dataFolder: dataFolder).note(on: store.host?.name ?? L("the host"))
-        } catch {
-            syncNotes[host] = L("Not synced: \(error.localizedDescription)")
-        }
     }
 
     /// This Mac's store and those of the hosts that answer.
@@ -440,8 +518,8 @@ extension GitHost {
             let done = DispatchSemaphore(value: 0)
             let result = Answer()
             Task.detached { [weak store] in
-                // Git's own programs take as long as they take (a clone): the long wait, not the one by size.
-                let ran = await store?.run(executable, arguments, patience: GitHost.patience)
+                // Git's own programs take as long as they take (a clone): given up on below, after `GitHost.patience`, not by size.
+                let ran = await store?.run(executable, arguments, patience: GitHost.patience * 2)
                 result.lock.withLock { result.value = ran }
                 done.signal()
             }

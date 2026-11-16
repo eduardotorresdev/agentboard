@@ -89,7 +89,11 @@ struct ContentView: View {
         }
         .onAppear {
             if let path = DebugShow.worktree { OpenWorktree.set(path, in: store.organizationID) }
-            if DebugShow.items.contains("sign-in") { hosts.account.signIn() }
+            // The account is the usual way in: asked for once per launch, and the board works without it.
+            if hosts.account.account == nil, !hosts.account.isSigningIn, ProcessInfo.processInfo.environment["AGENTBOARD_BACKGROUND"] == nil || DebugShow.items.contains("sign-in") {
+                hosts.account.signIn()
+            }
+            if DebugShow.items.contains("vault-question") { hosts.showSample() }
             restoreSelection()
         }
         .onChange(of: selection) { _, selection in
@@ -115,8 +119,11 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { hosts.account.isSigningIn }, set: { if !$0 { hosts.account.cancelSignIn() } })) {
             SignInDialog(account: hosts.account)
         }
-        .sheet(isPresented: Binding(get: { hosts.syncQuestion != nil }, set: { if !$0 { hosts.answerSync(false) } })) {
-            if let host = hosts.syncQuestion { SyncQuestionDialog(hosts: hosts, host: host) }
+        .sheet(isPresented: Binding(get: { hosts.vaultQuestion }, set: { if !$0 { hosts.answerVault(false) } })) {
+            VaultQuestionDialog(hosts: hosts)
+        }
+        .sheet(isPresented: Binding(get: { hosts.editingServers != nil }, set: { if !$0 { hosts.editingServers = nil } })) {
+            if let host = hosts.editingServers { HostServersSheet(hosts: hosts, host: host) }
         }
         .sheet(item: $addProjectStep) { step in
             AddProjectDialog(store: store, initialStep: step, onAdded: select)

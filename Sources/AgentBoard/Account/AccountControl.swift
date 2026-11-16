@@ -57,23 +57,25 @@ extension HostChannel.Path {
     }
 }
 
-/// Asked before this Mac's skills first go to a host: what goes, and that later syncs won't ask.
-struct SyncQuestionDialog: View {
+/// Asked once per account, before anything of this Mac is kept in it: what is kept, who can
+/// read it, and where it lands.
+struct VaultQuestionDialog: View {
     let hosts: HostStores
-    let host: UUID
 
     var body: some View {
-        AppDialog(title: L("Sync skills to \(hosts.account.hosts.first { $0.id == host }?.name ?? L("the host"))?")) {
+        AppDialog(title: L("Keep your skills in your account?")) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(L("Copies \(AgentCatalog.all[0].title)'s skills, commands, subagents, instructions and user-level MCP servers, with their keys, from this Mac. Not its settings, project-level servers or other agents' setups."))
-                Text(L("After this, the host is kept in sync each time it connects. Without it, agents there work with what the host has."))
+                Text(L("Keeps \(AgentCatalog.all[0].title)'s skills, commands, subagents and instructions from this Mac, its user-level MCP servers with their keys, and your GitHub login, so every host of yours has them."))
+                Text(L("It is sealed with a key only the computers you approved hold: the account server can't read it."))
+                Text(L("On a host it lands in the home every agent there shares. After this, changes here are kept without asking."))
             }
             .foregroundStyle(Theme.inkMuted)
             .fixedSize(horizontal: false, vertical: true)
+            .frame(width: 440, alignment: .leading)
         } footer: {
-            Button(L("Not Now"), role: .cancel) { hosts.answerSync(false) }
+            Button(L("Not Now"), role: .cancel) { hosts.answerVault(false) }
                 .keyboardShortcut(.cancelAction)
-            Button(L("Sync")) { hosts.answerSync(true) }
+            Button(L("Keep and Sync")) { hosts.answerVault(true) }
                 .buttonStyle(DialogButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
         }
@@ -276,10 +278,11 @@ struct AccountMenu: View {
                         account.acceptIdentity(of: host.id)
                     }
                 } else if host.online, waiting == nil {
-                    MenuAction(title: L("Sync skills"), caption: L("Copies this Mac's skills and MCP servers to this host.")) {
-                        Task { await hosts.sync(host.id, from: FileManager.default.homeDirectoryForCurrentUser) }
+                    MenuAction(title: L("MCP servers"), caption: L("What agents on this host are given, and what only it does differently.")) {
+                        hosts.editingServers = host.id
+                        close()
                     }
-                    // What the last sync did.
+                    // What its last sync did.
                     if let note = hosts.syncNotes[host.id] {
                         Text(note)
                             .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
@@ -297,6 +300,13 @@ struct AccountMenu: View {
             }
             .padding(.leading, 22)
         }
+        MenuAction(title: L("Sync now"), caption: L("Keeps this Mac's skills, MCP servers and GitHub login in your account; your hosts apply them.")) {
+            Task { await hosts.syncVault() }
+        }
+        .padding(.top, 8)
+        // What the last one did, and what it doesn't do.
+        note([hosts.vaultNote, L("This Mac's skills are kept in your account; other computers' additions reach your hosts, not this Mac.")]
+            .compactMap { $0 }.joined(separator: " "))
         MenuAction(title: confirmingSignOut ? L("Sign out? Click again") : L("Sign out"),
                    caption: L("Agents on your hosts keep running; this Mac stops showing them.")) {
             guard confirmingSignOut else { return confirmingSignOut = true }

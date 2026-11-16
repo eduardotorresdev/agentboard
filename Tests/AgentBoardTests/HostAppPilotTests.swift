@@ -390,26 +390,26 @@ import Testing
 
         // 8. This Mac's skills and MCP servers, as the app sends them when the host answers.
         let home = URL(fileURLWithPath: String(cString: getpwuid(getuid()).pointee.pw_dir))
-        let entries = HostSync.entries(in: home)
+        // Kept in the account's vault (sealed with a key that stays beside the pilot's files) and applied by the host itself.
+        let beside = URL(fileURLWithPath: Self.environment["AGENTBOARD_PILOT"]!).deletingLastPathComponent()
+        hosts.syncHome = home
+        hosts.vaultKeys = .file(beside.appendingPathComponent("vault.key"))
+        hosts.vaultState = beside.appendingPathComponent("vault.base")
+        hosts.githubLogin = { HostSync.githubLogin() }
         let syncing = Date()
-        // While it runs, the store's own connection is asked small things: how long each answer takes.
-        let inFlight = Task { await hosts.sync(host.id, from: home) }
-        var echoes: [Double] = []
-        while hosts.syncNotes[host.id] == nil || hosts.syncNotes[host.id] == AgentBoard.L("Syncing skills…") {
-            let asked = Date()
-            guard await store.run("true", [])?.status == 0 else { break }
-            echoes.append(Date().timeIntervalSince(asked) * 1000)
-            try await Task.sleep(for: .milliseconds(200))
-        }
-        await inFlight.value
-        echoes.sort()
-        print("pilot: sync of \(entries) in \(Int(Date().timeIntervalSince(syncing) * 1000)) ms: \(hosts.syncNotes[host.id] ?? "no note")")
-        print("pilot: \(echoes.count) small calls on the store's connection while it synced: median \(Int(echoes.isEmpty ? 0 : echoes[echoes.count / 2])) ms, slowest \(Int(echoes.last ?? 0)) ms")
-        #expect(store.notice == nil && store.core != nil, "a sync never makes the host look unreachable")
+        await hosts.syncVault()
+        print("pilot: vault written and applied in \(Int(Date().timeIntervalSince(syncing) * 1000)) ms: \(hosts.vaultNote ?? "no note") Sent \(hosts.vaultSent?.sent ?? 0) bytes for \(hosts.vaultSent?.plain ?? 0) plain bytes of chunks.")
+        print("pilot: the host says: \(hosts.syncNotes[host.id] ?? "no note")")
+        let report = try #require(hosts.reports[host.id], "the host applied the vault and said what it did")
+        // The report holds no secret: names, counts and whether `gh` took the login.
+        print("pilot: pull report: version \(report.version), files \(report.files), removed \(report.removed), servers \(report.servers), lacking \(report.lacking), github \(report.github)")
+        #expect(report.version > 0 && store.notice == nil && store.core != nil)
         let again = Date()
-        let outcome = try await HostSync.run(from: home, to: files, dataFolder: hostData)
-        print("pilot: synced again in \(Int(Date().timeIntervalSince(again) * 1000)) ms: \(outcome.note(on: host.name))")
-        #expect(outcome.upToDate || !outcome.missing.isEmpty || !outcome.unresolved.isEmpty, "nothing changed: nothing to send")
+        await hosts.syncVault()
+        print("pilot: synced again in \(Int(Date().timeIntervalSince(again) * 1000)) ms: \(hosts.vaultNote ?? "no note") The host: files \(hosts.reports[host.id]?.files ?? -1), removed \(hosts.reports[host.id]?.removed ?? -1)")
+        #expect(hosts.vaultNote == AgentBoard.L("Up to date.") && hosts.reports[host.id]?.files == 0, "nothing changed: nothing to send or write")
+        let signedIn = await store.run("sh", ["-c", #"PATH="$HOME/.local/bin:$PATH"; gh auth status 2>&1 | grep -E "Logged in|not logged|command not found" | sed -E 's/\(.*//'"#])
+        print("pilot: `gh auth status` on the host: \(String(decoding: signedIn?.output ?? Data(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))")
         if let skill = (try? FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".claude/skills").path))?.sorted().first(where: { !$0.hasPrefix(".") }) {
             #expect(await store.run("sh", ["-c", "test -e \"$HOME/.claude/skills/$1\"", "sh", skill])?.status == 0, "the skill \(skill) is on the host")
         }
@@ -418,9 +418,7 @@ import Testing
             let theirs = await files.output("sh", ["-c", "cat \"$HOME/.claude.json\""]) ?? ""
             let there = ((try? JSONSerialization.jsonObject(with: Data(theirs.utf8))) as? [String: Any])?["mcpServers"] as? [String: Any] ?? [:]
             print("pilot: MCP servers on the host: \(there.keys.sorted())")
-            #expect(sent.subtracting(outcome.kept).isSubset(of: Set(there.keys)), "sent \(sent.sorted())")
-            let marks = await files.read("\(hostData)/synced-mcp.json", limit: 100_000).flatMap { try? JSONDecoder().decode([String].self, from: $0) }
-            #expect(marks.map(Set.init) == sent.subtracting(outcome.kept))
+            #expect(Set(report.servers).isSubset(of: Set(there.keys)), "the host has what it said it ended with; sent \(sent.sorted())")
         }
 
         // What an agent there is given: the servers as its own program lists them (names and
@@ -507,7 +505,6 @@ import Testing
             print("shots: left on the host: \(left.map { String(decoding: $0.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) } ?? "unknown")")
             return store.quit()
         }
-        account.allowSync(to: host.id)
         let repo = home.appendingPathComponent("projects/\(name)")
         if !FileManager.default.fileExists(atPath: repo.path) {
             try Git.createRepository(at: repo)

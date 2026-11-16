@@ -367,40 +367,6 @@ private func configuredHome() throws -> URL {
     return home
 }
 
-@Test func theArchiveHoldsWhatAgentsReadAndNothingElse() throws {
-    let home = try configuredHome(), out = try temporaryFolder("sync-out")
-    defer { [home, out].forEach { try? FileManager.default.removeItem(at: $0) } }
-    func unpacked() throws -> Set<String> {
-        let archive = out.appendingPathComponent("a.tgz"), folder = out.appendingPathComponent(UUID().uuidString)
-        try #require(try HostSync.archive(of: home)).write(to: archive)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let tar = Process()
-        tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-        tar.arguments = ["-xzf", archive.path, "-C", folder.path]
-        try tar.run()
-        tar.waitUntilExit()
-        #expect(tar.terminationStatus == 0)
-        var files: Set<String> = []
-        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey])
-        for case let url as URL in walker! where (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true {
-            files.insert(String(url.resolvingSymlinksInPath().path.dropFirst(folder.resolvingSymlinksInPath().path.count + 1)))
-        }
-        return files
-    }
-    let sent = [".claude/skills/review/SKILL.md", ".claude/skills/linked/SKILL.md", ".claude/commands/ship.md", ".claude/agents/tester.md",
-                ".claude/CLAUDE.md", ".claude/RTK.md"]
-    #expect(try unpacked() == Set(sent + [".claude/plugins/tiny/plugin.json"]))
-
-    // Plugins past the limit stay; the rest still goes.
-    try Data(count: HostSync.pluginsLimit + 1).write(to: home.appendingPathComponent(".claude/plugins/tiny/big.bin"))
-    #expect(try unpacked() == Set(sent))
-
-    // A home without any of it sends nothing.
-    let empty = try temporaryFolder("sync-empty")
-    defer { try? FileManager.default.removeItem(at: empty) }
-    #expect(try HostSync.archive(of: empty) == nil)
-}
-
 @Test func mcpServersThatRunAProgramOfThisMacStayHere() throws {
     let home = try configuredHome()
     defer { try? FileManager.default.removeItem(at: home) }
@@ -427,120 +393,18 @@ private func configuredHome() throws -> URL {
     let papers = try #require(sorted.copied["papers"] as? [String: Any])
     #expect(papers["command"] as? String == "uvx" && papers["args"] as? [String] == ["--from", "paper-search", "papers-mcp", "--fast"])
     #expect(papers["env"] as? [String: String] == ["EMAIL": "me@example.test"])
-    let reason = AgentBoard.L("a program built for the Mac")
-    #expect(HostSync.Outcome(skipped: ["b": reason, "a": reason, "c": "else"]).note(on: "builder").contains("a, b (\(reason)); c (else)"))
-    // Held to the versions the tool has here, when the host has somewhere to keep them.
+    // Held to the versions the tool has here: the pins go along, and a shell finds them in the host's data folder.
     let packages = home.appendingPathComponent(".local/share/uv/tools/paper-search/lib/python3.12/site-packages")
     for record in ["paper_search-0.1.4.dist-info", "mcp-1.9.2.dist-info", "not-a-record"] {
         try FileManager.default.createDirectory(at: packages.appendingPathComponent(record), withIntermediateDirectories: true)
     }
-    let pinned = HostSync.servers(in: config, pinsFolder: "/data/synced-pins")
+    let pinned = HostSync.servers(in: config, pinned: true)
+    #expect((pinned.copied["papers"] as? [String: Any])?["command"] as? String == "sh")
     #expect((pinned.copied["papers"] as? [String: Any])?["args"] as? [String]
-        == ["--constraints", "/data/synced-pins/paper-search.txt", "--from", "paper-search==0.1.4", "papers-mcp", "--fast"])
+        == ["-c", HostSync.pinnedScript, "sh", "paper-search", "--from", "paper-search==0.1.4", "papers-mcp", "--fast"])
+    #expect(HostSync.pinnedScript.contains(#"synced-pins/$tool.txt"#))
     #expect(pinned.pins == ["paper-search": "mcp==1.9.2\npaper_search==0.1.4\n"])
     #expect(HostSync.servers(in: config).pins.isEmpty)
-    #expect(HostSync.Outcome(unresolved: ["papers": "no wheel"]).note(on: "builder").contains("no wheel"))
-
-    let note = HostSync.Outcome(skipped: sorted.skipped, kept: [], missing: ["papers": "uvx"]).note(on: "builder")
-    #expect(note.contains("app (\(AgentBoard.L("a program built for the Mac")))") && note.contains(AgentBoard.L("\("papers"): \("uvx") isn't installed on \("builder")")))
-
-    // A command that is an npm package installed for everyone here goes as npx fetches it.
-    let prefix = home.appendingPathComponent("npm")
-    try write("#!/usr/bin/env node\n", to: prefix.appendingPathComponent("lib/node_modules/@scope/gitlab-mcp/build/index.js"))
-    try write("#!/usr/bin/env node\n", to: prefix.appendingPathComponent("lib/node_modules/plain-mcp/cli.js"))
-    try FileManager.default.createDirectory(at: prefix.appendingPathComponent("bin"), withIntermediateDirectories: true)
-    try FileManager.default.createSymbolicLink(atPath: prefix.appendingPathComponent("bin/gitlab-mcp").path, withDestinationPath: "../lib/node_modules/@scope/gitlab-mcp/build/index.js")
-    try FileManager.default.createSymbolicLink(atPath: prefix.appendingPathComponent("bin/plain").path, withDestinationPath: "../lib/node_modules/plain-mcp/cli.js")
-    let named = try JSONSerialization.data(withJSONObject: ["mcpServers": [
-        "gitlab": ["command": "gitlab-mcp", "args": ["--read-only"]], "plain": ["command": "plain"], "other": ["command": "somewhere-else"], "node": ["command": "npx", "args": ["x"]],
-    ]])
-    let fetched = HostSync.servers(in: named, searchPath: "/nonexistent:" + prefix.appendingPathComponent("bin").path).copied
-    #expect((fetched["gitlab"] as? [String: Any])?["command"] as? String == "npx")
-    #expect((fetched["gitlab"] as? [String: Any])?["args"] as? [String] == ["-y", "@scope/gitlab-mcp", "--read-only"])
-    #expect((fetched["plain"] as? [String: Any])?["args"] as? [String] == ["-y", "plain-mcp"])
-    #expect((fetched["other"] as? [String: Any])?["command"] as? String == "somewhere-else")
-    #expect((fetched["node"] as? [String: Any])?["args"] as? [String] == ["x"])
-}
-
-@Test func syncingCopiesSkillsAndMergesMcpServersWithoutTouchingTheHostsOwn() async throws {
-    let home = try configuredHome(), host = try temporaryFolder("sync-host")
-    defer { [home, host].forEach { try? FileManager.default.removeItem(at: $0) } }
-    let files = machine(home: host), data = host.appendingPathComponent("data").path
-    let config = host.appendingPathComponent(".claude.json")
-    func servers() throws -> [String: [String: Any]] {
-        let whole = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
-        return whole["mcpServers"] as? [String: [String: Any]] ?? [:]
-    }
-    // The host has settings of its own, a server of its own under a name this Mac also uses,
-    // and a skill of its own.
-    try write(#"{"numStartups": 7, "mcpServers": {"mine": {"command": "the-hosts-own"}, "theirs": {"command": "x"}}}"#, to: config)
-    try write("own", to: host.appendingPathComponent(".claude/skills/own/SKILL.md"))
-
-    let first = try await HostSync.run(from: home, to: files, dataFolder: data)
-    #expect(first.skipped.keys.sorted() == ["local"] && first.kept == ["mine"])
-    // The stand-in host has none of the programs the servers run, and the result says which.
-    #expect(first.missing == ["files": "npx", "brewed": "uvx"])
-    // Only what the host can run is said to be copied, and never that it starts.
-    #expect(first.copied == ["search"] && first.note(on: "builder").contains(AgentBoard.L("Servers copied: \("search").")))
-    #expect(first.note(on: "builder").contains("local") && first.note(on: "builder").contains("mine"))
-    for path in ["skills/review/SKILL.md", "skills/linked/SKILL.md", "skills/own/SKILL.md", "CLAUDE.md", "RTK.md"] {
-        #expect(FileManager.default.fileExists(atPath: host.appendingPathComponent(".claude/" + path).path), "\(path)")
-    }
-    #expect(!FileManager.default.fileExists(atPath: host.appendingPathComponent(".claude/.credentials.json").path))
-    // Its hooks run programs of this Mac: the host keeps settings of its own.
-    #expect(!FileManager.default.fileExists(atPath: host.appendingPathComponent(".claude/settings.json").path))
-    var now = try servers()
-    #expect(Set(now.keys) == ["mine", "theirs", "search", "files", "brewed"])
-    #expect(now["mine"]?["command"] as? String == "the-hosts-own")
-    #expect((now["files"]?["env"] as? [String: String]) == ["TOKEN": "t"])
-    let whole = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any])
-    #expect(whole["numStartups"] as? Int == 7 && whole["oauthAccount"] == nil && whole["projects"] == nil)
-    #expect(try JSONDecoder().decode([String].self, from: Data(contentsOf: URL(fileURLWithPath: data + "/synced-mcp.json"))) == ["brewed", "files", "search"])
-    // Only its owner reads the file that now holds keys.
-    #expect((try FileManager.default.attributesOfItem(atPath: config.path)[.posixPermissions] as? Int) == 0o600)
-
-    #expect(try String(contentsOfFile: data + "/synced-files.txt", encoding: .utf8).contains(".claude/skills/review/SKILL.md"))
-    // Next time: one changed here is changed there, one removed here is removed there, and the
-    // host's own two are still its own. So with skills: one deleted here goes, the host's own stays.
-    try FileManager.default.removeItem(at: home.appendingPathComponent(".claude/skills/review"))
-    try FileManager.default.removeItem(at: home.appendingPathComponent(".claude/commands/ship.md"))
-    try write(#"{"mcpServers": {"files": {"command": "npx", "args": ["-y", "files-mcp@2"]}, "mine": {"command": "mine-mcp"}}}"#,
-              to: home.appendingPathComponent(".claude.json"))
-    let second = try await HostSync.run(from: home, to: files, dataFolder: data)
-    #expect(second.skipped.isEmpty && second.kept == ["mine"] && second.missing == ["files": "npx"])
-    for (path, there) in [("skills/review/SKILL.md", false), ("commands/ship.md", false), ("skills/own/SKILL.md", true), ("skills/linked/SKILL.md", true), ("CLAUDE.md", true)] {
-        #expect(FileManager.default.fileExists(atPath: host.appendingPathComponent(".claude/" + path).path) == there, "\(path)")
-    }
-    let list = try String(contentsOfFile: data + "/synced-files.txt", encoding: .utf8)
-    #expect(!list.contains("review") && !list.contains("own") && list.contains(".claude/skills/linked/SKILL.md"))
-    now = try servers()
-    #expect(Set(now.keys) == ["mine", "theirs", "files"])
-    #expect(now["files"]?["args"] as? [String] == ["-y", "files-mcp@2"])
-    #expect(now["mine"]?["command"] as? String == "the-hosts-own")
-
-    // A host file that isn't JSON is left as it is, and the sync says so.
-    try write("{ broken", to: config)
-    await #expect(throws: HostSync.Failure.self) { try await HostSync.run(from: home, to: files, dataFolder: data) }
-    #expect(try String(contentsOf: config, encoding: .utf8) == "{ broken")
-
-    // No file at all on the host: made, with the servers alone.
-    try FileManager.default.removeItem(at: config)
-    try FileManager.default.removeItem(atPath: data + "/synced-mcp.json")
-    #expect(try await HostSync.run(from: home, to: files, dataFolder: data).kept.isEmpty)
-    #expect(Set(try servers().keys) == ["files", "mine"])
-}
-
-@MainActor @Test func aHostIsSyncedOnceWhenItAnswersAndAgainWhenAsked() async throws {
-    let rig = try await Rig()
-    defer { rig.cleanUp() }
-    // Nothing is copied unasked without a home to copy from (every other test here).
-    let store = rig.hosts.store(for: rig.host)
-    try await waitUntil { store.isLoaded }
-    #expect(rig.hosts.syncNotes.isEmpty)
-    // A host that can't say where its data folder is: the row says the sync didn't happen.
-    store.hostDataFolder = nil
-    await rig.hosts.sync(rig.host, from: rig.folder)
-    #expect(rig.hosts.syncNotes[rig.host]?.contains("builder") == true, "\(rig.hosts.syncNotes)")
 }
 
 // MARK: Pages
@@ -825,78 +689,6 @@ func aRealPageReachesWhatOnlyTheHostServes() throws {
     #expect(printed.contains("\"lost\":\"unreachable\""), "a page without the proxy doesn't reach the host: \(printed)")
 }
 
-// MARK: Sending only what changed
-
-@Test func aSyncSendsOnlyWhatTheHostDoesNotHave() async throws {
-    let home = try temporaryFolder("sync-home"), host = try temporaryFolder("sync-host")
-    defer { [home, host].forEach { try? FileManager.default.removeItem(at: $0) } }
-    for (path, text) in [("skills/a/SKILL.md", "a"), ("skills/b/SKILL.md", "b"), ("skills/b/notes/more.md", "more"), ("CLAUDE.md", "rules")] {
-        try write(text, to: home.appendingPathComponent(".claude/" + path))
-    }
-    try write("the host's own", to: host.appendingPathComponent(".claude/skills/own/SKILL.md"))
-    // What is asked of the host, and what each request carries.
-    final class Asked: @unchecked Sendable {
-        let lock = NSLock()
-        var inputs: [Data] = []
-    }
-    let asked = Asked(), machine = machine(home: host), data = host.appendingPathComponent("data").path
-    let files = HostFiles { executable, arguments, input in
-        asked.lock.withLock { asked.inputs.append(input ?? Data()) }
-        return await machine.run(executable, arguments, input)
-    }
-    func sync() async throws -> (outcome: HostSync.Outcome, inputs: [Data]) {
-        asked.lock.withLock { asked.inputs = [] }
-        let outcome = try await HostSync.run(from: home, to: files, dataFolder: data)
-        return (outcome, asked.lock.withLock { asked.inputs })
-    }
-    func packed(_ archive: Data) throws -> Set<String> {
-        let file = host.appendingPathComponent("seen.tgz")
-        try archive.write(to: file)
-        let tar = Process(), listed = Pipe()
-        tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-        tar.arguments = ["-tzf", file.path]
-        tar.standardOutput = listed
-        try tar.run()
-        let names = String(decoding: listed.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        tar.waitUntilExit()
-        return Set(names.split(separator: "\n").map(String.init))
-    }
-    let there = { (path: String) in try? String(contentsOf: host.appendingPathComponent(".claude/" + path), encoding: .utf8) }
-
-    // The first time everything goes.
-    let first = try await sync()
-    #expect(!first.outcome.upToDate && there("skills/b/notes/more.md") == "more" && there("CLAUDE.md") == "rules")
-    #expect(try first.inputs.contains { try $0.count > 100 && packed($0).count == 4 })
-
-    // Nothing changed: one question, no bytes sent, and it says so.
-    let again = try await sync()
-    #expect(again.outcome.upToDate && again.outcome.note(on: "builder") == AgentBoard.L("Up to date."))
-    #expect(again.inputs.count == 1 && again.inputs[0].isEmpty)
-
-    // One file changed and one added: only those two travel.
-    try write("b, improved", to: home.appendingPathComponent(".claude/skills/b/SKILL.md"))
-    try write("c", to: home.appendingPathComponent(".claude/skills/c/SKILL.md"))
-    let changed = try await sync()
-    let archives = try changed.inputs.filter { $0.starts(with: [0x1F, 0x8B]) }.map(packed)
-    #expect(archives == [[".claude/skills/b/SKILL.md", ".claude/skills/c/SKILL.md"]])
-    #expect(there("skills/b/SKILL.md") == "b, improved" && there("skills/c/SKILL.md") == "c" && there("skills/a/SKILL.md") == "a")
-
-    // One removed here: removed there with no file sent, and the host's own stays.
-    try FileManager.default.removeItem(at: home.appendingPathComponent(".claude/skills/a"))
-    let removed = try await sync()
-    #expect(!removed.inputs.contains { $0.starts(with: [0x1F, 0x8B]) })
-    #expect(there("skills/a/SKILL.md") == nil && there("skills/own/SKILL.md") == "the host's own" && there("skills/c/SKILL.md") == "c")
-    #expect(try await sync().outcome.upToDate)
-
-    // A list from before there were hashes: every file counts as changed, once.
-    try write(".claude/CLAUDE.md\n.claude/skills/gone/SKILL.md\n", to: URL(fileURLWithPath: data + "/synced-files.txt"))
-    try FileManager.default.removeItem(atPath: data + "/synced.digest")
-    try write("left by an old sync", to: host.appendingPathComponent(".claude/skills/gone/SKILL.md"))
-    let migrated = try await sync()
-    #expect(try migrated.inputs.contains { try $0.starts(with: [0x1F, 0x8B]) && packed($0).count == 4 } && there("skills/gone/SKILL.md") == nil)
-    #expect(HostSync.manifest(listed: try String(contentsOfFile: data + "/synced-files.txt", encoding: .utf8)) == HostSync.manifest(of: home))
-}
-
 @Test func aCallToAHostIsWaitedForByWhatItSendsAndNoLonger() async {
     #expect(HostFiles.patience(sending: 0) == 30 && HostFiles.patience(sending: 5_000_000) == 130)
     #expect(HostFiles.patience(sending: 1 << 40) == GitHost.patience)
@@ -905,17 +697,4 @@ func aRealPageReachesWhatOnlyTheHostServes() throws {
     #expect(late == nil && Date().timeIntervalSince(started) < 2)
     #expect(await HostFiles.within(5) { 2 } == 2)
     #expect(HostFiles.unanswered.status != 0 && !HostFiles.unanswered.error.isEmpty)
-}
-
-@Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_SYNC_TIMING"] == "1"))
-func timingOfWhatASyncReadsHere() throws {
-    let home = URL(fileURLWithPath: String(cString: getpwuid(getuid()).pointee.pw_dir))
-    var clock = Date()
-    func lap(_ what: String) { print("timing: \(what) \(Int(Date().timeIntervalSince(clock) * 1000)) ms"); clock = Date() }
-    let entries = HostSync.entries(in: home); lap("entries \(entries.count)")
-    let listed = HostSync.manifest(of: home); lap("manifest \(listed.count)")
-    _ = HostSync.manifest(of: home); lap("manifest again")
-    let config = try Data(contentsOf: home.appendingPathComponent(".claude.json")); lap("config \(config.count) bytes")
-    _ = HostSync.servers(in: config, pinsFolder: "/x"); lap("servers")
-    _ = HostSync.servers(in: config, pinsFolder: "/x"); lap("servers again")
 }

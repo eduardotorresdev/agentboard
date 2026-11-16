@@ -13,7 +13,7 @@ public enum HostChannel {
     /// What a channel carries: the host's core, a port on the host's loopback, or the host's
     /// list of boards (see "Board identity" in docs/hosts.md).
     public enum Carrying: Sendable {
-        case core, tcp(port: UInt16), boards
+        case core, tcp(port: UInt16), boards, vault
 
         /// What a trusted board says after the host's verdict.
         var text: String {
@@ -21,6 +21,7 @@ public enum HostChannel {
             case .core: "core"
             case .tcp(let port): "tcp:\(port)"
             case .boards: "boards"
+            case .vault: "vault"
             }
         }
     }
@@ -266,7 +267,7 @@ public enum HostChannel {
 
     /// Connects to every one of `addresses` ("address:port") at once and gives the first that
     /// answers within `seconds`, closing the others.
-    static func reach(_ addresses: [String], within seconds: Double = 0.4) -> Int32? {
+    static func reach(_ addresses: [String], within seconds: Double = 1) -> Int32? {
         var pending: [pollfd] = []
         for address in addresses.prefix(8) {
             guard let colon = address.lastIndex(of: ":") else { continue }

@@ -30,6 +30,9 @@ struct AgentBoardApp: App {
             }
         }
         hosts.syncHome = FileManager.default.homeDirectoryForCurrentUser
+        hosts.vaultKeys = .standardVaultKey
+        hosts.vaultState = DataFolder.url.appendingPathComponent("vault.base")
+        hosts.githubLogin = { HostSync.githubLogin() }
         let account = hosts.account
         browsers.makeProxy = { HostProxy(account: account) }
         hosts.prepare?(agents)

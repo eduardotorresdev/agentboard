@@ -113,9 +113,6 @@ private let otherKey = "B" + String(repeating: "A", count: 42) + "="
     // First seen: pinned, connected to, nothing to say.
     #expect(store.pins[builder] == AccountStore.Pin(key: firstKey))
     #expect(store.channel(to: builder)?.key == Data(base64Encoded: firstKey) && !store.identityChanged(builder))
-    #expect(!store.isSyncAllowed(to: builder))
-    store.allowSync(to: builder)
-    #expect(store.isSyncAllowed(to: builder))
 
     // The server now gives another key for it: refused, here and after a relaunch.
     replaced.isOn = true
@@ -123,20 +120,17 @@ private let otherKey = "B" + String(repeating: "A", count: 42) + "="
     store.onHosts = { told += 1 }
     await store.refreshHosts()
     #expect(store.identityChanged(builder) && store.channel(to: builder) == nil && told == 1)
-    #expect(!store.isSyncAllowed(to: builder), "what was allowed was allowed for the old key")
     #expect(store.pins[builder]?.key == firstKey, "never accepted silently")
     let relaunched = AccountStore(server: stub.server, session: stub.session, file: file, vault: vault, database: try Database(url: url))
     await relaunched.refreshHosts()
     #expect(relaunched.identityChanged(builder) && relaunched.channel(to: builder) == nil)
 
-    // Accepted by the user: connected to with the new key, and asked about syncing again.
+    // Accepted by the user: connected to with the new key.
     store.acceptIdentity(of: builder)
     #expect(!store.identityChanged(builder) && store.channel(to: builder)?.key == Data(base64Encoded: otherKey))
-    #expect(!store.isSyncAllowed(to: builder))
     #expect(try Database(url: url).hostPins()[builder]?.key == otherKey)
 
     // Forgotten: gone from the account on the server, with its pin.
-    store.allowSync(to: builder)
     #expect(await store.forgetHost(builder))
     #expect(stub.calls().contains(StubServer.Call(method: "DELETE", path: "/v1/hosts/\(builder.uuidString.lowercased())", authorization: "Bearer secret")))
     #expect(store.pins[builder] == nil && !store.hosts.contains { $0.id == builder })
@@ -155,28 +149,7 @@ private let otherKey = "B" + String(repeating: "A", count: 42) + "="
     #expect(store.pins[builder] != nil && store.hosts.contains { $0.id == builder })
 }
 
-// MARK: The first sync, and the path
-
-@MainActor @Test func theFirstSyncToAHostWaitsForTheUsersWord() async throws {
-    let rig = try await Rig()
-    defer { rig.cleanUp() }
-    rig.hosts.syncHome = rig.folder
-    let store = rig.hosts.store(for: rig.host)
-    try await waitUntil { rig.hosts.syncQuestion == rig.host }
-    #expect(rig.hosts.syncNotes.isEmpty, "nothing went unasked")
-    #expect(!rig.hosts.account.isSyncAllowed(to: rig.host))
-
-    // No: nothing goes, and nothing is remembered.
-    rig.hosts.answerSync(false)
-    #expect(rig.hosts.syncQuestion == nil && rig.hosts.syncNotes.isEmpty && !rig.hosts.account.isSyncAllowed(to: rig.host))
-
-    // Yes (here to a host that can't say where its data is, so nothing is written): it syncs,
-    // and the host is one to sync by itself from then on.
-    try await waitUntil { store.isLoaded }
-    store.hostDataFolder = nil
-    await rig.hosts.sync(rig.host, from: rig.folder)
-    #expect(rig.hosts.syncNotes[rig.host] != nil && rig.hosts.account.isSyncAllowed(to: rig.host))
-}
+// MARK: The path
 
 @MainActor @Test func aRelayedHostMovesToTheDirectPathWhenItOpens() async throws {
     let rig = try await Rig()

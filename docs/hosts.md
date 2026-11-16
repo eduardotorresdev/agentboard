@@ -29,27 +29,26 @@ same gate (`GOAL.md`); the Rust core ships on Linux first.
   videos added here are copied to the host and ones agents make there are fetched when their
   card shows (64 MiB at most each way); Pull in a worktree's menu runs `git pull --ff-only` on
   its host.
-- **Skills and MCP servers** (`HostSync`): "Sync skills" in the account menu copies, from this
-  Mac's default agent home to the host's: `~/.claude/skills`, `commands`, `agents`, the `*.md`
-  instruction files at its top and `plugins` (while under 32 MiB), and the user-scope MCP servers
-  of `~/.claude.json` with their keys (ones whose program is a path on this Mac are skipped). A
-  host with no git identity gets this Mac's `user.name` and `user.email`. Not copied:
+- **Skills, MCP servers and the GitHub login** (`Vault`, `HostSync`): kept in the account's
+  vault (see "The vault") and applied by each host itself. What this Mac contributes, from its
+  default agent home: `~/.claude/skills`, `commands`, `agents`, the `*.md` instruction files at
+  its top and `plugins` (while under 32 MiB); the user-scope MCP servers of `~/.claude.json`
+  with their keys (a global npm command goes as `npx -y <package>`, a uv tool as `uvx` held to
+  the versions it has here through a small `sh` that finds the host's `synced-pins`, a Mac
+  binary stays here); its git identity; and `gh`'s login when `gh` is signed in. Not kept:
   `settings.json` (its hooks run programs of this Mac), project-scoped MCP servers, the other
-  agent programs' own settings (`~/.codex`, `~/.copilot`), logins, transcripts, history.
-  Only what the host doesn't have travels: the host keeps, in its data folder, the list of
-  what the last sync left (`synced-files.txt`, a SHA-256 and a path per line) and a digest of
-  all of it, servers included (`synced.digest`); a sync first reads those in one small
-  request, sends nothing when the digest is this Mac's, and otherwise the new and changed
-  files alone. What is large (a sync's upload, a picture, a file over 256 KB) goes over a
-  second connection to the host, opened for it and closed when idle, so keys and screens never
-  wait behind it; and a request to a host is waited for 30 seconds plus one per 50 KB it
-  sends, then given up on.
-  What an earlier sync put on the host and is gone here is removed there (the lists are
-  `synced-files.txt` and `synced-mcp.json`); what the host had on
-  its own is never removed, and a server it has under the same name is kept. The first sync to
-  a host asks first, saying what goes; after a yes (or a click on "Sync skills") it runs by
-  itself each time the host first answers after launch. A host whose identity key changed is
-  asked about again.
+  agent programs' own settings (`~/.codex`, `~/.copilot`), transcripts, history. The Mac
+  writes when what it has changed (it remembers, sealed in `vault.base` of its data folder,
+  its own entries at the last write, and merges its changes since into what the server
+  holds), then hands each host it reaches the key and runs `agentboard vault pull` there; the
+  host's report becomes its row's note. The first time, one question for the account says
+  what is kept and where it lands; after a yes ("Keep and Sync", or "Sync now" in the account
+  menu) it runs by itself when a host first answers after launch. A host's row opens "MCP
+  servers": what that host ends with and why, and its own commands, additions and omissions
+  ("Per host"). Other computers' additions reach the hosts, not this Mac's home.
+  What is large on a host's connection (a picture, a file over 256 KB) goes over a second
+  connection, opened for it and closed when idle, so keys and screens never wait behind it;
+  and a request to a host is waited for 30 seconds plus one per 50 KB it sends, then given up on.
 - **Whose host it is**: the Mac keeps the identity key each host had when first seen (in its
   database) and holds every channel to that key. When the account server gives another key for
   a host, nothing connects to it: its row in the account menu and its cards say its identity

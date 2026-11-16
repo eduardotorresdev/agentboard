@@ -72,6 +72,9 @@ struct TokenVault: Sendable {
     /// The same place, for this Mac's own key (see "Board identity" in docs/hosts.md).
     static var standardBoardKey: TokenVault { standard("board key", file: "board.key") }
 
+    /// And for the key of the account's vault (see "The vault" in docs/hosts.md).
+    static var standardVaultKey: TokenVault { standard("vault key", file: "vault.key") }
+
     private static func standard(_ what: String, file name: String) -> TokenVault {
         isSignedWithAnIdentity ? keychain(service: "AgentBoard \(what) (\(DataFolder.url.path))") : file(DataFolder.url.appendingPathComponent(name))
     }
@@ -224,6 +227,7 @@ final class AccountStore {
             self.boardVault = boardVault ?? (file == nil ? .standardBoardKey : .memory())
             let saved = read(self.file)
             // A file from before the token moved to the vault: moved once, then gone from the file.
+            vaultAllowed = saved?.vault == true
             if let old = saved?.token, let account = saved?.account, self.vault.write(old) { save(account) }
             account = saved?.account
         }
@@ -244,10 +248,17 @@ final class AccountStore {
     private struct Saved: Codable {
         var token: String?
         var account: Account
+        var vault: Bool?
+    }
+
+    /// Whether the user said yes, for this account, to keeping skills, servers and the GitHub
+    /// login in its vault (asked once: see `HostStores.vaultQuestion`).
+    var vaultAllowed = false {
+        didSet { if vaultAllowed != oldValue, let account { save(account) } }
     }
 
     private func save(_ account: Account) {
-        guard let data = try? JSONEncoder().encode(Saved(token: nil, account: account)) else { return }
+        guard let data = try? JSONEncoder().encode(Saved(token: nil, account: account, vault: vaultAllowed ? true : nil)) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
         try? FileManager.default.removeItem(at: file)
@@ -364,6 +375,7 @@ final class AccountStore {
         refreshing = nil
         token = nil
         account = nil
+        vaultAllowed = false
         hosts = []
         _ = vault.write(nil)
         try? FileManager.default.removeItem(at: file)
@@ -442,15 +454,6 @@ final class AccountStore {
         guard let known = hosts.first(where: { $0.id == host }) else { return }
         pin(host, to: Pin(key: known.publicKey))
         onHosts?()
-    }
-
-    /// Whether the user allowed syncing to `host`, as it is pinned.
-    func isSyncAllowed(to host: UUID) -> Bool { pins[host]?.syncAllowed == true && !identityChanged(host) }
-
-    func allowSync(to host: UUID) {
-        guard var pin = pins[host], !identityChanged(host) else { return }
-        pin.syncAllowed = true
-        self.pin(host, to: pin)
     }
 
     private func pin(_ host: UUID, to pin: Pin?) {

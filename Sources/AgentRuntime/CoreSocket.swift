@@ -177,11 +177,18 @@ final class CoreSocket: @unchecked Sendable {
             return !closed
         }
         guard wasOpen else { return }
-        reader?.cancel()
+        // Closed only once both sources let go of it: cancelling is not immediate, and a
+        // descriptor closed under a source still registered brings libdispatch down
+        // (`_dispatch_bug_kevent_vanished`), whatever made the connection end.
+        let released = DispatchGroup(), fd = fd
+        for source in [reader as DispatchSourceProtocol?, writer].compactMap({ $0 }) {
+            released.enter()
+            source.setCancelHandler { released.leave() }
+            source.cancel()
+        }
         reader = nil
-        writer?.cancel()
         writer = nil
-        Darwin.close(fd)
+        released.notify(queue: queue) { Darwin.close(fd) }
         let onClose = onClose
         self.onClose = nil
         onFrame = nil
