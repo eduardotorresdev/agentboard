@@ -1,10 +1,11 @@
 import AppKit
 import Metal
+import MetalPerformanceShaders
 import QuartzCore
 import SwiftUI
 
-/// The board's backdrop: a painted sky with drifting clouds, generated in Metal at a fraction of
-/// the screen's resolution a few times a second.
+/// The board's backdrop: a painted sky with drifting clouds behind frosted glass, generated in
+/// Metal at a fraction of the screen's resolution and blurred there, so the window never blurs it.
 /// It stays fixed while the board pans and zooms, like a painting hung behind the cards.
 struct SkyCanvas: NSViewRepresentable {
     func makeNSView(context: Context) -> SkyView {
@@ -21,10 +22,13 @@ struct SkyCanvas: NSViewRepresentable {
 }
 
 final class SkyView: NSView {
-    /// Sky pixels per point: the clouds are soft, so a quarter of the pixels of a 1x screen is enough.
-    static let skyScale: CGFloat = 0.5
-    /// Clouds move a few points a minute, so a handful of frames a second reads as continuous.
-    private static let framesPerSecond: Double = 8
+    /// Sky pixels per point. Few on purpose: behind the frost nothing finer would show, and a
+    /// frame costs a sixteenth of a 1x screen's pixels.
+    static let skyScale: CGFloat = 0.25
+    /// Enough for the drift to read as fluid; a frame is cheap at this size.
+    private static let framesPerSecond: Double = 15
+    /// The frost between the painting and the cards: a blur's sigma, in points.
+    static let frost: CGFloat = 10
     /// With Reduce Motion the clouds still drift, this many times slower, one frame every few seconds.
     private static let reducedMotionSlowdown: Double = 8
 
@@ -37,6 +41,9 @@ final class SkyView: NSView {
     /// on the main thread: encode into `commands` to read `texture`, e.g. to blur it behind a card.
     var onSkyFrame: ((_ texture: MTLTexture, _ commands: MTLCommandBuffer) -> Void)?
     private var timer: Timer?
+    /// The sky as painted, before the frost.
+    private var painted: MTLTexture?
+    private lazy var blur = device.map { Self.frosting($0, sigma: Float(Self.frost * Self.skyScale)) }
     /// Seconds of sky time, advanced more slowly under Reduce Motion.
     private var skyTime: Double = 0
     private var lastTick = CACurrentMediaTime()
@@ -89,7 +96,8 @@ final class SkyView: NSView {
         let timer = Timer(timeInterval: 1 / Self.framesPerSecond, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
-        timer.tolerance = 0.05
+        // Tight, or frames bunch up and the drift stutters.
+        timer.tolerance = 0.25 / Self.framesPerSecond
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         tick()
@@ -140,9 +148,15 @@ final class SkyView: NSView {
     private func draw(_ target: CAMetalLayer, pipeline: MTLRenderPipelineState?, pixels: CGSize, pointsPerPixel: CGFloat, time: Float = 0) {
         let pixels = CGSize(width: max(1, pixels.width.rounded()), height: max(1, pixels.height.rounded()))
         if target.drawableSize != pixels { target.drawableSize = pixels }
-        guard let pipeline, let queue, let drawable = target.nextDrawable(), let commands = queue.makeCommandBuffer() else { return }
+        if painted?.width != Int(pixels.width) || painted?.height != Int(pixels.height) {
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: Int(pixels.width), height: Int(pixels.height), mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .private
+            painted = device?.makeTexture(descriptor: descriptor)
+        }
+        guard let pipeline, let queue, let painted, let blur, let drawable = target.nextDrawable(), let commands = queue.makeCommandBuffer() else { return }
         let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].texture = painted
         pass.colorAttachments[0].loadAction = .dontCare
         pass.colorAttachments[0].storeAction = .store
         guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return }
@@ -151,9 +165,17 @@ final class SkyView: NSView {
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         encoder.endEncoding()
+        blur.encode(commandBuffer: commands, sourceTexture: painted, destinationTexture: drawable.texture)
         if target === sky { onSkyFrame?(drawable.texture, commands) }
         commands.present(drawable)
         commands.commit()
+    }
+
+    /// The frost's blur. Clamped: past the edge it repeats the sky, where black would shade the border.
+    private static func frosting(_ device: MTLDevice, sigma: Float) -> MPSImageGaussianBlur {
+        let blur = MPSImageGaussianBlur(device: device, sigma: sigma)
+        blur.edgeMode = .clamp
+        return blur
     }
 
     /// The backdrop as the app shows it, for screenshots: window captures (`cacheDisplay`,
@@ -169,9 +191,9 @@ final class SkyView: NSView {
               let library = try? device.makeLibrary(source: source, options: nil), let commands = queue.makeCommandBuffer() else { return nil }
         let width = Int(size.width * scale), height = Int(size.height * scale)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: false)
-        descriptor.usage = .renderTarget
+        descriptor.usage = [.renderTarget, .shaderRead, .shaderWrite]
         descriptor.storageMode = .shared
-        guard width > 0, height > 0, let texture = device.makeTexture(descriptor: descriptor) else { return nil }
+        guard width > 0, height > 0, let texture = device.makeTexture(descriptor: descriptor), let frosted = device.makeTexture(descriptor: descriptor) else { return nil }
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = texture
         pass.colorAttachments[0].loadAction = .clear
@@ -195,10 +217,11 @@ final class SkyView: NSView {
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         }
         encoder.endEncoding()
+        frosting(device, sigma: Float(frost * scale)).encode(commandBuffer: commands, sourceTexture: texture, destinationTexture: frosted)
         commands.commit()
         commands.waitUntilCompleted()
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        texture.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        frosted.getBytes(&bytes, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
         guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
         return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
@@ -260,7 +283,7 @@ final class SkyView: NSView {
     // Tone laid in a few flat washes with soft seams, as watercolour dries in layers.
     static float washes(float x) {
         float f = saturate(x) * 3, i = floor(f);
-        return (i + smoothstep(0.3, 0.7, f - i)) / 3;
+        return (i + smoothstep(0.1, 0.9, f - i)) / 3;
     }
 
     // One bank of clouds painted over `color`: a firm edge where the bank faces the light (up),
@@ -271,7 +294,7 @@ final class SkyView: NSView {
         float n = fbm(q, 3) + (0.3 - billow(q * 2.2, 3)) * 0.3;
         float3 above = q - float3(0.03, 0.09, 0) * scale;
         float lit = n - fbm(above, 3) - (0.3 - billow(above * 2.2, 3)) * 0.3;
-        float edge = mix(0.16, 0.045, smoothstep(-0.02, 0.04, lit));
+        float edge = mix(0.2, 0.1, smoothstep(-0.02, 0.04, lit));
         float tone = 0.55 + lit * 16 - (n - threshold) * 1.4 + marks;
         float3 body = mix(shade, top, washes(smoothstep(0.15, 0.85, tone)));
         float cover = smoothstep(threshold, threshold + edge, n);
@@ -300,7 +323,7 @@ final class SkyView: NSView {
         // Every sample is dragged along the brush (fine bristles plus broad dabs), so edges
         // feather into strokes instead of fuzz.
         float2 dir = strokeDirection(p, t);
-        float2 bp = p + dir * (bristles(p, dir, 11) * 0.028 + bristles(p * 0.3, dir, 3) * 0.035);
+        float2 bp = p + dir * (bristles(p, dir, 11) * 0.012 + bristles(p * 0.3, dir, 3) * 0.035);
 
         // Composition, with wandering borders: open sky in the upper left, a bluer band at the bottom.
         float wander = noise(float3(p * 0.9, t * 0.007 + 3)) - 0.5;
@@ -335,10 +358,12 @@ final class SkyView: NSView {
         // The deepest tones stay where the painting keeps them: the opening and the bottom.
         float depth = 0.3 + 0.7 * max(open, low);
         float blue = saturate(1 - (color.r - 0.6) * 2.8);
-        color = mix(color, pigment, smoothstep(0.03, 0.12, pool) * 0.6 * blue * depth);
+        color = mix(color, pigment, smoothstep(0.0, 0.16, pool) * 0.6 * blue * depth);
         // Here and there a second, darker layer of the same pigment.
-        color = mix(color, pigment * float3(0.84, 0.91, 0.95), smoothstep(0.13, 0.19, pool) * 0.5 * blue * depth);
-        color = mix(color, pale, smoothstep(0.05, 0.14, -pool) * 0.3 * blue);
+        color = mix(color, pigment * float3(0.84, 0.91, 0.95), smoothstep(0.1, 0.22, pool) * 0.5 * blue * depth);
+        color = mix(color, pale, smoothstep(0.02, 0.18, -pool) * 0.3 * blue);
+        // The glass's own white, so the painting sits back behind the cards.
+        color = mix(color, float3(1.0), 0.25);
         return float4(saturate(color), 1);
     }
     """

@@ -328,8 +328,8 @@ final class SkyBlur: @unchecked Sendable {
                 guard let target = device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0) else { return nil }
                 return (surface, target)
             }
-            // Sigma in sky pixels (two points each): soft enough to read as frosted glass.
-            blur = MPSImageGaussianBlur(device: device, sigma: 6)
+            // Sigma in sky pixels (four points each), over a sky that is already frosted.
+            blur = MPSImageGaussianBlur(device: device, sigma: 3)
             blur?.edgeMode = .clamp
         }
         guard surfaces.count == 2, let blur else { return }

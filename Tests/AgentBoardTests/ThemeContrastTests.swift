@@ -27,10 +27,10 @@ final class ThemeContrastTests: XCTestCase {
         }
     }
 
-    /// Sidebar text over its translucent backdrop, with the darkest sky behind it: the sky
-    /// shader's greener blue under a second layer of pigment, where it pools along the bottom.
+    /// Sidebar text over its translucent backdrop, with the darkest sky behind it: the darkest
+    /// pixel of the frosted sky over a sweep of its frames (the greener blue pooled along the bottom).
     func testSidebarTextOverTheBlurredSky() {
-        let darkestSky: UInt32 = 0x5EA2BF
+        let darkestSky: UInt32 = 0x94C4D7
         func over(_ top: UInt32, _ bottom: UInt32, _ alpha: Double) -> UInt32 {
             [16, 8, 0].reduce(0) { hex, shift in
                 let a = Double(top >> UInt32(shift) & 0xFF), b = Double(bottom >> UInt32(shift) & 0xFF)

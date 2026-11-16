@@ -377,10 +377,11 @@ private struct WorktreeRow: View {
 /// slate one, so the sidebar reads as its own layer even over a white cloud. No border, no
 /// shadow. Text stays AA over the darkest sky (see ThemeContrastTests).
 struct SidebarBackdrop: View {
-    /// How much white covers the blurred sky: enough for muted text over the sky's deepest blue.
-    static let tint = 0.85
+    /// How much white covers the blurred sky: the least that keeps muted text AA over the sky's
+    /// deepest blue, so the sky still shows through.
+    static let tint = 0.65
     /// The slate (ink) tint over that, which sets the sidebar apart.
-    static let shade = 0.05
+    static let shade = 0.03
 
     var body: some View {
         Rectangle()
