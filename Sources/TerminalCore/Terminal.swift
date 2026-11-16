@@ -68,7 +68,7 @@ public final class Terminal: VTHandler {
     @exclusivity(unchecked) public internal(set) var title = ""
     @exclusivity(unchecked) public internal(set) var workingDirectory: String?
     /// Colors reported to programs that ask (OSC 10/11), as 0xRRGGBB.
-    @exclusivity(unchecked) public var reportedForeground: UInt32 = 0x26213A
+    @exclusivity(unchecked) public var reportedForeground: UInt32 = 0x14233D
     @exclusivity(unchecked) public var reportedBackground: UInt32 = 0xFFFFFF
     /// Bumped on screen switches, resizes and resets: renderers must re-read every row.
     @exclusivity(unchecked) public internal(set) var layoutVersion = 0

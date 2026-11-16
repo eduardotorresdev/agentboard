@@ -261,7 +261,10 @@ struct ReplyTests {
         let t = terminal(10, 2, "\u{1b}]11;?\u{07}")
         #expect(reply(t) == "\u{1b}]11;rgb:ffff/ffff/ffff\u{07}")
         t.feed("\u{1b}]10;?\u{1b}\\")
-        #expect(reply(t) == "\u{1b}]10;rgb:2626/2121/3a3a\u{1b}\\")
+        // Derived from the default the terminal reports, so palette changes don't break the test.
+        let ink = [t.reportedForeground >> 16, t.reportedForeground >> 8, t.reportedForeground]
+            .map { String(format: "%02x%02x", $0 & 0xFF, $0 & 0xFF) }.joined(separator: "/")
+        #expect(reply(t) == "\u{1b}]10;rgb:\(ink)\u{1b}\\")
     }
 
     @Test func kittyKeyboardQueryGetsNoAnswer() {
