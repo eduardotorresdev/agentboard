@@ -395,6 +395,15 @@ fn sign_in_github(token: &str, home: &Path, path: &str) -> bool {
     crate::setup::on_path("gh", path)
         && succeeds(run("gh", &["auth", "login", "--hostname", "github.com", "--with-token"], Some(token), home, path))
         && succeeds(run("gh", &["auth", "setup-git"], None, home, path))
+        && use_https_for_github(home, path)
+}
+
+/// `gh auth setup-git` only answers for HTTPS, and a host has no SSH key: send GitHub's SSH
+/// remotes (`git@github.com:`, `ssh://git@github.com/`) over HTTPS too, idempotently.
+fn use_https_for_github(home: &Path, path: &str) -> bool {
+    [("git@github.com:", r"^git@github\.com:$"), ("ssh://git@github.com/", r"^ssh://git@github\.com/$")].iter().all(|(from, pattern)| {
+        succeeds(run("git", &["config", "--global", "--replace-all", "url.https://github.com/.insteadOf", from, pattern], None, home, path))
+    })
 }
 
 /// The vault's git identity, for what the host has none of.

@@ -333,7 +333,7 @@ copying from a Mac to each host.
   stays; made when absent, written aside, 0600; left alone if it is a link or not JSON),
   writes the pins, signs `gh` in with the token
   (`gh auth login --hostname github.com --with-token`, the token on stdin, then
-  `gh auth setup-git`, when `gh` is on the PATH: `~/.local/bin` first, then the system's) and
+  `gh auth setup-git`, plus `url.https://github.com/.insteadOf` for GitHub's SSH remotes, when `gh` is on the PATH: `~/.local/bin` first, then the system's) and
   sets `user.name` and `user.email` in the global git config when they are unset. `files`
   counts the files written this time, `removed` the ones removed, `github` whether `gh` took
   the token. `agentboard vault status` says which version is applied and whether the key is
