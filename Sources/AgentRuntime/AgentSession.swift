@@ -82,7 +82,7 @@ public final class AgentSession {
 
     public init(cols: Int, rows: Int) {
         terminal = Terminal(cols: cols, rows: rows, scrollback: 5000)
-        terminal.reportedForeground = 0x26213A
+        terminal.reportedForeground = 0x14233D
         terminal.reportedBackground = 0xFFFFFF
         pty = PseudoTerminal(queue: queue)
         pty.minimumReadInterval = Self.hiddenReadInterval

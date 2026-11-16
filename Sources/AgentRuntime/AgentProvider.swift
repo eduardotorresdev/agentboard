@@ -8,13 +8,25 @@ public protocol AgentProvider: Sendable {
     var id: String { get }
     /// Name on the card and in the Add Agent menu.
     var title: String { get }
+    /// One line under the name in the Add Agent menu, saying what picking it gets.
+    var subtitle: String { get }
     /// Command looked up in the user's PATH.
     var executable: String { get }
+    /// Shell command that installs `executable`, shown on the card when it is missing.
+    var installCommand: String? { get }
+    /// The agent's brand color (sRGB hex) for its mark on the card; nil draws it in ink.
+    var brandColor: UInt32? { get }
     /// Arguments that start the conversation bound to `session`, or resume it if it exists, with
     /// the board's tools available through `tools` when given.
     func arguments(session: UUID, tools: ToolServerLink?) -> [String]
     /// Adjusts the environment inherited from the app.
     func environment(_ base: [String: String]) -> [String: String]
+}
+
+public extension AgentProvider {
+    var subtitle: String { "" }
+    var installCommand: String? { nil }
+    var brandColor: UInt32? { nil }
 }
 
 /// Where an agent reaches the board's tools: an MCP server over HTTP, and the token that
@@ -33,10 +45,26 @@ public struct ToolServerLink: Sendable {
 
 /// The agents the app knows about. Adding one means adding a provider here.
 public enum AgentCatalog {
-    public static let all: [any AgentProvider] = [ClaudeCode()]
+    public static let all: [any AgentProvider] = [ClaudeCode(), Codex()]
 
     public static func provider(id: String) -> (any AgentProvider)? {
         all.first { $0.id == id }
+    }
+
+    /// Where agent CLIs usually land, for when the login shell's PATH misses them.
+    public static func fallbackDirectories(home: String = NSHomeDirectory()) -> [String] {
+        ["/opt/homebrew/bin", "/usr/local/bin", "\(home)/.local/bin", "\(home)/.npm-global/bin",
+         "\(home)/.volta/bin", "\(home)/.bun/bin", "\(home)/.claude/local"]
+    }
+
+    /// The executable's path: as given when absolute, else the first match in `searchPath`
+    /// and then in `fallbacks`. Nil when it isn't installed.
+    public static func locate(_ name: String, in searchPath: String,
+                              fallbacks: [String] = fallbackDirectories()) -> String? {
+        if name.hasPrefix("/") { return FileManager.default.isExecutableFile(atPath: name) ? name : nil }
+        return (searchPath.split(separator: ":").map(String.init) + fallbacks)
+            .map { "\($0)/\(name)" }
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 }
 
@@ -44,7 +72,11 @@ public enum AgentCatalog {
 public struct ClaudeCode: AgentProvider {
     public let id = "claude"
     public let title = "Claude"
+    /// The orange of Claude's mark.
+    public let brandColor: UInt32? = 0xD97757
+    public let subtitle = "Anthropic's Claude Code"
     public let executable = "claude"
+    public let installCommand: String? = "curl -fsSL https://claude.ai/install.sh | bash"
 
     public init() {}
 
@@ -131,6 +163,63 @@ public struct ClaudeCode: AgentProvider {
         let name = id + ".jsonl"
         let folders = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         return folders.contains { FileManager.default.fileExists(atPath: root.appendingPathComponent($0).appendingPathComponent(name).path) }
+    }
+}
+
+/// OpenAI's Codex CLI. Its config is overridden per launch (`-c`), never in ~/.codex/config.toml.
+public struct Codex: AgentProvider {
+    public let id = "codex"
+    public let title = "Codex"
+    public let subtitle = "OpenAI's Codex CLI"
+    public let executable = "codex"
+    public let installCommand: String? = "npm install -g @openai/codex"
+
+    public init() {}
+
+    public func environment(_ base: [String: String]) -> [String: String] { base }
+
+    public func arguments(session: UUID, tools: ToolServerLink?) -> [String] {
+        // Agents run unattended on the board: they never stop to ask for a permission.
+        var arguments = ["--dangerously-bypass-approvals-and-sandbox"]
+        if let tools {
+            let server = "mcp_servers.\(tools.name)"
+            arguments += ["-c", "\(server).url=\(Self.toml(tools.url.absoluteString))",
+                          "-c", "\(server).http_headers={Authorization=\(Self.toml("Bearer \(tools.token)"))}",
+                          "-c", "notify=\(Self.notify(tools))"]
+        }
+        // Codex picks its own thread ids; the first turn's notify reports it (as `session_id`)
+        // and the card keeps it as its conversation, so later launches resume it.
+        let id = session.uuidString.lowercased()
+        return Self.conversationExists(id) ? ["resume"] + arguments + [id] : arguments
+    }
+
+    /// Codex's `notify` program gets its payload as the last argument, keys in kebab-case; this
+    /// renames the fields the board reads to Claude Code's hook names and posts it as an
+    /// attention hook. Codex only notifies the end of a turn.
+    private static func notify(_ tools: ToolServerLink) -> String {
+        let url = tools.url.absoluteString + "/attention"
+        let script = #"printf '%s' "$1" | sed -e 's/"type":"agent-turn-complete"/"hook_event_name":"Stop"/' "#
+            + #"-e 's/"thread-id"/"session_id"/' -e 's/"last-assistant-message"/"last_assistant_message"/' "#
+            + "| curl -s -m 3 -o /dev/null -X POST -H 'Authorization: Bearer \(tools.token)' --data-binary @- '\(url)'"
+        return "[" + ["sh", "-c", script, "sh"].map(toml).joined(separator: ",") + "]"
+    }
+
+    /// A TOML basic string (JSON's escaping is valid TOML).
+    private static func toml(_ value: String) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: [value], options: [.withoutEscapingSlashes])
+        return String(String(decoding: data, as: UTF8.self).dropFirst().dropLast())
+    }
+
+    /// Codex keeps each thread in $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl.
+    static func conversationExists(_ id: String) -> Bool {
+        let home = ProcessInfo.processInfo.environment["CODEX_HOME"]
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
+        let suffix = "-\(id).jsonl"
+        let files = FileManager.default.enumerator(atPath: home + "/sessions")
+        while let file = files?.nextObject() as? String {
+            if file.hasSuffix(suffix) { return true }
+        }
+        return false
     }
 }
 
