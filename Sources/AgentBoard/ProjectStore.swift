@@ -16,6 +16,8 @@ final class ProjectStore {
     private(set) var worktrees: [Project.ID: [Worktree]] = [:]
     /// User-given names for worktrees, keyed by worktree path.
     private(set) var aliases: [String: String] = [:]
+    /// Titles agents gave worktrees (see `WorktreeTitle`), keyed by worktree path.
+    private(set) var agentTitles: [String: String] = [:]
     var errorMessage: String?
 
     let database: Database?
@@ -54,16 +56,26 @@ final class ProjectStore {
         perform { try $0.deleteProject(id: project.id) }
     }
 
-    /// The worktree's alias, or its folder name when it has none.
+    /// The user's name for the worktree, else an agent's title, else its folder made readable.
     func displayName(of worktree: Worktree) -> String {
-        aliases[worktree.path] ?? worktree.name
+        WorktreeTitle.resolve(user: aliases[worktree.path], agent: agentTitles[worktree.path], folder: worktree.name)
     }
 
-    /// Renames a worktree inside the app only; an empty name goes back to the folder name.
+    /// Names a worktree inside the app only. The name is the user's: agents can't replace it.
+    /// An empty name hands the title back to agents; an unchanged one changes nothing.
+    /// Also the hook for a name typed when creating the worktree.
     func rename(_ worktree: Worktree, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let alias = trimmed.isEmpty || trimmed == worktree.name ? nil : trimmed
-        perform { try $0.setAlias(alias, path: worktree.path) }
+        guard trimmed != displayName(of: worktree) || trimmed.isEmpty else { return }
+        perform { try $0.setAlias(WorktreeTitle.clean(trimmed), path: worktree.path) }
+    }
+
+    /// An agent's title for the worktree at `path`. Returns the user's name instead when they
+    /// gave one, which the agent's never replaces.
+    func setAgentTitle(_ title: String, path: String) -> (applied: Bool, shown: String) {
+        if let user = aliases[path] { return (false, user) }
+        perform { try $0.setWorktreeTitle(title, path: path) }
+        return (true, title)
     }
 
     /// Whether the worktree is the repository's own checkout, which can't be removed.
@@ -109,6 +121,7 @@ final class ProjectStore {
             if !organizations.contains(where: { $0.id == organizationID }) { organizationID = OrganizationHome.defaultID }
             projects = try database.projects(in: organizationID)
             aliases = try database.aliases()
+            agentTitles = try database.worktreeTitles()
             worktrees = projects.reduce(into: [:]) { $0[$1.id] = Git.worktrees(at: $1.path) }
         } catch {
             errorMessage = "\(error)"

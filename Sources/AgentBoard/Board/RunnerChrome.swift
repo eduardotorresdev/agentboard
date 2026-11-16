@@ -90,8 +90,8 @@ final class RunnerChromeLayer: CALayer {
     override init() {
         super.init()
         for hover in [toggleHover, restartHover] {
-            hover.cornerRadius = CardMetrics.closeSize / 2
-            hover.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.12)
+            hover.cornerRadius = Theme.Radius.control
+            hover.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.1)
             hover.isHidden = true
         }
         for icon in [toggleIcon, restartIcon] { icon.contentsGravity = .center }
@@ -142,7 +142,7 @@ final class RunnerChromeLayer: CALayer {
 
         while chips.count < layout.chips.count {
             let background = CALayer()
-            background.cornerRadius = RunnerChromeLayout.chipHeight / 2
+            background.cornerRadius = Theme.Radius.control
             let label = CATextLayer()
             label.font = RunnerChromeLayout.chipFont
             label.fontSize = RunnerChromeLayout.chipFont.pointSize
@@ -157,17 +157,18 @@ final class RunnerChromeLayer: CALayer {
         for (chip, item) in zip(chips, layout.chips) {
             let lit = hovered == .link(item.link.url)
             chip.background.frame = item.rect
-            // Localhost is the main address (violet); the network one is secondary (orange).
+            // Localhost is the main address (sky blue); the network one is secondary (yellow).
             let tint = item.link.network ? BoardPalette.secondary : BoardPalette.accent
-            chip.background.backgroundColor = BoardPalette.rgb(tint, lit ? 0.2 : 0.1)
+            chip.background.backgroundColor = BoardPalette.rgb(tint, lit ? 0.45 : 0.22)
             chip.label.string = item.link.label + " ↗"
-            chip.label.foregroundColor = BoardPalette.rgb(tint)
+            // Yellow text doesn't read on paper: the network chip writes in ink.
+            chip.label.foregroundColor = BoardPalette.rgb(item.link.network ? BoardPalette.ink : tint)
             chip.label.frame = CGRect(x: 0, y: (item.rect.height - line) / 2, width: item.rect.width, height: line)
         }
 
         let metricsLine = ceil(RunnerChromeLayout.metricsFont.ascender - RunnerChromeLayout.metricsFont.descender)
         metrics.string = status.text
-        metrics.foregroundColor = status.attention ? BoardPalette.rgb(BoardPalette.secondary) : BoardPalette.rgb(BoardPalette.ink, 0.55)
+        metrics.foregroundColor = status.attention ? BoardPalette.rgb(Theme.Hex.danger) : BoardPalette.rgb(BoardPalette.ink, 0.6)
         let width = RunnerChromeLayout.width(of: status.text, font: RunnerChromeLayout.metricsFont) + 4
         metrics.frame = CGRect(x: layout.strip.maxX - width, y: layout.strip.midY - metricsLine / 2 - 2, width: width, height: metricsLine)
     }
@@ -182,8 +183,8 @@ final class RunnerChromeLayer: CALayer {
         let key = "\(symbol)-\(hovered)-\(scale)"
         guard iconKey[layer] != key else { return }
         iconKey[layer] = key
-        let color = NSColor(cgColor: BoardPalette.rgb(BoardPalette.ink, hovered ? 0.8 : 0.45)) ?? .secondaryLabelColor
-        let configuration = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        let color = NSColor(cgColor: BoardPalette.rgb(BoardPalette.ink, hovered ? 0.9 : 0.6)) ?? .secondaryLabelColor
+        let configuration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
             .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration)
         layer.contentsScale = scale

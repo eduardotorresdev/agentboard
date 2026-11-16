@@ -23,7 +23,7 @@ final class BrowserRelay: ToolProvider {
 
     private static let browserArgument: [String: Any] = [
         "type": "string",
-        "description": "Which connected browser, by name. Needed only when several are connected.",
+        "description": "Which connected browser, by name or id (as list_peers shows it). Needed only when several are connected.",
     ]
     private static let targetArgument: [String: Any] = [
         "type": "string",

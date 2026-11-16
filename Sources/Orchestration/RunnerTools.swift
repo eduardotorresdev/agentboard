@@ -24,7 +24,7 @@ final class RunnerTools: ToolProvider {
 
     private static let runnerArgument: [String: Any] = [
         "type": "string",
-        "description": "Which connected runner, by name. Needed only when several are connected.",
+        "description": "Which connected runner, by name or id (as list_peers shows it). Needed only when several are connected.",
     ]
     private static let waitArguments: [String: Any] = [
         "wait": ["type": "boolean", "description": "Wait until it listens on a port (or exits) before answering. True by default; false for commands that serve nothing, such as watchers."],
@@ -244,7 +244,7 @@ final class RunnerTools: ToolProvider {
             return .failure(Refusal(text: "No runner is connected to you. Start one with runner_start."))
         }
         if let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            if let found = runners.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
+            if let found = runners.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame || $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
             return .failure(Refusal(text: "No runner named “\(name)” is connected to you. Connected: \(runners.map(\.name).joined(separator: ", "))."))
         }
         guard runners.count == 1, let only = runners.first else {

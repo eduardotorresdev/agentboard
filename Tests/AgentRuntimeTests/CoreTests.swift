@@ -219,6 +219,7 @@ struct CoreTests {
         defer { unlink(path) }
         let id = UUID()
         let first = try #require(CoreClient.connect(socketPath: path, launching: binary, timeout: 5))
+        defer { CoreClient.connect(socketPath: path, timeout: 1)?.shutdown() }
         let session = AgentSession(cols: 40, rows: 6)
         session.host(on: first, id: id)
         session.start(shell)

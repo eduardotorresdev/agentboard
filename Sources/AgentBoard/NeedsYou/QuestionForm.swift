@@ -75,7 +75,7 @@ struct QuestionForm: View {
     private var progress: some View {
         HStack(spacing: 6) {
             ForEach(questions.indices, id: \.self) { index in
-                Capsule()
+                RoundedRectangle(cornerRadius: Theme.Radius.control)
                     .fill(index == step || isAnswered(index) ? Theme.accent : Theme.line.opacity(0.15))
                     .frame(width: index == step ? 22 : 8, height: 4)
             }
@@ -113,7 +113,7 @@ struct QuestionForm: View {
                         .foregroundStyle(Theme.accent)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Theme.accent.opacity(0.1), in: .capsule)
+                        .background(Theme.accent.opacity(0.1), in: .rect(cornerRadius: Theme.Radius.control))
                 }
                 Text(question.question)
                     .font(.system(size: 14, weight: .semibold))
@@ -230,8 +230,8 @@ private struct OptionRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(isOn ? Theme.accent.opacity(0.09) : Theme.line.opacity(isHovered ? 0.04 : 0), in: .rect(cornerRadius: 10))
-            .contentShape(.rect(cornerRadius: 10))
+            .background(isOn ? Theme.accent.opacity(0.09) : Theme.line.opacity(isHovered ? 0.04 : 0), in: .rect(cornerRadius: Theme.Radius.card))
+            .contentShape(.rect(cornerRadius: Theme.Radius.card))
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

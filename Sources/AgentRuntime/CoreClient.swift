@@ -19,6 +19,12 @@ public final class CoreClient: @unchecked Sendable {
 
     /// Called on the main queue if the core goes away.
     public var onDisconnect: (() -> Void)?
+    private var _onStatus: ((UUID, SessionStatus) -> Void)?
+    /// Called on the client's queue with every session status the core sends.
+    public var onStatus: ((UUID, SessionStatus) -> Void)? {
+        get { lock.withLock { _onStatus } }
+        set { lock.withLock { _onStatus = newValue } }
+    }
 
     /// Whether `session` mirrors one of this core's.
     public func mirrors(_ session: AgentSession, id: UUID) -> Bool { lock.withLock { mirrors[id]?.session === session } }
@@ -119,7 +125,8 @@ public final class CoreClient: @unchecked Sendable {
         return true
     }
 
-    /// Sessions the core had when this board connected, by id.
+    /// Every session's last status: those the core had when this board connected, and any it
+    /// reported since.
     public var known: [UUID: SessionStatus] { lock.withLock { _known } }
 
     public var isConnected: Bool { lock.withLock { _connected } }
@@ -198,8 +205,12 @@ public final class CoreClient: @unchecked Sendable {
                 }
                 welcomed.signal()
             case .status(let id, let status):
-                lock.withLock { if _known[id] != nil { _known[id] = status } }
+                let notify = lock.withLock { () -> ((UUID, SessionStatus) -> Void)? in
+                    _known[id] = status
+                    return _onStatus
+                }
                 mirror(id)?.coreStatus(status)
+                notify?(id, status)
             }
         case .data:
             guard let id = UUID(bytes: payload), let session = mirror(id) else { return }

@@ -111,7 +111,7 @@ private struct ScriptSelect: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 24)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(Color.primary.opacity(0.06)))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -161,7 +161,7 @@ private struct ScriptRow: View {
             }
             .padding(.horizontal, 10)
             .frame(height: height)
-            .background(RoundedRectangle(cornerRadius: 6).fill(fill))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.control).fill(fill))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

@@ -45,11 +45,14 @@
 /* New Worktree dialog */
 "New Worktree" = "Nova worktree";
 "Branch" = "Branch";
-"Git doesn't accept this as a branch name." = "O git não aceita isso como nome de branch.";
-"%@ already exists. Pick another branch name." = "%@ já existe. Escolha outro nome de branch.";
-"Checks out the existing branch." = "Usa a branch que já existe.";
-"Starts a new branch from %@." = "Cria uma branch nova a partir de %@.";
-"Starts a new branch from the current commit." = "Cria uma branch nova a partir do commit atual.";
+"Fix the login redirect" = "Corrigir o redirecionamento do login";
+"Use at least one letter or number." = "Use ao menos uma letra ou número.";
+"This name can't be used for a branch. Try other words." = "Esse nome não serve para uma branch. Tente outras palavras.";
+"%@ already exists. Pick another name." = "%@ já existe. Escolha outro nome.";
+"Continues the existing branch %@." = "Continua a branch %@, que já existe.";
+"Starts %@ from %@." = "Começa %@ a partir de %@.";
+"Starts %@ from the current commit." = "Começa %@ a partir do commit atual.";
+"Couldn't add %@ to the list." = "Não foi possível adicionar %@ à lista.";
 "Detached HEAD" = "HEAD destacado";
 "Select a worktree" = "Selecione uma worktree";
 "Pick a worktree in the sidebar to open it on the canvas." = "Escolha uma worktree na barra lateral para abri-la no canvas.";
@@ -190,6 +193,8 @@
 "Organization %@" = "Organização %@";
 "Edit Organization…" = "Editar organização…";
 "%@ — hold to edit" = "%@ — segure para editar";
+"Organization" = "Organização";
+"Edit %@…" = "Editar %@…";
 "Color" = "Cor";
 "Choose Image…" = "Escolher imagem…";
 "Use Initial" = "Usar inicial";
@@ -303,3 +308,12 @@
 "%@ couldn't be read." = "Não foi possível ler %@.";
 "Couldn't add the image" = "Não foi possível adicionar a imagem";
 "Couldn't add %lld images" = "Não foi possível adicionar %lld imagens";
+
+"Sends the text to the agent as your prompt." = "Envia o texto ao agente como seu prompt.";
+"Prompt" = "Prompt";
+
+/* Sidebar card states */
+"Waiting for you" = "Esperando você";
+"Crashed" = "Falhou";
+"Our sky is still empty" = "Nosso céu ainda está vazio";
+"Add your first agent or card from the bar below." = "Adicione seu primeiro agente ou card pela barra abaixo.";

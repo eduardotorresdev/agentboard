@@ -5,7 +5,7 @@ import SwiftUI
 enum WelcomeStyle {
     /// "Start something epic." in ink.
     case monument
-    /// "What's the next big thing?" in violet.
+    /// "What's the next big thing?" in the accent.
     case horizon
     /// "From zero to epic." in ink, left-aligned.
     case launch
@@ -114,7 +114,7 @@ private struct StartCard: View {
                     .foregroundStyle(option.tint)
                     .symbolEffect(option.bounce, options: .speed(0.8), value: pulse)
                     .frame(width: 64, height: 64)
-                    .background(option.tint.opacity(0.12), in: .rect(cornerRadius: 18))
+                    .background(option.tint.opacity(0.12), in: .rect(cornerRadius: Theme.Radius.dialog))
                     .scaleEffect(isHovered ? 1.08 : 1)
                     .rotationEffect(.degrees(isHovered ? -4 : 0))
                 .padding(.bottom, 20)
@@ -128,7 +128,7 @@ private struct StartCard: View {
             }
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(Theme.surface, in: .rect(cornerRadius: 18))
+            .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.dialog))
             .shadow(color: Theme.line.opacity(isHovered ? 0.14 : 0.07), radius: isHovered ? 22 : 14, y: isHovered ? 10 : 4)
             .offset(y: isHovered ? -3 : 0)
             .contentShape(.rect)
@@ -140,7 +140,7 @@ private struct StartCard: View {
     }
 }
 
-/// Ambient light: soft violet and orange lights wandering across the whole canvas.
+/// Ambient light: soft sky blue and yellow lights wandering across the whole canvas.
 /// Ambient effects must always move; a static bloom reads as a stain.
 /// Each light retargets a slow spring to a new random spot before the last one settles,
 /// so the motion never stops.

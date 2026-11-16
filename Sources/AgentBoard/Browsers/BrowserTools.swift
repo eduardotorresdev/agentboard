@@ -89,7 +89,7 @@ final class BrowserTools {
             return .failure(Refusal(text: "No browser is connected to you. Add one with browser_open, or ask the user to connect one by drawing a line between your card and a browser card."))
         }
         if let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            if let found = browsers.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
+            if let found = browsers.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame || $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
             return .failure(Refusal(text: "No browser named “\(name)” is connected to you. Connected: \(browsers.map(\.name).joined(separator: ", "))."))
         }
         guard browsers.count == 1, let only = browsers.first else {

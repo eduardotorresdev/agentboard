@@ -1,3 +1,4 @@
+import AgentRuntime
 import SwiftUI
 
 /// Projects and their worktrees, in a panel floating over the canvas. The canvas shows through
@@ -8,29 +9,42 @@ struct Sidebar: View {
     let browsers: BrowserStore
     @Binding var selection: WorktreeSelection?
     @Binding var renaming: Worktree?
-    @State private var collapsed: Set<Project.ID> = []
+    /// Folded projects, kept across launches as comma-separated ids.
+    @AppStorage("sidebar.collapsedProjects") private var collapsedIDs = ""
     @State private var pendingRemoval: PendingRemoval?
     /// The project a worktree is being added to.
     @State private var addingWorktreeTo: Project?
+    /// The core's session statuses, for the marks; see `refreshStatuses`.
+    @State private var statuses: [UUID: SessionStatus] = [:]
     @Namespace private var selectionSpace
 
     static let width: CGFloat = 264
 
+    private var collapsed: Set<Project.ID> {
+        get { Set(collapsedIDs.split(separator: ",").compactMap { Int64($0) }) }
+        nonmutating set { collapsedIDs = newValue.sorted().map(String.init).joined(separator: ",") }
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                ForEach(store.projects) { project in
-                    group(for: project)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    ForEach(store.projects) { project in
+                        group(for: project)
+                    }
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 16)
             }
-            // The same gap on both sides, so headers and chips sit evenly inside the panel.
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
+            .scrollIndicators(.never)
+            // Fixed below the projects: it doesn't scroll with them.
+            SidebarFooter(organization: store.organizationID,
+                          project: selection.flatMap { s in store.projects.first { $0.id == s.projectID }?.path })
         }
-        .scrollIndicators(.never)
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
         .background { SidebarBackdrop() }
+        .task { await refreshStatuses() }
         .confirmationDialog(pendingRemoval.map { L("Remove \(store.displayName(of: $0.worktree))?") } ?? "",
                             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
                             presenting: pendingRemoval) { removal in
@@ -53,6 +67,16 @@ struct Sidebar: View {
         }
     }
 
+    /// shortcut: polls the core's statuses once a second, since sessions don't publish them to
+    /// the main thread while off screen; upgrade if the core gains an observed status feed.
+    private func refreshStatuses() async {
+        while !Task.isCancelled {
+            let known = agents.core?.known ?? [:]
+            if known != statuses { statuses = known }
+            try? await Task.sleep(for: .seconds(1))
+        }
+    }
+
     /// Removes right away when nothing would be lost; otherwise asks first.
     private func requestRemoval(of worktree: Worktree, in project: Project) {
         let removal = PendingRemoval(worktree: worktree, project: project, work: Git.pendingWork(at: worktree.path))
@@ -67,7 +91,7 @@ struct Sidebar: View {
     private func group(for project: Project) -> some View {
         let isCollapsed = collapsed.contains(project.id)
         let worktrees = store.worktrees[project.id]
-        return VStack(alignment: .leading, spacing: 2) {
+        return VStack(alignment: .leading, spacing: 6) {
             ProjectHeader(name: project.name, count: worktrees?.count, isCollapsed: isCollapsed,
                           onAddWorktree: worktrees == nil ? nil : { addingWorktreeTo = project }) {
                 withAnimation(.snappy(duration: 0.28)) {
@@ -88,11 +112,11 @@ struct Sidebar: View {
                             row(for: worktree, in: project)
                         }
                     } else {
-                        Label(L("Not a git repository"), systemImage: "exclamationmark.triangle")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
+                        Text(L("Not a git repository"))
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.inkMuted)
                             .padding(.vertical, 6)
-                            .padding(.leading, ProjectHeader.contentInset)
+                            .padding(.leading, WorktreeRow.textInset)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -103,10 +127,11 @@ struct Sidebar: View {
 
     private func row(for worktree: Worktree, in project: Project) -> some View {
         let tag = WorktreeSelection(projectID: project.id, worktree: worktree)
-        return WorktreeRow(worktree: worktree, name: store.displayName(of: worktree), contents: contents(of: worktree),
+        return WorktreeRow(name: store.displayName(of: worktree), contents: contents(of: worktree),
                            isSelected: selection == tag, isRenaming: renaming == worktree,
                            selectionSpace: selectionSpace,
                            onSelect: { withAnimation(.snappy(duration: 0.3)) { selection = tag } },
+                           onStartRename: { renaming = worktree },
                            onRename: { name in
                                store.rename(worktree, to: name)
                                renaming = nil
@@ -120,13 +145,16 @@ struct Sidebar: View {
             }
     }
 
-    /// What is on the worktree's canvas, and whether any of it is at work.
+    /// What is on the worktree's canvas, each kind at its most pressing status.
     private func contents(of worktree: Worktree) -> WorktreeContents {
         let cards = agents.agents(in: worktree.path)
-        let runners = cards.filter { $0.runner != nil }
-        return WorktreeContents(hasAgents: cards.contains { $0.runner == nil }, hasRunners: !runners.isEmpty,
-                                runnerRunning: runners.contains { agents.runningRunners.contains($0.id) },
-                                hasBrowsers: !browsers.browsers(in: worktree.path).isEmpty)
+        let waiting = Set(agents.attention.map(\.id))
+        return WorktreeContents(
+            agents: cards.filter { $0.runner == nil }
+                .map { CardStatus.agent(statuses[$0.id], waiting: waiting.contains($0.id)) }.max(),
+            runners: cards.filter { $0.runner != nil }
+                .map { CardStatus.runner(statuses[$0.id], running: agents.runningRunners.contains($0.id)) }.max(),
+            hasBrowsers: !browsers.browsers(in: worktree.path).isEmpty)
     }
 }
 
@@ -144,7 +172,7 @@ private struct PendingRemoval {
     }
 }
 
-/// A project's name over its worktrees; clicking it folds them away.
+/// A project's name over its worktrees, after its tile; clicking folds them away.
 private struct ProjectHeader: View {
     let name: String
     /// Worktrees in the project, nil when it isn't a git repository.
@@ -155,136 +183,125 @@ private struct ProjectHeader: View {
     let onToggle: () -> Void
     @State private var isHovered = false
 
-    private static let badgeSize: CGFloat = 22
-    private static let spacing: CGFloat = 9
-    private static let padding: CGFloat = 6
-    /// Where the text after the badge starts, so worktrees line up under the name.
-    static let contentInset = padding + badgeSize + spacing
-
     var body: some View {
-        HStack(spacing: 2) {
-            toggle
+        HStack(spacing: 6) {
+            Button(action: onToggle) {
+                HStack(spacing: 9) {
+                    ProjectTile(name: name)
+                    Text(name)
+                        .font(Theme.Font.heading)
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    if let count, isCollapsed, !isHovered {
+                        Text(count, format: .number)
+                            .font(Theme.Font.caption.monospacedDigit())
+                            .foregroundStyle(Theme.inkMuted)
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.inkMuted)
+                        .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+                        .opacity(isHovered || isCollapsed ? 1 : 0)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(name)
+            .accessibilityValue(isCollapsed ? L("Collapsed") : L("Expanded"))
             if let onAddWorktree, isHovered {
                 Button(action: onAddWorktree) {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
+                        .foregroundStyle(Theme.inkMuted)
+                        .frame(width: 18, height: 18)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .help(L("New Worktree…"))
                 .accessibilityLabel(L("New Worktree…"))
-                .transition(.opacity)
             }
         }
-        .padding(.trailing, isHovered && onAddWorktree != nil ? 4 : 0)
-        .background(.black.opacity(isHovered ? 0.045 : 0), in: .rect(cornerRadius: 9, style: .continuous))
+        .padding(.horizontal, 8)
+        .frame(height: 30)
         .onHover { isHovered = $0 }
         .animation(.snappy(duration: 0.2), value: isHovered)
     }
+}
 
-    private var toggle: some View {
-        Button(action: onToggle) {
-            HStack(spacing: Self.spacing) {
-                Text(monogram)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: Self.badgeSize, height: Self.badgeSize)
-                    .background(Theme.accent.opacity(0.13), in: .rect(cornerRadius: 6, style: .continuous))
-                Text(name)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 4)
-                if let count, isCollapsed || isHovered {
-                    Text(count, format: .number)
-                        .font(.system(size: 11, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .transition(.opacity)
-                }
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isCollapsed ? -90 : 0))
-                    .opacity(isHovered || isCollapsed ? 1 : 0)
-            }
-            .padding(.horizontal, Self.padding)
-            .frame(height: 32)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(name)
-        .accessibilityValue(isCollapsed ? L("Collapsed") : L("Expanded"))
+/// A project's mark: its initial on a small square tile, in a color that stays the same for the
+/// same name.
+struct ProjectTile: View {
+    let name: String
+    static let size: CGFloat = 20
+
+    /// Theme colors that carry white text; no green, teal or flat yellow.
+    private static let palette: [Color] = [Theme.accent, Theme.ink, Theme.inkMuted, Theme.danger]
+
+    /// Stable across launches, unlike `hashValue`.
+    static func colorIndex(for name: String) -> Int {
+        Int(name.unicodeScalars.reduce(UInt32(5381)) { ($0 &* 33) &+ $1.value } % UInt32(palette.count))
     }
 
-    /// The first letter or digit of the name, as the project's mark.
-    private var monogram: String {
-        name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "•"
+    var body: some View {
+        Text(name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "•")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .foregroundStyle(Theme.onAccent)
+            .frame(width: Self.size, height: Self.size)
+            .background(Self.palette[Self.colorIndex(for: name)], in: .rect(cornerRadius: Theme.Radius.thumb))
+            .accessibilityHidden(true)
     }
 }
 
-/// A worktree: its name (alias or folder), and the branch underneath when it says something
-/// the name doesn't. The open one sits on a raised white chip.
+/// A worktree: its title, text only, bold when it needs the user, with a small dot on the right
+/// while something runs or waits. Double-click renames.
 private struct WorktreeRow: View {
-    let worktree: Worktree
     let name: String
     let contents: WorktreeContents
     let isSelected: Bool
     let isRenaming: Bool
     let selectionSpace: Namespace.ID
     let onSelect: () -> Void
+    let onStartRename: () -> Void
     let onRename: (String) -> Void
     @State private var isHovered = false
     @State private var draft = ""
     @FocusState private var fieldFocused: Bool
 
+    /// Where the title starts, under the project's name.
+    static let textInset: CGFloat = 8 + ProjectTile.size + 9
+
+    private var status: CardStatus? { [contents.agents, contents.runners].compactMap { $0 }.max() }
+    private var needsUser: Bool { status == .waiting || status == .crashed }
+
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Group {
-                if contents.isEmpty {
-                    Image(systemName: worktree.branch == nil ? "circle.dashed" : "arrow.triangle.branch")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(isSelected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
-                } else {
-                    WorktreeGlyph(contents: contents, isSelected: isSelected)
-                        .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 }
-                }
-            }
-            .frame(width: 14)
-            VStack(alignment: .leading, spacing: 2) {
-                title
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
+        HStack(spacing: 8) {
+            title
             Spacer(minLength: 0)
+            CardStatusDot(status: status ?? .stopped)
+                .help(status?.label ?? "")
         }
-        .padding(.vertical, 7)
-        // Lines the name up with the project's name; the chip itself spans the full row.
-        .padding(.leading, ProjectHeader.contentInset - 14 - 8)
-        .padding(.trailing, 8)
+        .padding(.leading, Self.textInset)
+        .padding(.trailing, 12)
+        .frame(height: 32)
         .background { background }
         .contentShape(.rect)
+        .onTapGesture(count: 2, perform: onStartRename)
         .onTapGesture(perform: onSelect)
         .onHover { isHovered = $0 }
         .animation(.snappy(duration: 0.2), value: isHovered)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(status?.label ?? "")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, onSelect)
     }
 
     @ViewBuilder private var title: some View {
         if isRenaming {
-            TextField(L("Name"), text: $draft, prompt: Text(worktree.name))
+            TextField(L("Name"), text: $draft, prompt: Text(name))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .medium))
+                .font(Theme.Font.body)
                 .focused($fieldFocused)
                 .onAppear {
                     draft = name
@@ -295,40 +312,88 @@ private struct WorktreeRow: View {
                 .onChange(of: fieldFocused) { _, focused in if !focused { onRename(draft) } }
         } else {
             Text(name)
-                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.82)))
+                .font(Theme.Font.body.weight(needsUser ? .bold : isSelected ? .medium : .regular))
+                .foregroundStyle(needsUser || isSelected ? Theme.ink : Theme.ink.opacity(0.82))
                 .lineLimit(1)
-                .truncationMode(.middle)
+                .truncationMode(.tail)
         }
     }
 
-    /// The branch, unless it reads the same as the name.
-    private var subtitle: String? {
-        guard let branch = worktree.branch else { return L("Detached HEAD") }
-        return branch == name ? nil : branch
-    }
-
     @ViewBuilder private var background: some View {
-        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control)
         if isSelected {
-            shape
-                .fill(Theme.surface)
-                .shadow(color: Theme.line.opacity(0.10), radius: 6, y: 2)
+            shape.fill(Theme.ink.opacity(0.08))
                 .matchedGeometryEffect(id: "selection", in: selectionSpace)
         } else {
-            shape.fill(.black.opacity(isHovered ? 0.045 : 0))
+            shape.fill(Theme.ink.opacity(isHovered ? 0.04 : 0))
         }
     }
 }
 
-/// The canvas blurred behind the sidebar, tinted a step darker than the canvas so the panel
-/// reads as its own surface without a border. A plain material, not Liquid Glass, whose rim
-/// would outline the edge. A soft shadow falls on the canvas past the trailing edge.
-private struct SidebarBackdrop: View {
+/// Fixed at the bottom of the sidebar: what the agents can use, each opening its inventory.
+private struct SidebarFooter: View {
+    let organization: UUID
+    let project: String?
+    @State private var open: InventoryPanel.Kind?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            item(.skills, symbol: "sparkles")
+            item(.mcps, symbol: "server.rack")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+    }
+
+    private func item(_ kind: InventoryPanel.Kind, symbol: String) -> some View {
+        SidebarFooterItem(title: kind.title, symbol: symbol, isOpen: open == kind) { open = kind }
+            .help(kind.help)
+            .popover(isPresented: Binding(get: { open == kind }, set: { if !$0 { open = nil } }), arrowEdge: .trailing) {
+                InventoryPanel(kind: kind, organization: organization, project: project)
+            }
+    }
+}
+
+private struct SidebarFooterItem: View {
+    let title: String
+    let symbol: String
+    let isOpen: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.inkMuted)
+                    .frame(width: 14)
+                Text(title)
+                    .font(Theme.Font.body)
+                    .foregroundStyle(Theme.ink.opacity(0.82))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 32)
+            .background(Theme.ink.opacity(isOpen ? 0.08 : isHovered ? 0.04 : 0), in: .rect(cornerRadius: Theme.Radius.control))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.snappy(duration: 0.2), value: isHovered)
+    }
+}
+
+/// A very light layer over the canvas: the sky and its squares blurred, under a faint paper
+/// tint that keeps text AA over the darkest sky (see ThemeContrastTests).
+struct SidebarBackdrop: View {
+    /// How much paper covers the blurred sky.
+    static let tint = 0.35
+
     var body: some View {
         Rectangle()
             .fill(.ultraThinMaterial)
-            .overlay(Theme.line.opacity(0.07))
+            .overlay(Theme.surface.opacity(Self.tint))
             .shadow(color: Theme.line.opacity(0.08), radius: 16, x: 4)
             .ignoresSafeArea()
     }

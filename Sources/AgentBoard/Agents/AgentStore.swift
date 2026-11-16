@@ -76,6 +76,8 @@ final class AgentStore {
             if running != runningRunners { runningRunners = running }
         }
     }
+    /// Each card's last session status as the core reported it; the sidebar reads it.
+    private(set) var statuses: [UUID: SessionStatus] = [:]
     /// The runners running now. Observed, unlike the report, whose stats change every second.
     private(set) var runningRunners: Set<UUID> = []
     /// Runners to start when their session is created; the others come back stopped.
@@ -161,6 +163,10 @@ final class AgentStore {
         connections = state.connections
         runnerReport = state.runners
         isLoaded = true
+        statuses = client.known
+        client.onStatus = { [weak self] id, status in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.statuses[id] = status } }
+        }
         client.send(.elements(elements()))
         for (id, session) in sessions {
             guard let record = record(id) else {
@@ -224,7 +230,7 @@ final class AgentStore {
         case .toolCall(let call, let name, let arguments, let caller):
             let parsed = (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]
             Task {
-                let result: ToolResult? = name.hasPrefix("project_")
+                let result: ToolResult? = name.hasPrefix("project_") || name.hasPrefix("worktree_")
                     ? await projectTools?.call(name, arguments: parsed, caller: caller)
                     : await browserTools?.call(name, arguments: parsed, caller: caller)
                 link.send(.toolResult(call: call, result: WireToolResult(result

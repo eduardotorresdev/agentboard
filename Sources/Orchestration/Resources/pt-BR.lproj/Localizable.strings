@@ -4,3 +4,4 @@
 "Unknown agent “%@”." = "Agente desconhecido “%@”.";
 "This folder no longer exists on disk." = "Esta pasta não existe mais no disco.";
 "restarted" = "reiniciado";
+"%@ is not installed. Install it in a terminal with “%@”, then click this card." = "%@ não está instalado. Instale num terminal com “%@” e depois clique neste card.";

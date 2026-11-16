@@ -12,7 +12,7 @@ struct WorktreeCanvas: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Theme.canvas
+            SkyCanvas()
             Board(store: agents, browsers: browsers, fileTrees: fileTrees, worktree: worktree.path, controller: board)
             if let notice {
                 EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
@@ -21,32 +21,48 @@ struct WorktreeCanvas: View {
                     .allowsHitTesting(false)
                     .transition(.opacity)
             } else if isEmpty {
-                EmptyCanvas(
-                    symbol: "terminal",
-                    title: L("No agents yet"),
-                    message: L("Add an agent from the bar below. It starts in this worktree's folder.")
-                ) { EmptyView() }
+                SkyBotEmptyState()
                 .padding(.leading, board.leadingInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(false)
                 .transition(.opacity)
             }
-            CanvasToolbar(board: board)
-                .padding(.bottom, 16)
-                .padding(.leading, board.leadingInset)
+            // One row, so the side groups give way to the centered tools instead of overlapping them.
+            HStack(alignment: .bottom, spacing: 12) {
+                // Narrow windows drop the usage first, then scroll the tools: nothing overlaps.
+                ViewThatFits(in: .horizontal) {
+                    if !board.isZen {
+                        ClaudeUsageToolbar(organization: agents.organizationID)
+                            .transition(.opacity)
+                    }
+                    Color.clear.frame(width: 0, height: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                ViewThatFits(in: .horizontal) {
+                    CanvasToolbar(board: board)
+                    ScrollView(.horizontal, showsIndicators: false) { CanvasToolbar(board: board) }
+                }
+                .layoutPriority(1)
+                VStack(alignment: .trailing, spacing: 8) {
+                    AppUsage()
+                    NavigationToolbar(board: board)
+                }
+                // Never squeezed below its size, or the zoom bar slides under the centered tools.
+                .fixedSize()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.bottom, 16)
+            .padding(.leading, board.leadingInset + 16)
+            .padding(.trailing, 16)
+            .frame(maxHeight: .infinity, alignment: .bottom)
             if !board.isZen {
-                ClaudeUsageToolbar(organization: agents.organizationID)
-                    .padding(.bottom, 16)
+                BranchBadge(branch: worktree.branch)
+                    .padding(.top, 14)
                     .padding(.leading, board.leadingInset + 16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
                     .transition(.opacity)
             }
-            VStack(alignment: .trailing, spacing: 8) {
-                AppUsage()
-                NavigationToolbar(board: board)
-            }
-            .padding([.bottom, .trailing], 16)
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .animation(.smooth(duration: 0.3), value: isEmpty)
         .animation(.snappy(duration: 0.32), value: board.isZen)
@@ -109,11 +125,11 @@ private struct CanvasToolbar: View {
                 .fixedSize()
                 .accessibilityLabel(L("Add post-it"))
                 .help(L("A new post-it in markdown: you and every agent connected to it read and write it."))
-            Button { board.addImages() } label: { Image(systemName: "photo") }
+            addMedia
                 .buttonStyle(ToolbarButtonStyle(icon: true))
                 .fixedSize()
-                .accessibilityLabel(L("Add image"))
-                .help(L("Puts pictures from your files on the board; agents connected to one see it."))
+                .accessibilityLabel(L("Add media"))
+                .help(L("Puts pictures or videos from your files on the board; agents connected to one see it."))
             Button { board.addFileTree() } label: { Image(systemName: "folder") }
                 .buttonStyle(ToolbarButtonStyle(icon: true))
                 .fixedSize()
@@ -122,7 +138,7 @@ private struct CanvasToolbar: View {
         }
         .font(.system(size: 18, weight: .medium))
         .padding(5)
-        .modifier(GlassCapsule())
+        .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
     }
 
     /// A browser emulates one screen; the menu says what each gives.
@@ -149,6 +165,22 @@ private struct CanvasToolbar: View {
         .menuIndicator(.hidden)
     }
 
+    /// Pictures and videos are different cards; the menu says what each gives.
+    private var addMedia: some View {
+        Menu {
+            Button { board.addImages() } label: {
+                Text(L("Image"))
+                Text(L("A picture from your files; connected agents see its pixels."))
+            }
+            Button { board.addVideos() } label: {
+                Text(L("Video"))
+                Text(L("An MP4, MOV or M4V clip that plays on the card, muted until you turn the sound on."))
+            }
+        } label: { Image(systemName: "photo.on.rectangle") }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+    }
+
     private var addRunner: some View {
         Button { board.addingRunner = true } label: { Image(systemName: "play.circle") }
     }
@@ -162,7 +194,10 @@ private struct CanvasToolbar: View {
         } else {
             Menu {
                 ForEach(AgentCatalog.all, id: \.id) { provider in
-                    Button(provider.title) { board.add(provider) }
+                    Button { board.add(provider) } label: {
+                        Text(provider.title)
+                        Text(provider.subtitle)
+                    }
                 }
             } label: { icon }
             .menuStyle(.button)
@@ -208,7 +243,7 @@ private struct NavigationToolbar: View {
         }
         .font(.callout.weight(.medium))
         .padding(4)
-        .modifier(GlassCapsule())
+        .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
     }
 
     @ViewBuilder private var zoomControls: some View {
@@ -250,14 +285,15 @@ private struct NavigationToolbar: View {
 }
 
 /// Liquid Glass where the system has it, a translucent material before that.
-private struct GlassCapsule: ViewModifier {
+private struct GlassRoundedRectangle: ViewModifier {
+    var cornerRadius = Theme.Radius.control
+
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
-            content.glassEffect(.regular, in: .capsule)
+            content.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
         } else {
             content
-                .background(.regularMaterial, in: .capsule)
-                .shadow(color: Theme.line.opacity(0.10), radius: 12, y: 4)
+                .background(.regularMaterial, in: .rect(cornerRadius: cornerRadius))
         }
     }
 }
@@ -299,7 +335,7 @@ private struct AppUsage: View {
                 .foregroundStyle(Theme.line.opacity(0.5))
                 .padding(.horizontal, 10)
                 .frame(height: 24)
-                .modifier(GlassCapsule())
+                .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
                 .help(L("CPU and memory the board uses, without its agents."))
                 .transition(.opacity)
             }
@@ -344,7 +380,7 @@ private struct ClaudeUsageToolbar: View {
                 }
                 .font(.callout.weight(.medium))
                 .padding(4)
-                .modifier(GlassCapsule())
+                .modifier(GlassRoundedRectangle(cornerRadius: Theme.Radius.canvasToolbar))
                 .transition(.opacity)
             }
         }

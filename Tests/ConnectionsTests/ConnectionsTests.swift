@@ -398,4 +398,21 @@ struct BoardListingTests {
         #expect(text.contains("- Far (postit, id: \(far.id.uuidString), connected: false"))
         #expect(!text.contains("Elsewhere") && !text.contains("- Me "))
     }
+
+    /// Two organizations on one worktree don't see each other's elements; a browser (no
+    /// organization) is seen from both.
+    @Test func organizationsOnOneWorktreeStayApart() {
+        final class Thing: BoardElement {
+            let id = UUID()
+            let name: String
+            let kind = ElementKind.agent
+            let board: String?
+            init(_ name: String, _ board: String) { self.name = name; self.board = board }
+        }
+        let bus = MessageBus()
+        let (a, b, page) = (Thing("A", "w\u{0}org1"), Thing("B", "w\u{0}org2"), Thing("Page", "w"))
+        [a, b, page].forEach(bus.register)
+        #expect(bus.elements(onBoardOf: a.id).map(\.name) == ["A", "Page"])
+        #expect(bus.elements(onBoardOf: page.id).map(\.name) == ["A", "B", "Page"])
+    }
 }

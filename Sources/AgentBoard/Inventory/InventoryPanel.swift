@@ -68,7 +68,7 @@ struct InventoryPanel: View {
                         if !row.secrets.isEmpty {
                             Text(row.secrets).font(Theme.Font.label.monospaced()).foregroundStyle(Theme.onSecondary)
                                 .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Theme.cream, in: .rect(cornerRadius: Theme.Radius.control))
+                                .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.control))
                         }
                         Text(row.source).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted).lineLimit(1).truncationMode(.middle)
                     }

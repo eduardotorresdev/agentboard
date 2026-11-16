@@ -94,7 +94,7 @@ struct ImageTests {
         #expect(inbox.events.contains { if case .imageAdded(let added) = $0 { added.id == record.id } else { false } })
 
         let peers = try await call("list_peers", as: a.id, on: core)
-        #expect(peers.text.contains("Image (image, 800×400"), "\(peers.text)")
+        #expect(peers.text.contains("Image (image, id: \(record.id.uuidString), connected: true, 800×400"), "\(peers.text)")
 
         // `~` resolves too.
         let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".abtest-\(UUID().uuidString.prefix(8)).png")

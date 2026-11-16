@@ -67,6 +67,17 @@ enum Theme {
         static let card: CGFloat = 8
         /// Dialogs and sheets.
         static let dialog: CGFloat = 10
+        /// The floating canvas toolbars (add bar, zoom bar): fully round, the one exception.
+        /// Larger than half their height, so the ends render as a capsule.
+        static let canvasToolbar: CGFloat = 40
+    }
+
+    /// Board elements separate from the sky by fill and contrast, not shadow. Where an element
+    /// truly needs separation, at most this one short, discreet shadow.
+    enum Shadow {
+        static let opacity: Float = 0.12
+        static let radius: CGFloat = 2
+        static let y: CGFloat = 1
     }
 
     // MARK: Type

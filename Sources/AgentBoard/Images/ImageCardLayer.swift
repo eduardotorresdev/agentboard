@@ -13,14 +13,15 @@ struct ImageCardLayout {
         let height = ImageRecord.titleHeight
         close = CGRect(x: size.width - CardMetrics.inset - CardMetrics.closeSize + 4, y: (height - CardMetrics.closeSize) / 2,
                        width: CardMetrics.closeSize, height: CardMetrics.closeSize)
-        title = CGRect(x: CardMetrics.inset + 2, y: height / 2 - 9, width: max(0, close.minX - CardMetrics.inset - 10), height: 18)
+        title = CGRect(x: CardFrame.titleX, y: height / 2 - 10, width: max(0, close.minX - CardFrame.titleX - 8), height: 20)
         picture = CGRect(x: 0, y: height, width: size.width, height: max(0, size.height - height))
     }
 }
 
 /// One image card: a title bar with its name and close control, the picture below it.
 final class ImageCardLayer: CALayer {
-    private let title = CATextLayer()
+    private let bar = CardTitleBar()
+    private var focused = false
     private let closeHover = CALayer()
     private let closeGlyph = CATextLayer()
     private let picture = CALayer()
@@ -28,28 +29,18 @@ final class ImageCardLayer: CALayer {
     private var handlesVisible = false
     private var hoveredHandle: Int?
     private var shownFile: String?
+    /// The player, for a video card.
+    private(set) var video: VideoPlayback?
 
     override init() {
         super.init()
-        backgroundColor = BoardPalette.card
-        cornerRadius = CardMetrics.radius
-        shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        closeHover.cornerRadius = CardMetrics.closeSize / 2
-        closeHover.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.08)
-        for layer in [title, closeGlyph] {
-            layer.fontSize = 12
-            layer.truncationMode = .end
-        }
-        title.font = PostItCardLayout.titleFont
-        closeGlyph.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        closeGlyph.string = "✕"
-        closeGlyph.alignmentMode = .center
         picture.contentsGravity = .resize
         picture.masksToBounds = true
         picture.cornerRadius = CardMetrics.radius
         picture.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         picture.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.05)
-        [title, closeHover, closeGlyph, picture].forEach(addSublayer)
+        [bar, closeHover, closeGlyph, picture].forEach(addSublayer)
+        CardFrame.reveal([closeGlyph], visible: false)
         for handle in handles {
             handle.bounds = CGRect(x: 0, y: 0, width: CardMetrics.handleSize, height: CardMetrics.handleSize)
             handle.cornerRadius = CardMetrics.handleSize / 2
@@ -72,27 +63,27 @@ final class ImageCardLayer: CALayer {
     /// The picture as last loaded, for copying.
     var image: CGImage? { picture.contents.map { $0 as! CGImage } }
 
-    @MainActor func update(frame: CGRect, record: ImageRecord, dataFolder: URL, focused: Bool, closeHovered: Bool, renaming: Bool, scale: CGFloat) {
+    @MainActor func update(frame: CGRect, record: ImageRecord, dataFolder: URL, focused: Bool, closeHovered: Bool, renaming: Bool, scale: CGFloat, visible: Bool = true) {
         self.frame = frame
         let layout = ImageCardLayout(size: frame.size)
-        shadowPath = CGPath(roundedRect: bounds, cornerWidth: CardMetrics.radius, cornerHeight: CardMetrics.radius, transform: nil)
-        shadowOpacity = focused ? 0.16 : 0.08
-        shadowRadius = focused ? 14 : 8
-        shadowOffset = CGSize(width: 0, height: focused ? 12 : 5)
-        for layer in [title, closeGlyph] { layer.contentsScale = scale }
-
-        let ink = BoardPalette.ink
-        let line = PostItCardLayout.lineHeight(PostItCardLayout.titleFont) + 2
-        title.string = record.name
-        title.isHidden = renaming
-        title.foregroundColor = BoardPalette.rgb(ink, focused ? 0.9 : 0.6)
-        title.frame = CGRect(x: layout.title.minX, y: layout.title.midY - line / 2, width: layout.title.width, height: line)
-        closeHover.frame = layout.close
-        closeHover.isHidden = !closeHovered
-        closeGlyph.foregroundColor = BoardPalette.rgb(ink, closeHovered ? 0.8 : 0.4)
-        closeGlyph.frame = CGRect(x: layout.close.minX, y: layout.close.midY - line / 2, width: layout.close.width, height: line)
+        self.focused = focused
+        CardFrame.style(self, focused: focused)
+        // While renaming, a field covers the name.
+        bar.update(size: bounds.size, height: ImageRecord.titleHeight, icon: .symbol(record.isVideo ? "film" : "photo", color: Theme.Hex.inkMuted), status: nil, title: renaming ? "" : record.name,
+                   detail: nil, focused: focused, reserve: bounds.width - layout.title.maxX, scale: scale)
+        CardFrame.closeButton(closeHover, closeGlyph, in: layout.close, hovered: closeHovered, scale: scale)
         picture.frame = layout.picture
 
+        if record.isVideo {
+            let video = video ?? {
+                let made = VideoPlayback()
+                addSublayer(made.layer)
+                self.video = made
+                return made
+            }()
+            video.update(picture: layout.picture, record: record, dataFolder: dataFolder, visible: visible, scale: scale)
+            return
+        }
         if shownFile != record.file {
             // The old picture is gone with its file.
             if let old = shownFile { Self.cache[old] = nil }
@@ -113,6 +104,7 @@ final class ImageCardLayer: CALayer {
 
     /// Its card is gone: the picture leaves the cache.
     @MainActor func forget() {
+        video?.invalidate()
         if let shownFile { Self.cache[shownFile] = nil }
         shownFile = nil
     }
@@ -159,14 +151,9 @@ final class ImageCardLayer: CALayer {
             }
             hoveredHandle = hovered
         }
-        if linkTarget {
-            shadowColor = BoardPalette.rgb(BoardPalette.accent)
-            shadowOpacity = 0.45
-            shadowRadius = 18
-            shadowOffset = .zero
-        } else {
-            shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        }
+        // A line's target lights up with the highlighted ring, like focus.
+        CardFrame.style(self, focused: focused || linkTarget)
+        CardFrame.reveal([closeGlyph], visible: visible || focused)
     }
 
     func animateAppearance() {

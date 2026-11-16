@@ -4,7 +4,6 @@ import QuartzCore
 /// Where a browser card's controls sit, in the card's own coordinates (or the board's, given
 /// the card's frame): shared by the layer that draws them and the board that hit-tests them.
 struct BrowserCardLayout {
-    let dot: CGRect
     let title: CGRect
     /// The device chip, which opens the menu that changes it.
     let device: CGRect
@@ -16,9 +15,9 @@ struct BrowserCardLayout {
     let content: CGRect
 
     static let button: CGFloat = 22
-    static let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    static let titleFont = CardFrame.titleFont
     static let addressFont = NSFont.systemFont(ofSize: 12)
-    static let chipFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    static let chipFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
 
     /// What the device chip says: the preset it follows, or the size of a custom one.
     static func chipLabel(_ device: BrowserDevice) -> String {
@@ -28,17 +27,16 @@ struct BrowserCardLayout {
 
     init(frame: CGRect, record: BrowserRecord) {
         let mid = frame.minY + CardMetrics.titleHeight / 2
-        dot = CGRect(x: frame.minX + CardMetrics.inset + 2, y: mid - 3.5, width: 7, height: 7)
-        let width = min(140, ceil((record.name as NSString).size(withAttributes: [.font: Self.titleFont]).width) + 2)
-        title = CGRect(x: dot.maxX + 8, y: mid - 9, width: width, height: 18)
+        let width = min(140, CardFrame.width(of: record.name, font: Self.titleFont) + 2)
+        title = CGRect(x: frame.minX + CardFrame.titleX, y: mid - 10, width: width, height: 20)
         let chip = ceil((Self.chipLabel(record.device) as NSString).size(withAttributes: [.font: Self.chipFont]).width) + 16
-        device = CGRect(x: title.maxX + 6, y: mid - 10, width: min(150, chip), height: 20)
+        device = CGRect(x: title.maxX + 8, y: mid - 11, width: min(150, chip), height: 22)
         let size = Self.button
         back = CGRect(x: device.maxX + 6, y: mid - size / 2, width: size, height: size)
         forward = back.offsetBy(dx: size + 2, dy: 0)
         reload = forward.offsetBy(dx: size + 2, dy: 0)
         close = CardMetrics.close(of: frame)
-        address = CGRect(x: reload.maxX + 8, y: mid - 11, width: max(0, close.minX - reload.maxX - 16), height: 22)
+        address = CGRect(x: reload.maxX + 8, y: mid - 12, width: max(0, close.minX - reload.maxX - 16), height: 24)
         content = CardMetrics.content(of: frame)
     }
 }
@@ -46,8 +44,9 @@ struct BrowserCardLayout {
 /// One browser card: chrome as Core Animation layers and the page itself, shown by hosting the
 /// layers WebKit draws it with (no pixels are copied; the window server composites them).
 final class BrowserCardLayer: CALayer {
-    private let dot = CALayer()
-    private let title = CATextLayer()
+    private let bar = CardTitleBar()
+    private let addressField = CALayer()
+    private var focused = false
     private let chip = CALayer()
     private let chipText = CATextLayer()
     private let address = CATextLayer()
@@ -68,40 +67,35 @@ final class BrowserCardLayer: CALayer {
 
     override init() {
         super.init()
-        backgroundColor = BoardPalette.card
-        cornerRadius = CardMetrics.radius
-        shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        dot.cornerRadius = 3.5
-        dot.backgroundColor = BoardPalette.rgb(BoardPalette.secondary)
-        hover.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.12)
+        hover.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.1)
         hover.isHidden = true
-        for text in [title, address, closeGlyph, status] + glyphs {
+        for text in [address, status] + glyphs {
             text.fontSize = 12
             text.truncationMode = .end
         }
-        title.font = BrowserCardLayout.titleFont
+        address.fontSize = BrowserCardLayout.addressFont.pointSize
+        addressField.backgroundColor = BoardPalette.card
+        addressField.cornerRadius = Theme.Radius.control
         chipText.font = BrowserCardLayout.chipFont
-        chipText.fontSize = 11
+        chipText.fontSize = BrowserCardLayout.chipFont.pointSize
         chipText.alignmentMode = .center
         chipText.truncationMode = .end
         chip.addSublayer(chipText)
         address.font = BrowserCardLayout.addressFont
-        closeGlyph.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        closeGlyph.string = "✕"
         for (glyph, symbol) in zip(glyphs, ["‹", "›", "↻"]) {
             glyph.string = symbol
             glyph.font = NSFont.systemFont(ofSize: symbol == "↻" ? 13 : 17, weight: .medium)
             glyph.fontSize = symbol == "↻" ? 13 : 17
             glyph.alignmentMode = .center
         }
-        closeGlyph.alignmentMode = .center
         status.alignmentMode = .center
         status.isWrapped = true
         page.backgroundColor = BoardPalette.card
         page.masksToBounds = true
-        page.cornerRadius = 6
+        page.cornerRadius = Theme.Radius.control
         dim.backgroundColor = BoardPalette.rgb(0xFFFFFF, 0.8)
-        ([dot, hover, chip, title, address, closeGlyph, page, dim, status] + glyphs).forEach(addSublayer)
+        ([bar, addressField, hover, chip, address, closeGlyph, page, dim, status] + glyphs).forEach(addSublayer)
+        CardFrame.reveal([closeGlyph] + glyphs, visible: false)
         for handle in handles {
             handle.bounds = CGRect(x: 0, y: 0, width: CardMetrics.handleSize, height: CardMetrics.handleSize)
             handle.cornerRadius = CardMetrics.handleSize / 2
@@ -124,39 +118,35 @@ final class BrowserCardLayer: CALayer {
     func update(frame: CGRect, record: BrowserRecord, page state: BrowserPage?, status message: String?,
                 focused: Bool, hovered control: Control?, editingAddress: Bool, scale: CGFloat) {
         self.frame = frame
-        shadowPath = CGPath(roundedRect: bounds, cornerWidth: CardMetrics.radius, cornerHeight: CardMetrics.radius, transform: nil)
-        shadowOpacity = focused ? 0.16 : 0.08
-        shadowRadius = focused ? 14 : 8
-        shadowOffset = CGSize(width: 0, height: focused ? 12 : 5)
-        for layer in [title, address, closeGlyph, status, chipText] + glyphs { layer.contentsScale = scale }
+        self.focused = focused
+        CardFrame.style(self, focused: focused)
+        for layer in [address, status, chipText] + glyphs { layer.contentsScale = scale }
 
         let layout = BrowserCardLayout(frame: bounds, record: record)
         let ink = BoardPalette.ink
         let line = ceil(BrowserCardLayout.addressFont.ascender - BrowserCardLayout.addressFont.descender) + 2
-        dot.frame = layout.dot
-        dot.backgroundColor = state?.phase == .open ? BoardPalette.rgb(BoardPalette.accent) : BoardPalette.rgb(BoardPalette.secondary)
-        title.string = record.name
-        title.foregroundColor = BoardPalette.rgb(ink, focused ? 0.9 : 0.6)
-        title.frame = CGRect(x: layout.title.minX, y: layout.title.midY - line / 2, width: layout.title.width, height: line)
+        // The page's own state is its address and content; the tile stays the browser's mark.
+        bar.update(size: bounds.size, icon: .symbol("globe", color: Theme.Hex.inkMuted), status: nil, title: record.name, detail: nil, focused: focused,
+                   reserve: bounds.width - layout.title.maxX - 10, scale: scale)
         chip.frame = layout.device
-        chip.cornerRadius = layout.device.height / 2
-        chip.backgroundColor = BoardPalette.rgb(BoardPalette.accent, control == .device ? 0.16 : 0.08)
+        chip.cornerRadius = Theme.Radius.control
+        chip.backgroundColor = BoardPalette.rgb(BoardPalette.accent, control == .device ? 1 : 0.14)
         chipText.string = BrowserCardLayout.chipLabel(record.device)
-        chipText.foregroundColor = BoardPalette.rgb(BoardPalette.accent)
+        chipText.foregroundColor = control == .device ? BoardPalette.rgb(Theme.Hex.white) : BoardPalette.rgb(BoardPalette.accent)
         let chipLine = ceil(BrowserCardLayout.chipFont.ascender - BrowserCardLayout.chipFont.descender) + 1
         chipText.frame = CGRect(x: 6, y: (layout.device.height - chipLine) / 2, width: layout.device.width - 12, height: chipLine)
         for (glyph, rect) in zip(glyphs, [layout.back, layout.forward, layout.reload]) {
             let height = ceil(glyph.fontSize * 1.3)
             glyph.frame = CGRect(x: rect.minX, y: rect.midY - height / 2 - 1, width: rect.width, height: height)
-            glyph.foregroundColor = BoardPalette.rgb(ink, 0.55)
+            glyph.foregroundColor = BoardPalette.rgb(ink, 0.75)
         }
         let url = state?.url.isEmpty == false ? state!.url : record.url
         address.string = url.isEmpty ? L("Enter an address") : Self.display(url)
-        address.foregroundColor = BoardPalette.rgb(ink, url.isEmpty ? 0.35 : 0.55)
+        address.foregroundColor = BoardPalette.rgb(ink, url.isEmpty ? 0.45 : 0.75)
         address.frame = CGRect(x: layout.address.minX + 8, y: layout.address.midY - line / 2, width: max(0, layout.address.width - 16), height: line)
         address.isHidden = editingAddress
-        closeGlyph.frame = CGRect(x: layout.close.minX, y: layout.close.midY - line / 2, width: layout.close.width, height: line)
-        closeGlyph.foregroundColor = BoardPalette.rgb(ink, control == .close ? 0.8 : 0.4)
+        addressField.frame = layout.address
+        CardFrame.closeButton(nil, closeGlyph, in: layout.close, hovered: control == .close, scale: scale)
         let hoverRect: CGRect? = switch control {
         case .device: nil
         case .back: layout.back
@@ -168,7 +158,7 @@ final class BrowserCardLayer: CALayer {
         hover.isHidden = hoverRect == nil
         if let hoverRect {
             hover.frame = hoverRect
-            hover.cornerRadius = hoverRect.height / 2
+            hover.cornerRadius = Theme.Radius.control
         }
 
         page.frame = layout.content
@@ -234,14 +224,9 @@ final class BrowserCardLayer: CALayer {
             }
             hoveredHandle = hovered
         }
-        if linkTarget {
-            shadowColor = BoardPalette.rgb(BoardPalette.accent)
-            shadowOpacity = 0.45
-            shadowRadius = 18
-            shadowOffset = .zero
-        } else {
-            shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        }
+        // A line's target lights up with the highlighted ring, like focus.
+        CardFrame.style(self, focused: focused || linkTarget)
+        CardFrame.reveal([closeGlyph] + glyphs, visible: visible || focused)
     }
 
     func animateAppearance() {

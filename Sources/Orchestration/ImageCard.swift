@@ -21,9 +21,13 @@ public struct ImageRecord: Identifiable, Hashable, Codable, Sendable {
     public var pixelSize: CGSize
     /// The organization it was added in.
     public var organization: UUID?
+    /// Seconds of video when the card plays one (see `ImageFiles.storeVideo`); nil for a picture.
+    public var duration: Double?
+
+    public var isVideo: Bool { duration != nil }
 
     public init(id: UUID, worktree: String, name: String, frame: CGRect, file: String, pixelSize: CGSize,
-                organization: UUID? = nil) {
+                organization: UUID? = nil, duration: Double? = nil) {
         self.id = id
         self.worktree = worktree
         self.name = name
@@ -31,6 +35,7 @@ public struct ImageRecord: Identifiable, Hashable, Codable, Sendable {
         self.file = file
         self.pixelSize = pixelSize
         self.organization = organization
+        self.duration = duration
     }
 
     public var organizationID: UUID { organization ?? OrganizationHome.defaultID }
@@ -80,11 +85,15 @@ public enum ImageFiles {
         case missing
         case tooLarge
         case notAnImage
+        /// A video AVFoundation can't play, or not MP4, MOV or M4V.
+        case notPlayable
     }
 
     public struct Stored: Equatable, Sendable {
         public let file: String
         public let pixelSize: CGSize
+        /// Seconds, for a video.
+        public var duration: Double? = nil
     }
 
     public static func folder(in dataFolder: URL) -> URL {
@@ -100,6 +109,7 @@ public enum ImageFiles {
         let source = source.resolvingSymlinksInPath()
         let size = (try? source.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]))
         guard size?.isRegularFile == true, let bytes = size?.fileSize else { throw Failure.missing }
+        if isVideoFile(source) { return try storeVideo(at: source, bytes: bytes, in: dataFolder) }
         guard bytes <= maximumBytes else { throw Failure.tooLarge }
         guard let data = try? Data(contentsOf: source) else { throw Failure.missing }
         return try store(data, in: dataFolder)

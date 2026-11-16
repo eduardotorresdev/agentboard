@@ -23,8 +23,9 @@ public protocol BoardElement: AnyObject {
     var kind: ElementKind { get }
     /// One short line peers see next to the name (a browser's device, …), or nil.
     var detail: String? { get }
-    /// The board (canvas) it sits on, so `elements(onBoardOf:)` lists only its neighbours; nil
-    /// when the element doesn't say, which puts it on every board.
+    /// The board (canvas) it sits on, so `elements(onBoardOf:)` lists only its neighbours: a
+    /// worktree path, optionally followed by NUL and the organization it belongs to. One without
+    /// an organization (a browser) is on that worktree in every organization; nil is on every board.
     var board: String? { get }
 }
 
@@ -141,8 +142,14 @@ public final class MessageBus {
     public func elements(onBoardOf id: UUID) -> [any BoardElement] {
         let board = elements[id]?.board
         return elements.values
-            .filter { board == nil || $0.board == nil || $0.board == board }
+            .filter { Self.sameBoard(board, $0.board) }
             .sorted { ($0.kind.rawValue, $0.name.lowercased()) < ($1.kind.rawValue, $1.name.lowercased()) }
+    }
+
+    static func sameBoard(_ a: String?, _ b: String?) -> Bool {
+        guard let a, let b, a != b else { return true }
+        let (x, y) = (a.split(separator: "\u{0}", omittingEmptySubsequences: false), b.split(separator: "\u{0}", omittingEmptySubsequences: false))
+        return (x.count == 1 || y.count == 1) && x[0] == y[0]
     }
 
     /// The connected elements of `kind`, e.g. the browsers a caller may drive.

@@ -59,6 +59,10 @@ final class Database {
                 path TEXT PRIMARY KEY,
                 alias TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS worktree_titles (
+                path TEXT PRIMARY KEY,
+                title TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS browsers (
                 id TEXT PRIMARY KEY,
                 worktree TEXT NOT NULL,
@@ -202,6 +206,25 @@ final class Database {
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, path)
         if let alias { bind(stmt, 2, alias) }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// Titles agents gave worktrees, keyed by worktree path. User-given names live in aliases.
+    func worktreeTitles() throws -> [String: String] {
+        let stmt = try prepare("SELECT path, title FROM worktree_titles")
+        defer { sqlite3_finalize(stmt) }
+        var result: [String: String] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result[String(cString: sqlite3_column_text(stmt, 0))] = String(cString: sqlite3_column_text(stmt, 1))
+        }
+        return result
+    }
+
+    func setWorktreeTitle(_ title: String, path: String) throws {
+        let stmt = try prepare("INSERT OR REPLACE INTO worktree_titles (path, title) VALUES (?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, path)
+        bind(stmt, 2, title)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 

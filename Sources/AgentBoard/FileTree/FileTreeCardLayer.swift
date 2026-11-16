@@ -4,34 +4,18 @@ import QuartzCore
 /// A file tree card's chrome: background, title and close button, and its connection handles.
 /// The files themselves are a SwiftUI view the board places over `CardMetrics.content`.
 final class FileTreeCardLayer: CALayer {
-    private let icon = CATextLayer()
-    private let title = CATextLayer()
+    private let bar = CardTitleBar()
+    private var focused = false
     private let closeHover = CALayer()
     private let closeGlyph = CATextLayer()
     private let handles: [CALayer] = (0..<4).map { _ in CALayer() }
     private var handlesVisible = false
     private var hoveredHandle: Int?
 
-    private static let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
-
     override init() {
         super.init()
-        backgroundColor = BoardPalette.card
-        cornerRadius = CardMetrics.radius
-        shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        closeHover.cornerRadius = CardMetrics.closeSize / 2
-        closeHover.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.08)
-        for layer in [icon, title, closeGlyph] {
-            layer.fontSize = 12
-            layer.truncationMode = .end
-        }
-        title.font = Self.titleFont
-        icon.string = "▤"
-        icon.foregroundColor = BoardPalette.rgb(BoardPalette.accent)
-        closeGlyph.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        closeGlyph.string = "✕"
-        closeGlyph.alignmentMode = .center
-        [icon, title, closeHover, closeGlyph].forEach(addSublayer)
+        [bar, closeHover, closeGlyph].forEach(addSublayer)
+        CardFrame.reveal([closeGlyph], visible: false)
         for handle in handles {
             handle.bounds = CGRect(x: 0, y: 0, width: CardMetrics.handleSize, height: CardMetrics.handleSize)
             handle.cornerRadius = CardMetrics.handleSize / 2
@@ -49,23 +33,12 @@ final class FileTreeCardLayer: CALayer {
 
     func update(frame: CGRect, name: String, focused: Bool, closeHovered: Bool, scale: CGFloat) {
         self.frame = frame
-        shadowPath = CGPath(roundedRect: bounds, cornerWidth: CardMetrics.radius, cornerHeight: CardMetrics.radius, transform: nil)
-        shadowOpacity = focused ? 0.16 : 0.08
-        shadowRadius = focused ? 14 : 8
-        shadowOffset = CGSize(width: 0, height: focused ? 12 : 5)
-        for layer in [icon, title, closeGlyph] { layer.contentsScale = scale }
-        let ink = BoardPalette.ink
-        let line = ceil(Self.titleFont.ascender - Self.titleFont.descender + Self.titleFont.leading) + 2
-        let mid = CardMetrics.titleHeight / 2
+        self.focused = focused
+        CardFrame.style(self, focused: focused)
         let close = CardMetrics.close(of: bounds)
-        icon.frame = CGRect(x: CardMetrics.inset + 2, y: mid - line / 2, width: 14, height: line)
-        title.string = name
-        title.foregroundColor = BoardPalette.rgb(ink, focused ? 0.9 : 0.6)
-        title.frame = CGRect(x: icon.frame.maxX + 6, y: mid - line / 2, width: max(0, close.minX - icon.frame.maxX - 14), height: line)
-        closeHover.frame = close
-        closeHover.isHidden = !closeHovered
-        closeGlyph.foregroundColor = BoardPalette.rgb(ink, closeHovered ? 0.8 : 0.4)
-        closeGlyph.frame = CGRect(x: close.minX, y: close.midY - line / 2, width: close.width, height: line)
+        bar.update(size: bounds.size, icon: .symbol("folder", color: Theme.Hex.inkMuted), status: nil, title: name, detail: nil, focused: focused,
+                   reserve: bounds.width - close.minX + 8, scale: scale)
+        CardFrame.closeButton(closeHover, closeGlyph, in: close, hovered: closeHovered, scale: scale)
     }
 
     func updateHandles(visible: Bool, hovered: Int?, linkTarget: Bool) {
@@ -84,14 +57,9 @@ final class FileTreeCardLayer: CALayer {
             }
             hoveredHandle = hovered
         }
-        if linkTarget {
-            shadowColor = BoardPalette.rgb(BoardPalette.accent)
-            shadowOpacity = 0.45
-            shadowRadius = 18
-            shadowOffset = .zero
-        } else {
-            shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        }
+        // A line's target lights up with the highlighted ring, like focus.
+        CardFrame.style(self, focused: focused || linkTarget)
+        CardFrame.reveal([closeGlyph], visible: visible || focused)
     }
 
     func animateAppearance() {

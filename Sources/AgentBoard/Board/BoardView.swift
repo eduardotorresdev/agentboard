@@ -11,7 +11,7 @@ import TerminalRenderer
 enum CardMetrics {
     static let titleHeight: CGFloat = 34
     static let inset: CGFloat = 12
-    static let radius: CGFloat = 14
+    static let radius: CGFloat = Theme.Radius.card
     static let closeSize: CGFloat = 20
     static let resizeHandle: CGFloat = 18
     static let minimumSize = CGSize(width: 320, height: 180)
@@ -45,12 +45,12 @@ enum BoardPalette {
                 blue: CGFloat(hex & 0xFF) / 255, alpha: alpha)
     }
 
-    static let ink: UInt32 = 0x2E1F6B
-    static let accent: UInt32 = 0x6E56CF
-    static let secondary: UInt32 = 0xF76B15
+    static let ink: UInt32 = Theme.Hex.ink
+    static let accent: UInt32 = Theme.Hex.accent
+    static let secondary: UInt32 = Theme.Hex.secondary
     static let card = rgb(0xFFFFFF)
-    /// A post-it's paper: a pale wash of the secondary orange.
-    static let postIt: UInt32 = 0xFFF1E2
+    /// A post-it's paper: the cream of the sky's clouds.
+    static let postIt: UInt32 = 0xFFF3C8
 }
 
 /// Lets SwiftUI chrome (the canvas toolbar) talk to the board.
@@ -66,6 +66,7 @@ final class BoardController {
     func addPostIt() { view?.addPostIt() }
     func addFileTree() { view?.addFileTree() }
     func addImages() { view?.addImages() }
+    func addVideos() { view?.addVideos() }
     /// The dialog that asks what a new runner runs is open.
     var addingRunner = false
     func addRunner(command: String, name: String?, directory: String?) { view?.addRunner(command: command, name: name, directory: directory) }
@@ -91,8 +92,6 @@ final class BoardController {
     var leadingInset: CGFloat = 0
     /// Only the canvas and the Needs you button show: no sidebar, bars or zoom controls.
     var isZen = false
-    /// The Needs you screen covers the board: energy pulses run up its grid underneath.
-    var isCovered = false { didSet { view?.setPulsing(isCovered) } }
 }
 
 struct DeviceRequest: Identifiable {
@@ -132,7 +131,7 @@ struct Board: NSViewRepresentable {
     }
 }
 
-/// The worktree canvas, built from Core Animation layers: the grid, the lines between cards, and
+/// The worktree canvas, built from Core Animation layers: the lines between cards, and
 /// per card its chrome (background, shadow, title, cursor) and a layer showing its terminal.
 ///
 /// Dragging from a card's handle to another card connects them; the line is routed around the
@@ -170,15 +169,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     weak var controller: BoardController?
 
     private let root = CALayer()
-    private let grid = GridLayer()
     private let linksLayer = CALayer()
     private let cardsLayer = CALayer()
     /// Above the cards: the line being drawn from a handle.
     private let overlayLayer = CALayer()
     private let linkPreview = CAShapeLayer()
-    /// The box dragged out on the empty canvas, and the glow behind the cards it selected.
+    /// The box dragged out on the empty canvas.
     private let marqueeLayer = CAShapeLayer()
-    private let selectionLayer = CAShapeLayer()
     /// Cards picked with the box; Delete removes them after asking.
     private var selection: Set<UUID> = []
     /// Where the box started and where the pointer is, in world points, and the selection it adds to.
@@ -186,6 +183,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var cards: [UUID: CardLayer] = [:]
     /// Runner cards' buttons, addresses and metrics, drawn over their `CardLayer`.
     private var runnerChrome: [UUID: RunnerChromeLayer] = [:]
+    /// Each agent card's composer, below the card.
+    private var composers: [UUID: NSView] = [:]
     /// The runner control under the pointer.
     private var hoveredRunnerControl: (card: UUID, control: RunnerControl)?
     private var browserCards: [UUID: BrowserCardLayer] = [:]
@@ -309,6 +308,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         let frame: CGRect
         /// The edges an image card is resized from.
         var edges: ImageResize.Edges = [.right, .bottom]
+        /// Where every selected card started, when the moved card is one of them.
+        var group: [UUID: CGRect]?
     }
 
     init(store: AgentStore, browsers: BrowserStore, fileTrees: FileTreeStore) {
@@ -319,7 +320,6 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         surface = presenter.map { SharedSurface(device: $0.device) }
         super.init(frame: .zero)
         root.isGeometryFlipped = true
-        root.addSublayer(grid)
         // The camera transform scales about the top-left corner, not the center.
         for layer in [linksLayer, cardsLayer, overlayLayer] {
             layer.anchorPoint = .zero
@@ -336,9 +336,6 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         marqueeLayer.strokeColor = nil
         marqueeLayer.isHidden = true
         overlayLayer.addSublayer(marqueeLayer)
-        selectionLayer.fillColor = BoardPalette.rgb(BoardPalette.accent, 0.35)
-        selectionLayer.strokeColor = nil
-        linksLayer.addSublayer(selectionLayer)
         layer = root
         wantsLayer = true
         store.onSessionChange = { [weak self] id in self?.sessionChanged(id) }
@@ -497,10 +494,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         beginPostItEditing(on: record.id, at: nil)
     }
 
+    /// Asks for video files and adds a card for each; one AVFoundation can't play is refused.
+    func addVideos() { addImages(videos: true) }
+
     /// Asks for picture files and adds a card for each.
-    func addImages() {
+    func addImages(videos: Bool = false) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
+        panel.allowedContentTypes = videos ? [.movie] : [.image]
         panel.allowsMultipleSelection = true
         guard let window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
@@ -524,8 +524,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             } catch {
                 let name = if case .file(let url) = source { url.lastPathComponent } else { L("The pasted picture") }
                 let reason = switch error as? ImageFiles.Failure {
+                case .tooLarge where source.isVideo: L("\(name) is larger than \(ImageFiles.maximumVideoBytes / 1024 / 1024) MB.")
                 case .tooLarge: L("\(name) is larger than 20 MB.")
                 case .notAnImage: L("\(name) isn't a picture the board can show.")
+                case .notPlayable: L("\(name) isn't a video the board can play. Use MP4, MOV or M4V.")
                 default: L("\(name) couldn't be read.")
                 }
                 refused.append(reason)
@@ -540,7 +542,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         guard !refused.isEmpty, let window else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = refused.count == 1 ? L("Couldn't add the image") : L("Couldn't add \(refused.count) images")
+        alert.messageText = refused.count == 1 ? L("Couldn't add the file") : L("Couldn't add \(refused.count) files")
         alert.informativeText = refused.joined(separator: "\n")
         alert.beginSheetModal(for: window)
     }
@@ -582,7 +584,6 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         defer { CATransaction.commit() }
 
         root.contentsScale = scale
-        grid.update(bounds: bounds, pan: pan, zoom: zoom, scale: scale)
         let camera = CATransform3DScale(CATransform3DMakeTranslation(pan.x, pan.y, 0), zoom, zoom, 1)
         for layer in [linksLayer, cardsLayer, overlayLayer] {
             layer.frame = bounds
@@ -596,6 +597,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             cards[id] = nil
             runnerChrome[id] = nil
             dirty.remove(id)
+        }
+        for (id, view) in composers where !ids.contains(id) {
+            view.removeFromSuperview()
+            composers[id] = nil
         }
         let onScreen = isOnScreen
         var visible = Set<UUID>()
@@ -621,10 +626,19 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }
             card.contentTop = content.minY - record.frame.minY
             card.titleReserve = record.runner == nil ? 0 : RunnerChromeLayout.titleReserve
-            card.update(frame: record.frame, title: record.isOrchestrator ? L("\(record.name) · Orchestrator") : record.name, state: state, focused: record.id == focusedID,
+            let status: CardStatus = record.runner != nil
+                ? CardStatus.runner(SessionStatus(state: state, processID: nil, exitCode: session.exitCode), running: state == .running || state == .starting)
+                : CardStatus.agent(SessionStatus(state: state, processID: nil, exitCode: nil), waiting: store.attention.contains { $0.id == record.id })
+            let kind = record.runner != nil ? L("Runner") : record.provider?.title ?? record.providerID
+            // The kind is left out when the name already says it ("Claude 2").
+            let detail = status == .waiting || status == .crashed ? status.label
+                : record.isOrchestrator ? L("\(kind) · Orchestrator") : record.name.hasPrefix(kind) ? nil : kind
+            let icon: CardIcon = record.runner != nil ? .symbol("play.rectangle", color: Theme.Hex.inkMuted) : CardFrame.agentIcon(provider: record.providerID)
+            card.update(frame: record.frame, title: record.name, detail: detail, icon: icon, status: status, kind: record.runner != nil ? .runner : .agent, state: state, focused: highlighted(record.id),
                         closeHovered: record.id == hoveredClose, starting: record.runner == nil ? L("Starting \(record.name)…") : "",
                         message: message, scale: renderScale)
             syncRunnerChrome(record, on: card, state: state, scale: renderScale)
+            if record.runner == nil { placeComposer(for: record) }
             // While a line is drawn every card shows the handles it can snap to.
             let showsHandles = linkDrag != nil || record.id == hoveredCard
             let lit: Int? = if let linkDrag {
@@ -659,6 +673,20 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if !dirty.isEmpty { displayLink?.isPaused = false }
     }
 
+    /// A strip just below the agent card, at a fixed on-screen height so it reads at any zoom.
+    /// Shown only on the focused card, or one holding a draft, so it rarely covers a card below.
+    private func placeComposer(for record: AgentRecord) {
+        let view = composers[record.id] ?? {
+            let view = NSHostingView(rootView: AgentComposer(store: store, id: record.id))
+            composers[record.id] = view
+            addSubview(view)
+            return view
+        }()
+        let frame = screen(record.frame)
+        view.frame = CGRect(x: frame.minX, y: frame.maxY + 8, width: frame.width, height: 34)
+        view.isHidden = record.id != focusedID && !AgentComposer.hasDraft(record.id)
+    }
+
     /// Browser cards sit above the agents, in their own stacking order.
     private func syncBrowsers(onScreen: Bool, scale: CGFloat) {
         let records = browsers.browsers(in: worktree)
@@ -680,7 +708,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }()
             card.zPosition = below + CGFloat(index)
             card.update(frame: record.frame, record: record, page: browsers.pages[record.id], status: browsers.status(of: record.id),
-                        focused: record.id == focusedID, hovered: hoveredControl?.card == record.id ? hoveredControl?.control : nil,
+                        focused: highlighted(record.id), hovered: hoveredControl?.card == record.id ? hoveredControl?.control : nil,
                         editingAddress: editingAddress == record.id, scale: scale)
             let showsHandles = linkDrag != nil || record.id == hoveredCard
             let lit: Int? = if let linkDrag {
@@ -977,10 +1005,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         frame(frames.dropFirst().reduce(first) { $0.union($1) })
     }
 
-    /// Springs every card to where `BoardLayout` arranges this worktree, and the camera to
+    /// Springs every card to where `RadialLayout` arranges this worktree, and the camera to
     /// frame the result.
     func organize() {
-        let targets = BoardLayout.organize(layoutItems, connections: worktreeConnections, aspect: screenAspect)
+        let targets = RadialLayout.organize(layoutItems.filter { selection.isEmpty || selection.contains($0.id) }, connections: worktreeConnections)
         guard let first = targets.values.first else { return }
         var animation = layoutAnimation ?? LayoutAnimation()
         for (id, target) in targets {
@@ -1228,8 +1256,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         let point = convert(event.locationInWindow, from: nil)
         let location = world(point)
         window?.makeFirstResponder(self)
-        if item(at: location) != nil, !selection.isEmpty {
-            // Clicking a card ends the box selection.
+        if let id = item(at: location), id != focusedID, !event.modifierFlags.intersection([.shift, .command]).isEmpty, handle(at: location) == nil {
+            // Shift- or Command-clicking a card adds it to the selection or takes it out; the focused
+            // card keeps those clicks for its own text selection.
+            selection = CanvasSelection.toggling(id, in: selection)
+            focusedID = nil
+            return syncLayers()
+        }
+        if let id = item(at: location), !selection.contains(id) {
+            // Clicking a card outside the selection ends it; a selected one keeps it, to move them together.
             selection = []
         }
         if let hoveredCard, let (id, index) = handle(at: location), id == hoveredCard {
@@ -1342,7 +1377,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             box.current = world(point)
             marquee = box
             let rect = Self.rect(box.start, box.current)
-            selection = box.base.union(itemFrames.filter { $0.frame.intersects(rect) }.map(\.id))
+            selection = CanvasSelection.hits(itemFrames, in: rect, adding: box.base)
             return syncLayers()
         }
         if var drag = linkDrag {
@@ -1367,8 +1402,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             linkDrag = drag
             return syncLayers()
         }
+        if interaction?.kind == .move, interaction?.group == nil, let id = interaction?.id, selection.count > 1, selection.contains(id) {
+            interaction?.group = Dictionary(itemFrames.filter { selection.contains($0.id) }.map { ($0.id, $0.frame) }, uniquingKeysWith: { a, _ in a })
+        }
         guard let interaction else { return }
         let dx = (point.x - interaction.start.x) / zoom, dy = (point.y - interaction.start.y) / zoom
+        if let group = interaction.group {
+            for (id, frame) in CanvasSelection.moved(group, by: CGSize(width: dx, height: dy)) { setFrame(frame, for: id, persist: false) }
+            return syncLayers()
+        }
         var frame = interaction.frame
         switch interaction.kind {
         case .move:
@@ -1420,6 +1462,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return syncLayers()
         }
         guard let interaction, let frame = frame(of: interaction.id) else { return }
+        for id in interaction.group?.keys.filter({ $0 != interaction.id }) ?? [] {
+            if let moved = self.frame(of: id) { setFrame(moved, for: id, persist: true) }
+        }
         setFrame(frame, for: interaction.id, persist: true)
         self.interaction = nil
     }
@@ -1569,18 +1614,14 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 
-    /// Draws the box being dragged and a glow behind each selected card.
+    /// Focused and selected cards wear the same lifted, accent-capped frame.
+    private func highlighted(_ id: UUID) -> Bool { id == focusedID || selection.contains(id) }
+
+    /// Draws the box being dragged; selected cards show it on their own frame.
     private func syncSelection() {
         let frames = itemFrames
         let ids = Set(frames.map(\.id))
         if !selection.isSubset(of: ids) { selection.formIntersection(ids) }
-        let selectionPath = CGMutablePath()
-        let outset = 6 / zoom
-        for item in frames where selection.contains(item.id) {
-            let rect = item.frame.insetBy(dx: -outset, dy: -outset)
-            selectionPath.addRoundedRect(in: rect, cornerWidth: CardMetrics.radius + outset, cornerHeight: CardMetrics.radius + outset)
-        }
-        selectionLayer.path = selectionPath
         if let marquee {
             let rect = Self.rect(marquee.start, marquee.current)
             let corner = min(4 / zoom, rect.width / 2, rect.height / 2)
@@ -2106,8 +2147,6 @@ extension BoardView {
         syncLayers()
     }
 
-    fileprivate func setPulsing(_ pulsing: Bool) { grid.pulsing = pulsing }
-
     // MARK: Card menu
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -2244,14 +2283,14 @@ extension BoardView {
             if editing, let editor = postItEditor, !editor.isDirty, editor.text != record.text { editor.show(record.text) }
             card.zPosition = agentCount + CGFloat(index)
             card.update(frame: record.frame, record: record, layout: layout, mode: mode(of: record), scroll: postItScroll[record.id] ?? 0,
-                        focused: record.id == focusedID, hovered: hoveredPostIt?.card == record.id ? hoveredPostIt?.control : nil,
+                        focused: highlighted(record.id), hovered: hoveredPostIt?.card == record.id ? hoveredPostIt?.control : nil,
                         editing: editing, scale: scale)
             // The text may have shrunk since it was scrolled.
             let maxScroll = max(0, card.contentHeight - layout.content.height)
             if let scroll = postItScroll[record.id], scroll > maxScroll {
                 postItScroll[record.id] = maxScroll
                 card.update(frame: record.frame, record: record, layout: layout, mode: mode(of: record), scroll: maxScroll,
-                            focused: record.id == focusedID, hovered: hoveredPostIt?.card == record.id ? hoveredPostIt?.control : nil,
+                            focused: highlighted(record.id), hovered: hoveredPostIt?.card == record.id ? hoveredPostIt?.control : nil,
                             editing: editing, scale: scale)
             }
             let showsHandles = linkDrag != nil || record.id == hoveredCard
@@ -2518,124 +2557,11 @@ private struct LayoutAnimation {
 
 // MARK: - Layers
 
-/// The canvas grid: minor lines every 24 points, a heavier one every fifth, scaled by the zoom.
-/// Built from replicated one-pixel lines, so panning only moves a layer.
-private final class GridLayer: CALayer {
-    private static let spacing: CGFloat = 24
-    /// Below this on-screen spacing the minor lines turn into noise and are left out.
-    private static let minimumMinorSpacing: CGFloat = 10
-    private var builtSize: CGSize?
-    private var builtScale: CGFloat?
-    private var builtZoom: CGFloat?
-    /// A violet copy of the lines, shown only through `band`: the pulses.
-    private let pulse = CALayer()
-    private let band = CAGradientLayer()
-    /// How tall a pulse's lit band is, fading out above and below its middle.
-    private static let bandHeight: CGFloat = 320
-    /// A pulse rises every `pulsePeriod` seconds.
-    private static let pulsePeriod: CFTimeInterval = 7
-
-    /// Energy pulses rising up the lines, one every few seconds.
-    var pulsing = false {
-        didSet {
-            guard pulsing != oldValue else { return }
-            pulse.isHidden = !pulsing
-            if pulsing { animatePulse() } else { band.removeAnimation(forKey: "pulse") }
-        }
-    }
-
-    func update(bounds: CGRect, pan: CGPoint, zoom: CGFloat, scale: CGFloat) {
-        let period = Self.spacing * 5 * zoom
-        // One period of slack on each side lets the pan offset wrap without uncovering edges.
-        let size = CGSize(width: bounds.width + period * 2, height: bounds.height + period * 2)
-        if builtSize != size || builtScale != scale || builtZoom != zoom { build(size: size, zoom: zoom, scale: scale) }
-        func wrap(_ value: CGFloat) -> CGFloat {
-            let offset = value.truncatingRemainder(dividingBy: period)
-            return ((offset < 0 ? offset + period : offset) * scale).rounded() / scale - period
-        }
-        frame = CGRect(origin: CGPoint(x: wrap(pan.x), y: wrap(pan.y)), size: size)
-    }
-
-    /// From below the bottom edge to past the top, gliding like an overdamped spring, then a
-    /// pause before the next.
-    private func animatePulse() {
-        band.removeAnimation(forKey: "pulse")
-        guard pulsing, let height = builtSize?.height else { return }
-        let rise = CASpringAnimation(keyPath: "position.y")
-        rise.fromValue = height + Self.bandHeight / 2
-        rise.toValue = -Self.bandHeight / 2
-        rise.mass = 1
-        rise.stiffness = 1.2
-        rise.damping = 2.4
-        rise.duration = Self.pulsePeriod - 1
-        let fade = CASpringAnimation(keyPath: "opacity")
-        fade.fromValue = 0
-        fade.toValue = 1
-        fade.stiffness = 4
-        fade.damping = 4
-        fade.duration = Self.pulsePeriod - 1
-        let group = CAAnimationGroup()
-        group.animations = [rise, fade]
-        group.duration = Self.pulsePeriod
-        group.repeatCount = .infinity
-        band.add(group, forKey: "pulse")
-    }
-
-    private func build(size: CGSize, zoom: CGFloat, scale: CGFloat) {
-        builtSize = size
-        builtScale = scale
-        builtZoom = zoom
-        sublayers?.forEach { $0.removeFromSuperlayer() }
-        pulse.sublayers?.forEach { $0.removeFromSuperlayer() }
-        let spacing = Self.spacing * zoom
-        // Major lines sit on top of minor ones; their alpha makes the overlap read as 0.09.
-        let minor = BoardPalette.rgb(BoardPalette.ink, 0.05), major = BoardPalette.rgb(BoardPalette.ink, 0.042)
-        let lines = spacing < Self.minimumMinorSpacing
-            ? [(spacing * 5, BoardPalette.rgb(BoardPalette.ink, 0.09))]
-            : [(spacing, minor), (spacing * 5, major)]
-        for (step, color) in lines {
-            for vertical in [true, false] {
-                let line = CALayer()
-                line.backgroundColor = color
-                line.frame = vertical ? CGRect(x: 0, y: 0, width: 1 / scale, height: size.height)
-                                      : CGRect(x: 0, y: 0, width: size.width, height: 1 / scale)
-                let replicator = CAReplicatorLayer()
-                replicator.frame = CGRect(origin: .zero, size: size)
-                replicator.instanceCount = Int(((vertical ? size.width : size.height) / step).rounded(.up)) + 1
-                replicator.instanceTransform = vertical ? CATransform3DMakeTranslation(step, 0, 0) : CATransform3DMakeTranslation(0, step, 0)
-                replicator.addSublayer(line)
-                addSublayer(replicator)
-                // The same lines in violet, for the pulses.
-                let lit = CALayer()
-                lit.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.8)
-                lit.frame = vertical ? CGRect(x: 0, y: 0, width: 1.5 / scale, height: size.height)
-                                     : CGRect(x: 0, y: 0, width: size.width, height: 1.5 / scale)
-                let litReplicator = CAReplicatorLayer()
-                litReplicator.frame = replicator.frame
-                litReplicator.instanceCount = replicator.instanceCount
-                litReplicator.instanceTransform = replicator.instanceTransform
-                litReplicator.addSublayer(lit)
-                pulse.addSublayer(litReplicator)
-            }
-        }
-        pulse.frame = CGRect(origin: .zero, size: size)
-        pulse.isHidden = !pulsing
-        let clear = BoardPalette.rgb(BoardPalette.accent, 0), solid = BoardPalette.rgb(BoardPalette.accent, 1)
-        band.colors = [clear, BoardPalette.rgb(BoardPalette.accent, 0.5), solid, BoardPalette.rgb(BoardPalette.accent, 0.5), clear]
-        band.locations = [0, 0.3, 0.5, 0.7, 1]
-        band.bounds = CGRect(x: 0, y: 0, width: size.width, height: Self.bandHeight)
-        band.position = CGPoint(x: size.width / 2, y: -Self.bandHeight)
-        pulse.mask = band
-        addSublayer(pulse)
-        animatePulse()
-    }
-}
-
 /// One agent card: chrome as Core Animation layers, the terminal as a layer showing its region
 /// of the board's shared surface, which exists only while the card is on screen.
 private final class CardLayer: CALayer {
-    private let dot = CALayer()
-    private let title = CATextLayer()
+    private let bar = CardTitleBar()
+    private var focused = false
     private let closeHover = CALayer()
     private let closeGlyph = CATextLayer()
     private let cursor = CALayer()
@@ -2656,25 +2582,14 @@ private final class CardLayer: CALayer {
 
     override init() {
         super.init()
-        backgroundColor = BoardPalette.card
-        cornerRadius = CardMetrics.radius
-        shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        dot.cornerRadius = 3.5
-        closeHover.cornerRadius = CardMetrics.closeSize / 2
-        closeHover.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.12)
         cursor.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.35)
         cursor.isHidden = true
         dim.backgroundColor = BoardPalette.rgb(0xFFFFFF, 0.75)
-        for text in [title, closeGlyph, status] {
-            text.fontSize = 12
-            text.truncationMode = .end
-        }
-        title.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        closeGlyph.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        closeGlyph.string = "✕"
-        closeGlyph.alignmentMode = .center
+        status.fontSize = 12
+        status.truncationMode = .end
         status.alignmentMode = .center
-        [dot, title, closeHover, closeGlyph, cursor, dim, status].forEach(addSublayer)
+        [bar, closeHover, closeGlyph, cursor, dim, status].forEach(addSublayer)
+        CardFrame.reveal([closeHover, closeGlyph], visible: false)
         for handle in handles {
             handle.bounds = CGRect(x: 0, y: 0, width: CardMetrics.handleSize, height: CardMetrics.handleSize)
             handle.cornerRadius = CardMetrics.handleSize / 2
@@ -2695,51 +2610,21 @@ private final class CardLayer: CALayer {
     override init(layer: Any) { super.init(layer: layer) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func update(frame: CGRect, title text: String, state: AgentSession.State, focused: Bool, closeHovered: Bool,
-                starting: String, message: String?, scale: CGFloat) {
+    func update(frame: CGRect, title text: String, detail: String?, icon: CardIcon, status cardStatus: CardStatus, kind: CardStatus.Kind, state: AgentSession.State,
+                focused: Bool, closeHovered: Bool, starting: String, message: String?, scale: CGFloat) {
         self.frame = frame
         self.state = state
-        shadowPath = CGPath(roundedRect: bounds, cornerWidth: CardMetrics.radius, cornerHeight: CardMetrics.radius, transform: nil)
-        shadowOpacity = focused ? 0.16 : 0.08
-        shadowRadius = focused ? 14 : 8
-        shadowOffset = CGSize(width: 0, height: focused ? 12 : 5)
-        for layer in [title, closeGlyph, status] { layer.contentsScale = scale }
+        self.focused = focused
+        CardFrame.style(self, focused: focused)
+        status.contentsScale = scale
 
         let ink = BoardPalette.ink
         let font = NSFont.systemFont(ofSize: 12)
         let line = ceil(font.ascender - font.descender) + 2
-        let mid = CardMetrics.titleHeight / 2
-        dot.frame = CGRect(x: CardMetrics.inset + 2, y: mid - 3.5, width: 7, height: 7)
-        dot.backgroundColor = switch state {
-        case .starting, .running: BoardPalette.rgb(BoardPalette.accent)
-        case .exited, .stopped: BoardPalette.rgb(ink, 0.25)
-        case .failed: BoardPalette.rgb(BoardPalette.secondary)
-        }
-        if state == .starting {
-            if dot.animation(forKey: "pulse") == nil {
-                // Breathes while the agent launches.
-                let pulse = CASpringAnimation(keyPath: "opacity")
-                pulse.fromValue = 1
-                pulse.toValue = 0.3
-                pulse.damping = 14
-                pulse.stiffness = 40
-                pulse.duration = pulse.settlingDuration
-                pulse.autoreverses = true
-                pulse.repeatCount = .infinity
-                dot.add(pulse, forKey: "pulse")
-            }
-        } else {
-            dot.removeAnimation(forKey: "pulse")
-        }
-
         let close = CardMetrics.close(of: bounds)
-        title.string = text
-        title.foregroundColor = BoardPalette.rgb(ink, focused ? 0.9 : 0.6)
-        title.frame = CGRect(x: dot.frame.maxX + 8, y: mid - line / 2, width: max(0, close.minX - dot.frame.maxX - 16 - titleReserve), height: line)
-        closeHover.frame = close
-        closeHover.isHidden = !closeHovered
-        closeGlyph.foregroundColor = BoardPalette.rgb(ink, closeHovered ? 0.8 : 0.4)
-        closeGlyph.frame = CGRect(x: close.minX, y: close.midY - line / 2, width: close.width, height: line)
+        bar.update(size: bounds.size, icon: icon, status: cardStatus, kind: kind, title: text, detail: detail, focused: focused,
+                   reserve: bounds.width - close.minX + titleReserve + 8, scale: scale)
+        CardFrame.closeButton(closeHover, closeGlyph, in: close, hovered: closeHovered, scale: scale)
 
         // A launching, finished or failed agent says so over its terminal.
         var area = CardMetrics.content(of: bounds)
@@ -2775,14 +2660,9 @@ private final class CardLayer: CALayer {
             }
             hoveredHandle = hovered
         }
-        if linkTarget {
-            shadowColor = BoardPalette.rgb(BoardPalette.accent)
-            shadowOpacity = 0.45
-            shadowRadius = 18
-            shadowOffset = .zero
-        } else {
-            shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        }
+        // A line's target lights up with the highlighted ring, like focus.
+        CardFrame.style(self, focused: focused || linkTarget)
+        CardFrame.reveal([closeHover, closeGlyph], visible: visible || focused)
     }
 
     fileprivate static func spring(_ keyPath: String, from: Any?, to: Any, stiffness: CGFloat, damping: CGFloat) -> CASpringAnimation {
@@ -3009,7 +2889,7 @@ extension BoardView {
                 return card
             }()
             card.zPosition = below + CGFloat(index)
-            card.update(frame: record.frame, name: record.name, focused: record.id == focusedID, closeHovered: hoveredClose == record.id,
+            card.update(frame: record.frame, name: record.name, focused: highlighted(record.id), closeHovered: hoveredClose == record.id,
                         scale: scale)
             let lit: Int? = if let linkDrag {
                 linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
@@ -3074,6 +2954,7 @@ extension BoardView {
         let records = store.images(in: worktree)
         let ids = Set(records.map(\.id))
         for (id, card) in imageCards where !ids.contains(id) {
+            card.video?.pause()
             if store.image(id) == nil { card.forget() }
             card.removeFromSuperlayer()
             imageCards[id] = nil
@@ -3088,8 +2969,9 @@ extension BoardView {
                 return card
             }()
             card.zPosition = below + CGFloat(index)
-            card.update(frame: record.frame, record: record, dataFolder: store.dataFolder, focused: record.id == focusedID,
-                        closeHovered: hoveredClose == record.id, renaming: renamingCard == record.id, scale: scale)
+            card.update(frame: record.frame, record: record, dataFolder: store.dataFolder, focused: highlighted(record.id),
+                        closeHovered: hoveredClose == record.id, renaming: renamingCard == record.id, scale: scale,
+                        visible: screen(record.frame).intersects(bounds))
             let showsHandles = linkDrag != nil || record.id == hoveredCard
             let lit: Int? = if let linkDrag {
                 linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
@@ -3113,6 +2995,12 @@ extension BoardView {
             store.removeImage(record.id)
             focusedID = nil
             hoveredClose = nil
+        } else if record.isVideo, let card = imageCards[record.id],
+                  card.video?.click(at: point, picture: ImageCardLayout(size: frame.size).picture, dragged: { seek in
+                      trackMouse { seek(self.local(self.world(self.convert($0.locationInWindow, from: nil)), in: frame)) }
+                  }) == true {
+            // A video control: play, mute, loop or the scrub track.
+            endCardRename()
         } else if !edges.isEmpty || (location.x > frame.maxX - corner && location.y > frame.maxY - corner) {
             endCardRename()
             interaction = Interaction(id: record.id, kind: .resize, start: start, frame: frame, edges: edges.isEmpty ? [.right, .bottom] : edges)
@@ -3125,11 +3013,16 @@ extension BoardView {
         }
     }
 
+    /// Follows the pressed mouse until it goes up, handing over each drag.
+    fileprivate func trackMouse(_ moved: (NSEvent) -> Void) {
+        while let event = window?.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]), event.type == .leftMouseDragged { moved(event) }
+    }
+
     // MARK: Dropping files
 
     private func droppedImages(_ info: NSDraggingInfo) -> [URL] {
         let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        return urls.filter(ImageSource.isImageFile)
+        return urls.filter(ImageSource.isMediaFile)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {

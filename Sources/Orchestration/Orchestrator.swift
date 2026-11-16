@@ -82,6 +82,7 @@ public final class Orchestrator: CoreService {
         catalog.add(RunnerTools(store: self))
         catalog.add(PostItTools(store: self))
         catalog.add(ImageTools(store: self))
+        catalog.add(ImageTools(store: self, medium: .video))
         toolServer.onQuestion = { [weak self] body, caller in await self?.ask(body, caller: caller) }
         toolServer.onAttention = { [weak self] body, caller in
             let notification = AgentHook.prefix + body.base64EncodedString()
@@ -89,6 +90,7 @@ public final class Orchestrator: CoreService {
         }
         catalog.add(BrowserRelay(store: self))
         catalog.add(ProjectRelay(store: self))
+        catalog.add(WorktreeTools(store: self))
         bus.onGraphChange = { [weak self] graph in
             try? self?.database?.saveConnections(graph.connections)
             self?.broadcast(.connections(graph.connections))
@@ -248,6 +250,8 @@ public final class Orchestrator: CoreService {
             update(record.id, from: board) { $0 = record }
         case .removeCard(let id):
             remove(id, from: board)
+        case .prompt(let id, let text):
+            agentEndpoints[id]?.prompt(text)
         case .deliver(let from, let text):
             for peer in bus.peers(of: from) where peer is any MessageEndpoint {
                 _ = try? bus.deliver(text, from: from, to: peer.id)
@@ -329,7 +333,7 @@ public final class Orchestrator: CoreService {
     /// Runs a tool only a board can (a browser's) on a connected one.
     func relay(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
         guard let board = boards.first else {
-            return .error(name.hasPrefix("project_") ? "Projects live in the board, which isn't open right now. Ask the user to open it, then try again." : "Browsers run in the board, which isn't open right now. Ask the user to open it, then try again.")
+            return .error(name.hasPrefix("project_") || name.hasPrefix("worktree_") ? "Projects live in the board, which isn't open right now. Ask the user to open it, then try again." : "Browsers run in the board, which isn't open right now. Ask the user to open it, then try again.")
         }
         let data = (try? JSONSerialization.data(withJSONObject: arguments)) ?? Data("{}".utf8)
         let call = UUID()
@@ -458,12 +462,18 @@ public final class Orchestrator: CoreService {
             session.fail(L("This worktree no longer exists on disk."))
             return
         }
-        guard let executable = Self.resolve(provider.executable, in: searchPath) else {
-            session.fail(L("Could not find “\(provider.executable)” in your PATH."))
+        guard let executable = AgentCatalog.locate(provider.executable, in: searchPath) else {
+            if let install = provider.installCommand {
+                session.fail(L("\(provider.title) is not installed. Install it in a terminal with “\(install)”, then click this card."))
+            } else {
+                session.fail(L("Could not find “\(provider.executable)” in your PATH."))
+            }
             return
         }
         var environment = provider.environment(ProcessInfo.processInfo.environment)
-        environment["PATH"] = searchPath
+        // Found outside the PATH: its folder joins it, for scripts run through `env node` and the like.
+        let folder = (executable as NSString).deletingLastPathComponent
+        environment["PATH"] = searchPath.split(separator: ":").contains(Substring(folder)) ? searchPath : searchPath + ":" + folder
         environment["TERM"] = "xterm-256color"
         environment["COLORTERM"] = "truecolor"
         environment["LANG"] = environment["LANG"] ?? "en_US.UTF-8"
@@ -478,13 +488,6 @@ public final class Orchestrator: CoreService {
     }
 
     var launchSearchPath: String? { searchPath }
-
-    private static func resolve(_ name: String, in searchPath: String) -> String? {
-        if name.hasPrefix("/") { return FileManager.default.isExecutableFile(atPath: name) ? name : nil }
-        return searchPath.split(separator: ":")
-            .map { "\($0)/\(name)" }
-            .first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
 
     /// GUI apps get a minimal PATH; ask the user's interactive login shell for the real one
     /// so tools installed through shell config (like ~/.local/bin) are found.
@@ -520,6 +523,9 @@ public final class Orchestrator: CoreService {
     }
 }
 
+/// The board of an element of one organization's worktree; see `MessageBus.elements(onBoardOf:)`.
+func boardKey(_ worktree: String, _ organization: UUID) -> String { worktree + "\u{0}" + organization.uuidString }
+
 /// An agent as the message bus sees it: a message is typed into its terminal as a prompt.
 @MainActor
 final class AgentEndpoint: MessageEndpoint {
@@ -540,6 +546,7 @@ final class AgentEndpoint: MessageEndpoint {
 
     var name: String { store?.record(id)?.name ?? "" }
     var kind: ElementKind { .agent }
+    var board: String? { store?.record(id).map { boardKey($0.worktree, $0.organizationID) } }
 
     var unavailableReason: String? {
         switch store?.session(id)?.state {
@@ -550,6 +557,14 @@ final class AgentEndpoint: MessageEndpoint {
         case .stopped: "it was stopped"
         case nil: "it hasn't started yet"
         }
+    }
+
+    /// What the user wrote in the card's composer, typed in as their own prompt.
+    func prompt(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        outbox.append(text)
+        deliverNext()
     }
 
     func receive(_ message: Message, from sender: any BoardElement) {
@@ -586,6 +601,7 @@ final class RunnerElement: BoardElement {
 
     var name: String { store?.record(id)?.name ?? "" }
     var kind: ElementKind { .runner }
+    var board: String? { store?.record(id).map { boardKey($0.worktree, $0.organizationID) } }
 
     var detail: String? {
         guard let runner = store?.record(id)?.runner else { return nil }
@@ -607,6 +623,7 @@ private final class PostItElement: BoardElement {
 
     var name: String { store?.postIt(id)?.name ?? "" }
     var kind: ElementKind { .postIt }
+    var board: String? { store?.postIt(id).map { boardKey($0.worktree, $0.organizationID) } }
 
     var detail: String? {
         guard let record = store?.postIt(id) else { return nil }
@@ -627,11 +644,13 @@ private final class ImageElement: BoardElement {
     }
 
     var name: String { store?.image(id)?.name ?? "" }
-    var kind: ElementKind { .image }
+    var kind: ElementKind { store?.image(id)?.isVideo == true ? .video : .image }
+    var board: String? { store?.image(id).map { boardKey($0.worktree, $0.organizationID) } }
 
     var detail: String? {
-        guard let size = store?.image(id)?.pixelSize else { return nil }
-        return "\(Int(size.width))×\(Int(size.height))"
+        guard let record = store?.image(id) else { return nil }
+        let size = "\(Int(record.pixelSize.width))×\(Int(record.pixelSize.height))"
+        return record.duration.map { "\(size), \(Int($0.rounded())) s; read with video_read" } ?? size
     }
 }
 
@@ -649,4 +668,5 @@ private final class RemoteElement: BoardElement {
     var name: String { store?.element(id)?.name ?? "" }
     var kind: ElementKind { ElementKind(rawValue: store?.element(id)?.kind ?? "") }
     var detail: String? { store?.element(id)?.detail }
+    var board: String? { store?.element(id)?.worktree }
 }

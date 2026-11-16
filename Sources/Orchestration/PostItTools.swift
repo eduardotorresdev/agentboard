@@ -34,7 +34,7 @@ final class PostItTools: ToolProvider {
 
     private static let postItArgument: [String: Any] = [
         "type": "string",
-        "description": "Which connected post-it, by name. Needed only when several are connected.",
+        "description": "Which connected post-it, by name or id (as list_peers shows it). Needed only when several are connected.",
     ]
 
     private static func schema(_ properties: [String: Any], required: [String] = []) -> [String: Any] {
@@ -183,7 +183,7 @@ final class PostItTools: ToolProvider {
         let postIts = store.bus.peers(of: caller, kind: .postIt)
         guard !postIts.isEmpty else { return .failure(Refusal(text: Self.noneConnected)) }
         if let name = name?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
-            if let found = postIts.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
+            if let found = postIts.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame || $0.id.uuidString.caseInsensitiveCompare(name) == .orderedSame }) { return .success(found) }
             return .failure(Refusal(text: "No post-it named “\(name)” is connected to you. Connected: \(postIts.map(\.name).joined(separator: ", "))."))
         }
         guard postIts.count == 1, let only = postIts.first else {

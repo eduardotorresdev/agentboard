@@ -170,7 +170,7 @@ private struct SourceRow: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(isHovered ? 0.06 : 0)))
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.card).fill(Color.primary.opacity(isHovered ? 0.06 : 0)))
             .contentShape(.rect)
         }
         .buttonStyle(.plain)

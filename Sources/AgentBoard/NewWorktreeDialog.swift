@@ -60,8 +60,7 @@ struct NewWorktreeDialog: View {
         guard draft.create(using: { added = try store.addWorktree(branch: $0, to: project) }) else { return }
         dismiss()
         if let added {
-            // Hook for F3's worktree titles: the typed name is the title, the slug only the folder.
-            store.rename(added, to: draft.trimmedName)
+            // TODO(F3): store draft.trimmedName as the worktree's initial title (not a user alias).
             onAdded(added)
         }
     }

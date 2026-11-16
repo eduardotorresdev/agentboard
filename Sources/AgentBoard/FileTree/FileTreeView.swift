@@ -37,7 +37,7 @@ struct FileTreeView: View {
             FileContentView(store: store, id: id, model: model)
         }
         .background(Theme.surface)
-        .clipShape(.rect(cornerRadius: 8))
+        .clipShape(.rect(cornerRadius: Theme.Radius.card))
     }
 }
 
@@ -72,8 +72,8 @@ private struct FileTreeSidebar: View {
             .font(.system(size: 12))
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Theme.surface, in: .capsule)
-            .overlay(Capsule().strokeBorder(Theme.line.opacity(0.12)))
+            .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.line.opacity(0.12)))
             .padding(8)
         }
     }
@@ -115,7 +115,7 @@ private struct FileRow: View {
         .padding(.trailing, 10)
         .frame(height: 24)
         .background(selected ? Theme.accent.opacity(0.14) : isHovered ? Theme.line.opacity(0.06) : .clear,
-                    in: .rect(cornerRadius: 6))
+                    in: .rect(cornerRadius: Theme.Radius.control))
         .padding(.horizontal, 6)
         .contentShape(.rect)
         .onHover { isHovered = $0 }
@@ -316,8 +316,8 @@ private struct FileContentView: View {
                     .focused($isWriting)
                     .onSubmit { add(lines) }
                     .padding(8)
-                    .background(Theme.surface, in: .rect(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.line.opacity(0.14)))
+                    .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.card))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.line.opacity(0.14)))
                 Button { add(lines) } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 22)).foregroundStyle(Theme.accent)
                 }
@@ -329,7 +329,7 @@ private struct FileContentView: View {
         .font(.system(size: 12))
         .padding(12)
         .frame(width: 440, alignment: .leading)
-        .background(Theme.canvas, in: .rect(cornerRadius: 12))
+        .background(Theme.canvas, in: .rect(cornerRadius: Theme.Radius.dialog))
         .shadow(color: Theme.line.opacity(0.14), radius: 10, y: 4)
         .padding(.vertical, 6)
         .onAppear { isWriting = true }
@@ -370,7 +370,7 @@ private struct NoteView: View {
         .font(.system(size: 12))
         .padding(10)
         .frame(width: 440, alignment: .leading)
-        .background(Theme.accent.opacity(0.08), in: .rect(cornerRadius: 10))
+        .background(Theme.accent.opacity(0.08), in: .rect(cornerRadius: Theme.Radius.card))
         .padding(.vertical, 4)
     }
 }
@@ -390,7 +390,7 @@ struct SendAnnotationsBar: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .frame(height: 34)
-                    .background(Theme.accent.opacity(agents.isEmpty ? 0.4 : 1), in: .capsule)
+                    .background(Theme.accent.opacity(agents.isEmpty ? 0.4 : 1), in: .rect(cornerRadius: Theme.Radius.control))
             }
             .buttonStyle(.plain)
             .disabled(agents.isEmpty)
@@ -404,7 +404,7 @@ struct SendAnnotationsBar: View {
             .help(L("Discards the notes."))
         }
         .padding(4)
-        .background(.regularMaterial, in: .capsule)
+        .background(.regularMaterial, in: .rect(cornerRadius: Theme.Radius.control))
         .shadow(color: Theme.line.opacity(0.14), radius: 10, y: 4)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

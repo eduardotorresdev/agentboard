@@ -23,7 +23,12 @@ final class CoreSocket: @unchecked Sendable {
     /// Called on `queue` once, when the connection ends for any reason.
     var onClose: (() -> Void)?
 
+    /// A peer gone mid-write ends this process with SIGPIPE unless it is ignored; the sockets set
+    /// SO_NOSIGPIPE, but the pipes and PTYs next to them can't.
+    private static let ignoresSIGPIPE: Void = { signal(SIGPIPE, SIG_IGN) }()
+
     init(fd: Int32, queue: DispatchQueue) {
+        Self.ignoresSIGPIPE
         self.fd = fd
         self.queue = queue
         var on: Int32 = 1

@@ -18,7 +18,7 @@ struct NeedsYouButton: View {
                 // Quiet while nothing waits.
                 Text(L("All clear"))
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.line.opacity(0.4))
+                    .foregroundStyle(Theme.inkMuted)
                     .padding(.horizontal, 12)
                     .frame(height: 30)
             } else {
@@ -40,16 +40,16 @@ struct NeedsYouButton: View {
                 }
                     .padding(.horizontal, 7)
                     .frame(minWidth: 22, minHeight: 20)
-                    .background(count > 0 ? .white : Theme.line.opacity(0.08), in: .capsule)
-                    .foregroundStyle(count > 0 ? Theme.accent : Theme.line.opacity(0.5))
+                    .background(count > 0 ? .white : Theme.line.opacity(0.08), in: .rect(cornerRadius: Theme.Radius.control))
+                    .foregroundStyle(count > 0 ? Theme.accent : Theme.inkMuted)
             }
             .padding(.leading, 14)
             .padding(.trailing, 5)
             .frame(height: 30)
-            .foregroundStyle(count > 0 ? .white : Theme.line.opacity(0.55))
+            .foregroundStyle(count > 0 ? .white : Theme.inkMuted)
             .background(count > 0 ? Theme.accent.opacity(isHovered ? 0.88 : 1) : Theme.line.opacity(isHovered ? 0.07 : 0.04),
-                        in: .capsule)
-            .contentShape(.capsule)
+                        in: .rect(cornerRadius: Theme.Radius.control))
+            .contentShape(.rect(cornerRadius: Theme.Radius.control))
             .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
         }
@@ -155,8 +155,8 @@ struct NeedsYouDeck: View {
         EmptyCanvas(symbol: "checkmark.circle", title: L("Nobody is waiting on you"),
                     message: L("An agent shows up here when it finishes its turn or asks you something.")) { EmptyView() }
             .frame(width: min(size.width, size.height * 0.72), height: size.height)
-            .background(RoundedRectangle(cornerRadius: 18).fill(Theme.surface.opacity(0.5)))
-            .overlay(RoundedRectangle(cornerRadius: 18)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.dialog).fill(Theme.surface.opacity(0.5)))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.dialog)
                 .strokeBorder(Theme.line.opacity(0.18), style: StrokeStyle(lineWidth: 1.5, dash: [8, 6])))
     }
 
@@ -322,7 +322,7 @@ private struct NeedsYouCard: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 12)
         }
-        .background(Theme.surface, in: .rect(cornerRadius: 18))
+        .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.dialog))
         .overlay(alignment: .top) {
             // Says what letting go does, once the drag is most of the way there.
             Label(L("Done"), systemImage: "checkmark")
@@ -330,7 +330,7 @@ private struct NeedsYouCard: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(Theme.accent, in: .capsule)
+                .background(Theme.accent, in: .rect(cornerRadius: Theme.Radius.control))
                 .padding(.top, -14)
                 .opacity(Double(max(0, (progress - 0.6) / 0.4)))
                 .scaleEffect(progress >= 1 ? 1.06 : 1)
@@ -396,7 +396,7 @@ private struct NeedsYouCard: View {
                 ScrollView { body }
             }
             .frame(maxHeight: questions == nil ? max(80, size.height - terminalHeight - 190) : 140)
-            .background(Theme.canvas, in: .rect(cornerRadius: 12))
+            .background(Theme.canvas, in: .rect(cornerRadius: Theme.Radius.dialog))
         }
     }
 

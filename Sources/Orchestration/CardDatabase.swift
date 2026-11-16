@@ -60,6 +60,10 @@ final class CardDatabase {
             try execute("ALTER TABLE postits ADD COLUMN organization TEXT")
         }
         try migrateNotesBlocks()
+        // Videos share the images table; a picture has no duration.
+        if try !columns(of: "images").contains("duration") {
+            try execute("ALTER TABLE images ADD COLUMN duration REAL")
+        }
         if try !columns(of: "agents").contains("name") {
             try execute("ALTER TABLE agents ADD COLUMN name TEXT")
         }
@@ -198,7 +202,7 @@ final class CardDatabase {
 
     /// Images, in the order they were added.
     func images() throws -> [ImageRecord] {
-        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, file, pixel_width, pixel_height, organization FROM images ORDER BY rowid")
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, file, pixel_width, pixel_height, organization, duration FROM images ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
         var result: [ImageRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -211,15 +215,16 @@ final class CardDatabase {
                               width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
                 file: String(cString: sqlite3_column_text(stmt, 7)),
                 pixelSize: CGSize(width: sqlite3_column_double(stmt, 8), height: sqlite3_column_double(stmt, 9)),
-                organization: sqlite3_column_text(stmt, 10).flatMap { UUID(uuidString: String(cString: $0)) }))
+                organization: sqlite3_column_text(stmt, 10).flatMap { UUID(uuidString: String(cString: $0)) },
+                duration: sqlite3_column_type(stmt, 11) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 11)))
         }
         return result
     }
 
     func saveImage(_ image: ImageRecord) throws {
         let stmt = try prepare("""
-            INSERT OR REPLACE INTO images (id, worktree, name, x, y, width, height, file, pixel_width, pixel_height, organization)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO images (id, worktree, name, x, y, width, height, file, pixel_width, pixel_height, organization, duration)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, image.id.uuidString)
@@ -232,6 +237,7 @@ final class CardDatabase {
         sqlite3_bind_double(stmt, 9, image.pixelSize.width)
         sqlite3_bind_double(stmt, 10, image.pixelSize.height)
         if let organization = image.organization { bind(stmt, 11, organization.uuidString) } else { sqlite3_bind_null(stmt, 11) }
+        if let duration = image.duration { sqlite3_bind_double(stmt, 12, duration) } else { sqlite3_bind_null(stmt, 12) }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 

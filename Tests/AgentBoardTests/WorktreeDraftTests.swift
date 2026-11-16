@@ -44,6 +44,8 @@ private func repository() throws -> URL {
     draft.name = "Taken"
     await draft.validate()
 
-    #expect(draft.problem?.contains("already exists") == true)
+    // The message names the folder; checked that way so the test doesn't depend on the locale.
+    let taken = (Git.worktreeLocation(for: "taken", in: repo.path).path as NSString).abbreviatingWithTildeInPath
+    #expect(draft.problem?.contains(taken) == true)
     #expect(!draft.canSubmit)
 }

@@ -459,7 +459,7 @@ struct OrchestratorTests {
         let unconnected = try await call("postit_read", as: c.id, on: core)
         #expect(unconnected.isError)
         let peers = try await call("list_peers", as: a.id, on: core)
-        #expect(peers.text.contains("Post-it (postit, shared markdown note, empty"), "\(peers.text)")
+        #expect(peers.text.contains("connected: true, shared markdown note, empty"), "\(peers.text)")
 
         let written = try await call("postit_write", ["text": "# Export\n- CSV uses semicolons"], as: a.id, on: core)
         #expect(!written.isError, "\(written.text)")
@@ -603,6 +603,7 @@ struct OrchestratorTests {
     let path = NSTemporaryDirectory() + "abcore-\(UUID().uuidString.prefix(8)).sock"
     defer { unlink(path) }
     let board = try #require(CoreClient.connect(socketPath: path, launching: binary, environment: ["AGENTBOARD_HOME": home.path], timeout: 10))
+    defer { CoreClient.connect(socketPath: path, timeout: 1)?.shutdown() }
     func runner(_ name: String, _ command: String) -> AgentRecord {
         AgentRecord(id: UUID(), worktree: home.path, providerID: AgentRecord.runnerProviderID, name: name,
                     frame: CGRect(x: 0, y: 0, width: 600, height: 340), runner: RunnerSpec(command: command, directory: home.path, owner: nil))
@@ -673,6 +674,7 @@ private func binaryCall(_ tool: String, _ arguments: [String: Any] = [:], as cal
     defer { unlink(path) }
     let environment = ["AGENTBOARD_HOME": home.path]
     let first = try #require(CoreClient.connect(socketPath: path, launching: binary, environment: environment, timeout: 10))
+    defer { CoreClient.connect(socketPath: path, timeout: 1)?.shutdown() }
     let counter = AgentRecord(id: UUID(), worktree: home.path, providerID: AgentRecord.runnerProviderID, name: "counter",
                               frame: CGRect(x: 0, y: 0, width: 600, height: 340),
                               runner: RunnerSpec(command: "i=0; while [ $i -lt 100000 ]; do i=$((i+1)); echo tick $i; sleep 0.01; done",
@@ -841,6 +843,8 @@ private func binaryCall(_ tool: String, _ arguments: [String: Any] = [:], as cal
         let runner: AgentRecord
         let reader: AgentRecord
     }
+    var spawned: [Process] = []
+    defer { for core in spawned where core.isRunning { core.terminate() } }
     func launch(_ name: String) async throws -> Instance {
         let home = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abhome-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -851,6 +855,7 @@ private func binaryCall(_ tool: String, _ arguments: [String: Any] = [:], as cal
         environment["AGENTBOARD_HOME"] = home.path
         core.environment = environment
         try core.run()
+        spawned.append(core)
         // Where the instance's board finds it: in its data folder.
         let socket = home.appendingPathComponent("core.sock").path
         var board: CoreClient?

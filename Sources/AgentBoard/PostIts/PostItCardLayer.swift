@@ -19,7 +19,6 @@ enum PostItControl: Equatable {
 /// Where everything in a post-it sits, in the card's own coordinates: shared by the layer that
 /// draws it and the board that hit-tests it.
 struct PostItCardLayout {
-    let dot: CGRect
     let title: CGRect
     let close: CGRect
     /// The View | Code switch, and each of its halves.
@@ -29,14 +28,13 @@ struct PostItCardLayout {
     /// Where the text shows; it scrolls inside.
     let content: CGRect
 
-    static let titleFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
-    static let modeFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    static let titleFont = CardFrame.titleFont
+    static let modeFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
     static let placeholderFont = NSFont.systemFont(ofSize: 12)
 
     init(size: CGSize) {
         let bounds = CGRect(origin: .zero, size: size)
         let mid = CardMetrics.titleHeight / 2
-        dot = CGRect(x: CardMetrics.inset + 2, y: mid - 3.5, width: 7, height: 7)
         close = CardMetrics.close(of: bounds)
         let labels = [L("View"), L("Code")].map { ceil(($0 as NSString).size(withAttributes: [.font: Self.modeFont]).width) + 16 }
         let height: CGFloat = 22
@@ -44,7 +42,7 @@ struct PostItCardLayout {
         modes = CGRect(x: close.minX - 8 - modesWidth, y: mid - height / 2, width: modesWidth, height: height)
         view = CGRect(x: modes.minX + 2, y: modes.minY + 2, width: labels[0], height: height - 4)
         code = CGRect(x: view.maxX, y: view.minY, width: labels[1], height: height - 4)
-        title = CGRect(x: dot.maxX + 8, y: mid - 9, width: max(0, modes.minX - dot.maxX - 16), height: 18)
+        title = CGRect(x: CardFrame.titleX, y: mid - 10, width: max(0, modes.minX - CardFrame.titleX - 8), height: 20)
         content = CGRect(x: CardMetrics.inset + 4, y: CardMetrics.titleHeight + 4,
                          width: max(0, size.width - CardMetrics.inset * 2 - 8),
                          height: max(0, size.height - CardMetrics.titleHeight - CardMetrics.inset - 8))
@@ -66,8 +64,8 @@ struct PostItCardLayout {
 /// One post-it: chrome as Core Animation layers like the other cards, and the text drawn into
 /// one layer that is redrawn only when what it shows changes.
 final class PostItCardLayer: CALayer {
-    private let dot = CALayer()
-    private let title = CATextLayer()
+    private let bar = CardTitleBar()
+    private var focused = false
     private let closeHover = CALayer()
     private let closeGlyph = CATextLayer()
     private let modes = CALayer()
@@ -82,21 +80,7 @@ final class PostItCardLayer: CALayer {
 
     override init() {
         super.init()
-        backgroundColor = BoardPalette.rgb(BoardPalette.postIt)
-        cornerRadius = CardMetrics.radius
-        shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        dot.cornerRadius = 3.5
-        dot.backgroundColor = BoardPalette.rgb(BoardPalette.secondary)
-        closeHover.cornerRadius = CardMetrics.closeSize / 2
-        closeHover.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.08)
-        for layer in [title, closeGlyph, viewLabel, codeLabel] {
-            layer.fontSize = 12
-            layer.truncationMode = .end
-        }
-        title.font = PostItCardLayout.titleFont
-        closeGlyph.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        closeGlyph.string = "✕"
-        closeGlyph.alignmentMode = .center
+        for layer in [viewLabel, codeLabel] { layer.truncationMode = .end }
         for (label, string) in [(viewLabel, L("View")), (codeLabel, L("Code"))] {
             label.font = PostItCardLayout.modeFont
             label.fontSize = PostItCardLayout.modeFont.pointSize
@@ -105,13 +89,10 @@ final class PostItCardLayer: CALayer {
         }
         modes.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.07)
         selectedMode.backgroundColor = BoardPalette.card
-        selectedMode.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        selectedMode.shadowOpacity = 0.1
-        selectedMode.shadowRadius = 2
-        selectedMode.shadowOffset = CGSize(width: 0, height: 1)
         text.masksToBounds = true
         text.needsDisplayOnBoundsChange = true
-        [dot, title, closeHover, closeGlyph, modes, selectedMode, viewLabel, codeLabel, text].forEach(addSublayer)
+        [bar, closeHover, closeGlyph, modes, selectedMode, viewLabel, codeLabel, text].forEach(addSublayer)
+        CardFrame.reveal([closeGlyph], visible: false)
         for handle in handles {
             handle.bounds = CGRect(x: 0, y: 0, width: CardMetrics.handleSize, height: CardMetrics.handleSize)
             handle.cornerRadius = CardMetrics.handleSize / 2
@@ -143,25 +124,17 @@ final class PostItCardLayer: CALayer {
     func update(frame: CGRect, record: PostItRecord, layout: PostItCardLayout, mode: PostItMode, scroll: CGFloat, focused: Bool,
                 hovered: PostItControl?, editing: Bool, scale: CGFloat) {
         self.frame = frame
-        shadowPath = CGPath(roundedRect: bounds, cornerWidth: CardMetrics.radius, cornerHeight: CardMetrics.radius, transform: nil)
-        shadowOpacity = focused ? 0.16 : 0.08
-        shadowRadius = focused ? 14 : 8
-        shadowOffset = CGSize(width: 0, height: focused ? 12 : 5)
-        for layer in [title, closeGlyph, viewLabel, codeLabel] { layer.contentsScale = scale }
+        self.focused = focused
+        CardFrame.style(self, focused: focused)
+        for layer in [viewLabel, codeLabel] { layer.contentsScale = scale }
 
         let ink = BoardPalette.ink
-        let line = PostItCardLayout.lineHeight(PostItCardLayout.titleFont) + 2
-        dot.frame = layout.dot
-        title.string = record.name
-        title.foregroundColor = BoardPalette.rgb(ink, focused ? 0.9 : 0.6)
-        title.frame = CGRect(x: layout.title.minX, y: layout.title.midY - line / 2, width: layout.title.width, height: line)
-        closeHover.frame = layout.close
-        closeHover.isHidden = hovered != .close
-        closeGlyph.foregroundColor = BoardPalette.rgb(ink, hovered == .close ? 0.8 : 0.4)
-        closeGlyph.frame = CGRect(x: layout.close.minX, y: layout.close.midY - line / 2, width: layout.close.width, height: line)
+        bar.update(size: bounds.size, icon: .symbol("note.text", color: Theme.Hex.inkMuted), status: nil, title: record.name, detail: nil, focused: focused,
+                   reserve: bounds.width - layout.title.maxX, fill: BoardPalette.rgb(BoardPalette.postIt), scale: scale)
+        CardFrame.closeButton(closeHover, closeGlyph, in: layout.close, hovered: hovered == .close, scale: scale)
 
         modes.frame = layout.modes
-        modes.cornerRadius = layout.modes.height / 2
+        modes.cornerRadius = Theme.Radius.control
         let selected = mode == .view ? layout.view : layout.code
         // The selected half slides under its label.
         if shownMode != nil, shownMode != mode {
@@ -175,11 +148,11 @@ final class PostItCardLayer: CALayer {
         }
         shownMode = mode
         selectedMode.frame = selected
-        selectedMode.cornerRadius = selected.height / 2
+        selectedMode.cornerRadius = Theme.Radius.control - 1
         let modeLine = PostItCardLayout.lineHeight(PostItCardLayout.modeFont) + 1
         for (label, rect, kind) in [(viewLabel, layout.view, PostItMode.view), (codeLabel, layout.code, .code)] {
             label.frame = CGRect(x: rect.minX, y: rect.midY - modeLine / 2, width: rect.width, height: modeLine)
-            label.foregroundColor = BoardPalette.rgb(ink, mode == kind ? 0.9 : hovered == .mode(kind) ? 0.7 : 0.45)
+            label.foregroundColor = BoardPalette.rgb(ink, mode == kind ? 0.95 : hovered == .mode(kind) ? 0.75 : 0.55)
         }
 
         text.frame = layout.content
@@ -207,14 +180,9 @@ final class PostItCardLayer: CALayer {
             }
             hoveredHandle = hovered
         }
-        if linkTarget {
-            shadowColor = BoardPalette.rgb(BoardPalette.accent)
-            shadowOpacity = 0.45
-            shadowRadius = 18
-            shadowOffset = .zero
-        } else {
-            shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        }
+        // A line's target lights up with the highlighted ring, like focus.
+        CardFrame.style(self, focused: focused || linkTarget)
+        CardFrame.reveal([closeGlyph], visible: visible || focused)
     }
 
     func animateAppearance() {

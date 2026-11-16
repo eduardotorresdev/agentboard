@@ -21,8 +21,19 @@ final class ProjectTools {
         switch name {
         case "project_list": return .text(list(in: organization))
         case "project_create": return await create(arguments, in: organization)
+        case "worktree_set_title": return setTitle(arguments, caller: caller)
         default: return .error("Unknown tool “\(name)”.")
         }
+    }
+
+    private func setTitle(_ arguments: [String: Any], caller: UUID) -> ToolResult {
+        guard let path = agents.record(caller)?.worktree else { return .error("Your card isn't on the board.") }
+        guard let title = (arguments["title"] as? String).flatMap(WorktreeTitle.clean) else {
+            return .error("Give a `title`: a few words.")
+        }
+        let result = projects.setAgentTitle(title, path: path)
+        return .text(result.applied ? "The worktree is titled “\(title)”."
+                                    : "Kept the user's title “\(result.shown)”: they named this worktree, so yours wasn't applied.")
     }
 
     private func list(in organization: UUID) -> String {

@@ -2,16 +2,17 @@ import AppKit
 import Orchestration
 import UniformTypeIdentifiers
 
-/// A picture the user gives the board: a file (picked or dropped), or pasted bytes.
+/// A picture or video the user gives the board: a file (picked or dropped), or pasted bytes
+/// (pictures only; a copied video comes as its file).
 enum ImageSource: Equatable {
     case file(URL)
     case data(Data)
 
-    /// The picture on `pasteboard`: a copied image file, else PNG or TIFF data. A copied file
-    /// that isn't an image gives nothing, not the icon Finder puts next to it.
+    /// The picture on `pasteboard`: a copied image or video file, else PNG or TIFF data. A copied
+    /// file that is neither gives nothing, not the icon Finder puts next to it.
     static func read(from pasteboard: NSPasteboard) -> ImageSource? {
         let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        if !urls.isEmpty { return urls.first(where: isImageFile).map(ImageSource.file) }
+        if !urls.isEmpty { return urls.first(where: isMediaFile).map(ImageSource.file) }
         for type in [NSPasteboard.PasteboardType.png, .tiff] {
             if let data = pasteboard.data(forType: type) { return .data(data) }
         }
@@ -21,6 +22,11 @@ enum ImageSource: Equatable {
     /// Puts the stored picture itself, at its full size, on `pasteboard`.
     @discardableResult
     static func copy(_ record: ImageRecord, in dataFolder: URL, to pasteboard: NSPasteboard) -> Bool {
+        if record.isVideo {
+            // A video goes as its file, the way Finder copies one.
+            pasteboard.clearContents()
+            return pasteboard.writeObjects([ImageFiles.url(of: record.file, in: dataFolder) as NSURL])
+        }
         guard let image = NSImage(contentsOf: ImageFiles.url(of: record.file, in: dataFolder)) else { return false }
         pasteboard.clearContents()
         return pasteboard.writeObjects([image])
@@ -30,6 +36,16 @@ enum ImageSource: Equatable {
         guard url.isFileURL else { return false }
         let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType ?? UTType(filenameExtension: url.pathExtension)
         return type?.conforms(to: .image) == true
+    }
+
+    /// A picture or a movie file (a movie AVFoundation can't play is refused when stored).
+    static func isMediaFile(_ url: URL) -> Bool {
+        isImageFile(url) || (url.isFileURL && ImageFiles.isVideoFile(url))
+    }
+
+    var isVideo: Bool {
+        if case .file(let url) = self { return ImageFiles.isVideoFile(url) }
+        return false
     }
 
     /// The card's name before it is made unique: the file's name, `Image` for pasted bytes.
@@ -61,7 +77,8 @@ extension AgentStore {
         }
         let record = ImageRecord(id: UUID(), worktree: worktree, name: ImageRecord.uniqueName(name, among: images(in: worktree)),
                                  frame: CGRect(origin: origin, size: ImageRecord.cardSize(for: stored.pixelSize)),
-                                 file: stored.file, pixelSize: stored.pixelSize, organization: organizationID)
+                                 file: stored.file, pixelSize: stored.pixelSize, organization: organizationID,
+                                 duration: stored.duration)
         images.append(record)
         send(.addImage(record))
         return record
