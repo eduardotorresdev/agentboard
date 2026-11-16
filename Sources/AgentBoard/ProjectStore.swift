@@ -88,8 +88,10 @@ final class ProjectStore {
 
     /// The same for a worktree that may not be in the shown organization (Needs you).
     func displayName(ofPath path: String) -> String {
+        // NSString, not URL(fileURLWithPath:): that one asks the disk whether the path is a
+        // folder, on every sidebar redraw, and a host's path (/home/…) waits on the automounter.
         WorktreeTitle.resolve(user: aliases[path], agent: agentTitles[path],
-                              folder: URL(fileURLWithPath: path).lastPathComponent, isMain: isMainCheckout(path))
+                              folder: (path as NSString).lastPathComponent, isMain: isMainCheckout(path))
     }
 
     /// Whether `path` is a project's own checkout, in the shown organization.

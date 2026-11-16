@@ -7,7 +7,7 @@ struct SkyBlobEmptyState: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            SkyBlob()
+            OwnGraph { SkyBlob() }.frame(width: 170, height: 160)
             Text(title)
                 .font(Theme.Font.headline)
                 .tracking(Theme.Font.headlineTracking)
@@ -18,6 +18,31 @@ struct SkyBlobEmptyState: View {
                 .multilineTextAlignment(.center)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// A SwiftUI graph of its own for a view that animates without end: inside the window's graph,
+/// each of its frames has the whole window laid out, rendered and committed. Built once: what
+/// it shows doesn't follow later changes of the view that holds it.
+struct OwnGraph<Content: View>: NSViewRepresentable {
+    @ViewBuilder var content: Content
+
+    func makeNSView(context: Context) -> NSView {
+        // A plain view around the hosting view, so its updates never mark the window's graph.
+        let container = Passthrough()
+        let host = NSHostingView(rootView: content)
+        // Sized by its frame: its ideal sizes are never asked for.
+        host.sizingOptions = []
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        return container
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class Passthrough: NSView {
+        // Clicks go to what is under it.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 
@@ -143,7 +168,9 @@ struct SkyBlob: View {
             // A small solid ground shadow that shrinks as the blob rises.
             Ellipse()
                 .fill(Theme.deep.opacity(0.14))
-                .frame(width: size.width * 0.8 * (1 - pose.lift / 140), height: 8)
+                // Scaled, not resized: a frame that animates lays the whole figure out on every frame.
+                .frame(width: size.width * 0.8, height: 8)
+                .scaleEffect(x: 1 - pose.lift / 140)
                 .offset(y: 4)
             ZStack {
                 if style.silhouette == .arms { arms(pose, size) }
@@ -173,7 +200,7 @@ struct SkyBlob: View {
         VStack(spacing: 5) {
             HStack(spacing: 10) {
                 ForEach(0 ..< 2, id: \.self) { _ in
-                    Capsule().fill(.white).frame(width: 12, height: max(19 * pose.eyes, 2.5))
+                    Capsule().fill(.white).frame(width: 12, height: 19).scaleEffect(y: max(pose.eyes, 2.5 / 19))
                 }
             }
             .offset(x: pose.look * 8)

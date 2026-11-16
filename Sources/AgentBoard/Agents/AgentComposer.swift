@@ -167,9 +167,23 @@ enum ComposerDrafts {
         }
     }
 
+    private static var pendingWrite: DispatchWorkItem?
+
     private static func store(_ text: String?, for id: UUID) {
         guard saved[id.uuidString] != text else { return }
         saved[id.uuidString] = text
+        // Written once the typing pauses: a file write on every key stalls the field.
+        pendingWrite?.cancel()
+        let write = DispatchWorkItem { flush() }
+        pendingWrite = write
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: write)
+    }
+
+    /// Writes the drafts still waiting to be written; the app calls it as it leaves.
+    static func flush() {
+        guard let write = pendingWrite else { return }
+        write.cancel()
+        pendingWrite = nil
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? JSONEncoder().encode(saved).write(to: file, options: [.atomic])
     }
@@ -256,9 +270,11 @@ private struct MentionField: NSViewRepresentable {
         view.onChange = { draft in
             ComposerDrafts.save(draft, for: id)
             ComposerDrafts.setLines(view.lineCount, for: id)
-            isEmpty = draft.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            notice = nil
-            store.composerNotices[id] = nil
+            // Each only when it changes: a write redraws what reads it, on every key otherwise.
+            let empty = draft.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if isEmpty != empty { isEmpty = empty }
+            if notice != nil { notice = nil }
+            if store.composerNotices[id] != nil { store.composerNotices[id] = nil }
         }
         view.onBlocked = { notice = $0 }
         if let draft = ComposerDrafts.draft(id) { view.textStorage?.setAttributedString(draft) }

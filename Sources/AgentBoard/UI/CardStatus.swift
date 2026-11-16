@@ -87,11 +87,59 @@ struct CardStatusDot: View {
         if status == .stopped {
             EmptyView()
         } else if status == .running && !reduceMotion {
-            PhaseAnimator([false, true]) { phase in
-                dot.scaleEffect(phase ? 0.65 : 1) // breathes by size only: full color keeps 3:1 at every phase
-            } animation: { _ in .smooth(duration: 1.1) }
+            BreathingDot(color: status.color).frame(width: 6, height: 6)
         } else {
             dot
+        }
+    }
+}
+
+/// The running dot, breathing by size only (full color keeps 3:1 at every phase), as on the
+/// cards. Core Animation runs it in the render server: a SwiftUI animation that never ends has
+/// the whole window's view tree redrawn on every frame.
+private struct BreathingDot: NSViewRepresentable {
+    let color: Color
+
+    func makeNSView(context: Context) -> DotView { DotView() }
+    func updateNSView(_ view: DotView, context: Context) { view.dot.backgroundColor = NSColor(color).cgColor }
+
+    final class DotView: NSView {
+        let dot = CALayer()
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layer?.addSublayer(dot)
+        }
+
+        @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+        // Clicks and hover go to the row under the dot.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            dot.frame = bounds
+            dot.cornerRadius = bounds.width / 2
+            CATransaction.commit()
+        }
+
+        // A layer loses its animations when it leaves the window, so each arrival starts it again.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            dot.removeAllAnimations()
+            guard window != nil else { return }
+            let spring = CASpringAnimation(keyPath: "transform.scale")
+            spring.fromValue = 1
+            spring.toValue = 0.65
+            spring.stiffness = 30
+            spring.damping = 9
+            spring.duration = spring.settlingDuration
+            spring.autoreverses = true
+            spring.repeatCount = .infinity
+            dot.add(spring, forKey: "status")
         }
     }
 }

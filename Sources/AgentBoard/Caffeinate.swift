@@ -46,7 +46,10 @@ struct CaffeinateSteam: View {
     var color: Color
 
     var body: some View {
-        TimelineView(.animation) { context in
+        // On a timer, a few times a second: the animation schedule wakes the whole window's view
+        // tree on every display frame, even when told to skip most of them, and the wisps move
+        // under a point between two of these.
+        TimelineView(.periodic(from: .now, by: 1.0 / 10)) { context in
             Canvas { canvas, size in
                 canvas.addFilter(.blur(radius: 1.2))
                 let t = context.date.timeIntervalSinceReferenceDate

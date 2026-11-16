@@ -78,7 +78,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // SIGTERM is how `./run --watch` replaces the app: leave right away, agents untouched.
         signal(SIGTERM, SIG_IGN)
         let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        terminate.setEventHandler { exit(0) }
+        terminate.setEventHandler {
+            MainActor.assumeIsolated { ComposerDrafts.flush() }
+            exit(0)
+        }
         terminate.resume()
         terminationSource = terminate
         if let path = ProcessInfo.processInfo.environment["AGENTBOARD_SCREENS"] { writeScreens(to: path) }
@@ -158,6 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Quitting ends the agents, as closing a terminal would. Being killed (a rebuild) doesn't:
     /// they stay on the core for the next launch.
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { Self.agents?.quit() }
+        MainActor.assumeIsolated {
+            ComposerDrafts.flush()
+            Self.agents?.quit()
+        }
     }
 }
