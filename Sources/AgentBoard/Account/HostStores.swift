@@ -350,14 +350,18 @@ final class HostStores {
         }
     }
 
-    /// For each host reached through the relay, tries the direct path again; a store whose
-    /// host answers there reconnects onto it. One that doesn't is left as it is.
-    func retryDirect() async {
-        for (host, store) in remote where store.core != nil {
+    /// For each host reached through the relay (or `only` that one, when the user asks), tries
+    /// the direct path again; a store whose host answers there reconnects onto it. One that
+    /// doesn't is left as it is. Says whether any moved.
+    @discardableResult func retryDirect(only: UUID? = nil) async -> Bool {
+        var moved = false
+        for (host, store) in remote where store.core != nil && (only == nil || only == host) {
             guard case .relay = store.hostPath, let channel = await openDirect(host) else { continue }
             if let stale = channels.lock.withLock({ channels.ready.updateValue(channel, forKey: host) }) { close(stale) }
             store.reconnect()
+            moved = true
         }
+        return moved
     }
 
     /// The user's answer to `vaultQuestion`: yes keeps this Mac's skills, servers and GitHub

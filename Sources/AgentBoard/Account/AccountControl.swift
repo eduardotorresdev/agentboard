@@ -177,6 +177,10 @@ struct AccountMenu: View {
     /// The approval or forgetting of a computer clicked once (host, then key): the next click does it.
     @State private var confirmingBoard: String?
     @State private var copiedKey = false
+    /// The relayed host whose direct path is being tried for the user.
+    @State private var tryingDirect: UUID?
+    /// The relayed host that didn't answer directly when the user last asked.
+    @State private var stillRelayed: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -266,11 +270,18 @@ struct AccountMenu: View {
                     }
                 }
                 if host.online, !changed, case .relay = hosts[host.id]?.hostPath {
-                    Text(L("Direct when this Mac and the host share a network, or the host's port 47470 is reachable."))
-                        .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 8)
-                        .padding(.bottom, 4)
+                    let when = L("Direct when this Mac and the host share a network, or the host's port 47470 is reachable.")
+                    MenuAction(title: tryingDirect == host.id ? L("Trying the direct connection…") : L("Try the direct connection now"),
+                               caption: stillRelayed == host.id ? L("The host didn't answer directly; still relayed.") + " " + when : when) {
+                        guard tryingDirect == nil else { return }
+                        tryingDirect = host.id
+                        stillRelayed = nil
+                        Task {
+                            let moved = await hosts.retryDirect(only: host.id)
+                            tryingDirect = nil
+                            if !moved { stillRelayed = host.id }
+                        }
+                    }
                 }
                 if changed {
                     MenuAction(title: L("Trust new identity"),

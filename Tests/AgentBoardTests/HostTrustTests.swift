@@ -160,14 +160,16 @@ private let otherKey = "B" + String(repeating: "A", count: 42) + "="
     store.hostPath = .relay
     let git = try await rig.projects.gitHost(rig.host)
 
-    // The direct path doesn't open: everything stays as it is.
-    await rig.hosts.retryDirect()
+    // The direct path doesn't open: everything stays as it is, and the user who asked hears so.
+    #expect(await rig.hosts.retryDirect(only: rig.host) == false)
     #expect(store.core === relayed)
 
-    // It opens: the store is on that channel, and says so.
+    // It opens: asking for another host leaves this one, asking for this one moves it.
     let socket = rig.socket
     rig.hosts.openDirect = { _ in try? UnixSocket.connect(to: socket) }
-    await rig.hosts.retryDirect()
+    #expect(await rig.hosts.retryDirect(only: UUID()) == false)
+    #expect(store.core === relayed)
+    #expect(await rig.hosts.retryDirect(only: rig.host))
     try await waitUntil { store.core != nil && store.core !== relayed }
     try await waitUntil { if case .direct = store.hostPath { true } else { false } }
     #expect(store.notice == nil)

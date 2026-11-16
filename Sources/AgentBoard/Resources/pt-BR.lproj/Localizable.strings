@@ -448,6 +448,9 @@
 "Signs out every computer showing this account. Hosts keep running." = "Sai de todos os computadores que mostram esta conta. Os hosts continuam rodando.";
 "Servers copied: %@." = "Servidores copiados: %@.";
 "Direct when this Mac and the host share a network, or the host's port 47470 is reachable." = "Direto quando este Mac e o host estão na mesma rede, ou quando a porta 47470 do host é alcançável.";
+"Try the direct connection now" = "Tentar a conexão direta agora";
+"Trying the direct connection…" = "Tentando a conexão direta…";
+"The host didn't answer directly; still relayed." = "O host não respondeu direto; continua via relay.";
 "%@: the versions it has on this Mac can't be installed on %@ (%@)." = "%1$@: as versões que ele tem neste Mac não podem ser instaladas em %2$@ (%3$@).";
 "%@ is waiting to approve this Mac. The account menu says how." = "%@ está esperando para aprovar este Mac. O menu da conta diz como.";
 "Fingerprint %@" = "Impressão digital %@";
