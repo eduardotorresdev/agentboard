@@ -23,6 +23,17 @@ impl std::fmt::Display for Failed {
     }
 }
 
+fn failed(error: ureq::Error) -> Failed {
+    match error {
+        ureq::Error::Status(status, reply) => {
+            let body: Value = reply.into_json().unwrap_or(Value::Null);
+            Failed { status, code: body["error"].as_str().unwrap_or("").to_string() }
+        }
+        // The transport's kind only: never the request, which carries the token.
+        ureq::Error::Transport(transport) => Failed { status: 0, code: transport.kind().to_string() },
+    }
+}
+
 pub struct Api {
     server: String,
     agent: ureq::Agent,
@@ -43,15 +54,13 @@ impl Api {
             Some(body) => request.send_json(body),
             None => request.call(),
         };
-        match reply {
-            Ok(reply) => Ok(reply.into_json().unwrap_or(Value::Null)),
-            Err(ureq::Error::Status(status, reply)) => {
-                let body: Value = reply.into_json().unwrap_or(Value::Null);
-                Err(Failed { status, code: body["error"].as_str().unwrap_or("").to_string() })
-            }
-            // The transport's kind only: never the request, which carries the token.
-            Err(ureq::Error::Transport(transport)) => Err(Failed { status: 0, code: transport.kind().to_string() }),
-        }
+        reply.map(|reply| reply.into_json().unwrap_or(Value::Null)).map_err(failed)
+    }
+
+    /// A GET whose reply is bytes, at most `limit` of them.
+    pub fn bytes(&self, path: &str, token: &str, limit: u64) -> Result<Vec<u8>, Failed> {
+        let reply = self.agent.get(&format!("{}{path}", self.server)).set("Authorization", &format!("Bearer {token}")).call().map_err(failed)?;
+        crate::vault::read_limited(reply.into_reader(), limit).map_err(|error| Failed { status: 0, code: error.kind().to_string() })
     }
 
     /// Registers this host, or refreshes its name, platform and version, and where boards may
@@ -122,10 +131,11 @@ pub fn login() -> Result<(), String> {
 }
 
 /// `agentboard logout`: forgets this host on the account, then the token on both sides, and
-/// every board this host trusted.
+/// every board this host trusted, and the vault's key (what the vault wrote stays).
 pub fn logout() -> Result<(), String> {
     let folder = config::data_folder();
     crate::boards::clear(&folder)?;
+    crate::vault::forget(&folder);
     let mut config = Config::load(&folder)?;
     let Some(token) = config.token.take().map(zeroize::Zeroizing::new) else {
         println!("Not signed in.");

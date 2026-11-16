@@ -585,6 +585,8 @@ fn run(executable: &str, arguments: Vec<String>, directory: Option<&str>, input:
     if let Some(directory) = directory {
         command.current_dir(directory);
     }
+    // A group of its own, so the time limit ends what the program started too (a shell's git).
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     // Nobody is there to answer a question: git says what it lacks instead of waiting for it.
     command.env("GIT_TERMINAL_PROMPT", "0");
     if std::env::var_os("GIT_SSH_COMMAND").is_none() {
@@ -615,8 +617,8 @@ fn run(executable: &str, arguments: Vec<String>, directory: Option<&str>, input:
                 std::thread::sleep(Duration::from_millis(200));
             }
             if !done.load(std::sync::atomic::Ordering::SeqCst) {
-                // SAFETY: a signal to the child this function still waits for (not reaped yet).
-                unsafe { libc::kill(pid, libc::SIGKILL) };
+                // SAFETY: a signal to the group of the child this function still waits for (not reaped yet).
+                unsafe { libc::kill(-pid, libc::SIGKILL) };
             }
         }
     });

@@ -392,11 +392,24 @@ import Testing
         let home = URL(fileURLWithPath: String(cString: getpwuid(getuid()).pointee.pw_dir))
         let entries = HostSync.entries(in: home)
         let syncing = Date()
-        await hosts.sync(host.id, from: home)
+        // While it runs, the store's own connection is asked small things: how long each answer takes.
+        let inFlight = Task { await hosts.sync(host.id, from: home) }
+        var echoes: [Double] = []
+        while hosts.syncNotes[host.id] == nil || hosts.syncNotes[host.id] == AgentBoard.L("Syncing skills…") {
+            let asked = Date()
+            guard await store.run("true", [])?.status == 0 else { break }
+            echoes.append(Date().timeIntervalSince(asked) * 1000)
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        await inFlight.value
+        echoes.sort()
         print("pilot: sync of \(entries) in \(Int(Date().timeIntervalSince(syncing) * 1000)) ms: \(hosts.syncNotes[host.id] ?? "no note")")
+        print("pilot: \(echoes.count) small calls on the store's connection while it synced: median \(Int(echoes.isEmpty ? 0 : echoes[echoes.count / 2])) ms, slowest \(Int(echoes.last ?? 0)) ms")
+        #expect(store.notice == nil && store.core != nil, "a sync never makes the host look unreachable")
+        let again = Date()
         let outcome = try await HostSync.run(from: home, to: files, dataFolder: hostData)
-        print("pilot: skipped \(outcome.skipped), kept the host's own \(outcome.kept), the host lacks \(outcome.missing)")
-        #expect(hosts.syncNotes[host.id] == outcome.note(on: host.name), "the menu's row says what a sync did")
+        print("pilot: synced again in \(Int(Date().timeIntervalSince(again) * 1000)) ms: \(outcome.note(on: host.name))")
+        #expect(outcome.upToDate || !outcome.missing.isEmpty || !outcome.unresolved.isEmpty, "nothing changed: nothing to send")
         if let skill = (try? FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".claude/skills").path))?.sorted().first(where: { !$0.hasPrefix(".") }) {
             #expect(await store.run("sh", ["-c", "test -e \"$HOME/.claude/skills/$1\"", "sh", skill])?.status == 0, "the skill \(skill) is on the host")
         }
@@ -412,7 +425,7 @@ import Testing
 
         // What an agent there is given: the servers as its own program lists them (names and
         // state only: the rest of each line may hold a key), and the skills in its home.
-        let offered = await store.run("sh", ["-c", "claude mcp list 2>&1 | sed -E 's/^([^:]*):.* - ([^-]*)$/\\1: \\2/'"])
+        let offered = await store.run("sh", ["-c", "claude mcp list 2>&1 | sed -E 's/^([^:]*):.* - ([^-]*)$/\\1: \\2/'"], patience: 180)
         print("pilot: `claude mcp list` on the host (exit \(offered?.status ?? -1)):\n\(String(decoding: offered?.output ?? Data(), as: UTF8.self))")
         let skills = await files.output("sh", ["-c", "ls \"$HOME/.claude/skills\" | wc -l; ls \"$HOME/.claude/skills\" | head -8"]) ?? ""
         print("pilot: skills in the host's home (count, then the first):\n\(skills)")

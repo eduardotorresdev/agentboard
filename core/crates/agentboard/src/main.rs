@@ -12,6 +12,14 @@ fn main() {
         Some("logout") => finish(host::logout()),
         Some("setup") => finish(host::setup()),
         Some("status") => finish(host::status()),
+        Some("vault") => match arguments.get(1).map(String::as_str) {
+            Some("pull") => finish(host::vault_pull()),
+            Some("status") => finish(host::vault_status()),
+            _ => {
+                eprintln!("{}", core::USAGE);
+                std::process::exit(2);
+            }
+        },
         Some("boards") => finish(host::boards()),
         // A fingerprint's groups may come as separate arguments.
         Some("trust") => finish(host::trust(&arguments[1..].concat())),

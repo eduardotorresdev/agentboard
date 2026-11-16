@@ -1,3 +1,5 @@
+import AgentRuntime
+import CryptoKit
 import Foundation
 import Orchestration
 
@@ -42,26 +44,98 @@ enum HostSync {
         return FileManager.default.fileExists(atPath: folder.path) ? total : nil
     }
 
-    /// A gzipped tar of `entries(in:)`, to unpack in the host's home; nil when there is nothing
-    /// to send. Links are followed (a skill linked in from elsewhere goes as its files), and
-    /// what only this Mac needs stays: Finder's files, git folders, caches, `.env` files.
-    static func archive(of home: URL) throws -> Data? {
-        let entries = entries(in: home)
-        guard !entries.isEmpty else { return nil }
+    /// What only this Mac needs, wherever it is: Finder's files, git folders, caches, `.env` files.
+    private static let left: Set<String> = [".DS_Store", ".git", "__pycache__", ".env"]
+
+    /// Every file that goes, by its path inside `home`, with the SHA-256 of its content (hashing
+    /// what a home has takes a fraction of a second; times and sizes would miss a file put back).
+    /// Links are followed: a skill linked in from elsewhere goes as its files.
+    static func manifest(of home: URL) -> [String: String] {
+        var found: [String: String] = [:]
+        func walk(_ path: String, depth: Int) {
+            let url = home.appendingPathComponent(path)
+            var isFolder: ObjCBool = false
+            // Deep enough for any skill, and an end to a link that leads back up.
+            guard depth < 40, FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder) else { return }
+            if isFolder.boolValue {
+                // The lists are lines: a name with a line break in it stays here.
+                for name in (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? [] where !left.contains(name) && !name.contains("\n") {
+                    walk(path + "/" + name, depth: depth + 1)
+                }
+            } else if let hash = hash(of: url) {
+                found[path] = hash
+            }
+        }
+        entries(in: home).forEach { walk($0, depth: 0) }
+        return found
+    }
+
+    /// The hashes found this launch, by file, with the size and date each file had then: a file
+    /// is read again only when one of those changed (reading every skill takes seconds).
+    private static let hashed = Hashed()
+    private final class Hashed: @unchecked Sendable {
+        let lock = NSLock()
+        var files: [String: (size: Int, changed: Date, hash: String)] = [:]
+    }
+
+    private static func hash(of url: URL) -> String? {
+        let file = url.resolvingSymlinksInPath()
+        let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        if let size = values?.fileSize, let changed = values?.contentModificationDate,
+           let kept = hashed.lock.withLock({ hashed.files[file.path] }), kept.size == size, kept.changed == changed {
+            return kept.hash
+        }
+        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else { return nil }
+        let hash = hex(SHA256.hash(data: data))
+        if let size = values?.fileSize, let changed = values?.contentModificationDate {
+            hashed.lock.withLock { hashed.files[file.path] = (size, changed, hash) }
+        }
+        return hash
+    }
+
+    private static func hex(_ digest: SHA256.Digest) -> String { digest.map { String(format: "%02x", $0) }.joined() }
+
+    /// A manifest as the host keeps it (`synced-files.txt`): a line per file, hash then path,
+    /// sorted by path.
+    static func listing(_ manifest: [String: String]) -> String {
+        manifest.keys.sorted().map { "\(manifest[$0] ?? "") \($0)\n" }.joined()
+    }
+
+    /// The same read back. A line without a hash (a list from before there were any) is a file
+    /// with none: it counts as changed.
+    static func manifest(listed text: String) -> [String: String] {
+        var found: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            let hash = line.prefix(64)
+            if line.count > 65, line.dropFirst(64).first == " ", hash.allSatisfy({ $0.isHexDigit }) {
+                found[String(line.dropFirst(65))] = String(hash)
+            } else {
+                found[String(line)] = ""
+            }
+        }
+        return found
+    }
+
+    /// A gzipped tar of `paths` (inside `home`; every file that goes, when nil), to unpack in the
+    /// host's home; nil when there is nothing to send.
+    static func archive(of home: URL, paths: [String]? = nil) throws -> Data? {
+        let paths = paths ?? manifest(of: home).keys.sorted()
+        guard !paths.isEmpty else { return nil }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
         // To a file: written to a pipe, tar pads the archive with zeros past its end.
         let packed = FileManager.default.temporaryDirectory.appendingPathComponent("agentboard-sync-\(UUID().uuidString).tgz")
-        defer { try? FileManager.default.removeItem(at: packed) }
-        process.arguments = ["-czLf", packed.path, "--no-mac-metadata", "--no-xattrs"]
-            + [".DS_Store", ".git", "__pycache__", ".env"].flatMap { ["--exclude", $0] } + ["-C", home.path] + entries
+        let named = packed.appendingPathExtension("files")
+        defer { [packed, named].forEach { try? FileManager.default.removeItem(at: $0) } }
+        try Data(paths.joined(separator: "\n").utf8).write(to: named)
+        process.arguments = ["-czLf", packed.path, "--no-mac-metadata", "--no-xattrs", "-C", home.path, "-T", named.path]
         // No `._name` companions either.
         process.environment = ["COPYFILE_DISABLE": "1"]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
-        // tar says 1 for a file it couldn't read (a dangling link): the rest still goes.
+        // tar says 1 for a file it couldn't read: the rest still goes.
         guard process.terminationStatus <= 1, let data = try? Data(contentsOf: packed), !data.isEmpty else {
             throw Failure(message: L("Couldn't pack the skills to send."))
         }
@@ -82,7 +156,7 @@ enum HostSync {
     /// `searchPath`, the user's PATH) goes as `npx -y <package>`, which fetches it there.
     /// With `pinsFolder` (where the host will keep them), a uv tool goes held to the versions it
     /// has here, in `pins` by tool: what uv would pick today may be newer than the tool works with.
-    static func servers(in config: Data, searchPath: String = Orchestrator.loginShellPath(), pinsFolder: String? = nil)
+    static func servers(in config: Data, searchPath: String? = nil, pinsFolder: String? = nil)
         -> (copied: [String: Any], skipped: [String: String], pins: [String: String]) {
         let all = ((try? JSONSerialization.jsonObject(with: config)) as? [String: Any])?["mcpServers"] as? [String: Any] ?? [:]
         var copied: [String: Any] = [:], skipped: [String: String] = [:], pins: [String: String] = [:]
@@ -109,7 +183,7 @@ enum HostSync {
                     skipped[name] = isMacBinary ? L("a program built for the Mac") : L("a program only this Mac has")
                     continue
                 }
-            } else if let command = server["command"] as? String, !portable.contains(command), let package = npmPackage(of: command, in: searchPath) {
+            } else if let command = server["command"] as? String, !portable.contains(command), let package = npmPackage(of: command, in: searchPath ?? loginPath) {
                 server["command"] = "npx"
                 server["args"] = ["-y", package] + (server["args"] as? [Any] ?? [])
             }
@@ -130,6 +204,10 @@ enum HostSync {
                 return parts.count == 2 ? (parts[0], parts[1]) : nil
             }
     }
+
+    /// The user's PATH, asked of a login shell once per launch and only when a server needs it:
+    /// that shell can take seconds to start.
+    private static let loginPath = Orchestrator.loginShellPath()
 
     /// The npm package the command `name` belongs to, when it is one installed globally: its
     /// file in `searchPath` links into a `node_modules` folder (`…/node_modules/@scope/name/…`).
@@ -207,9 +285,12 @@ enum HostSync {
         var missing: [String: String] = [:]
         /// Copied uv tools whose versions from this Mac the host couldn't install, and what uv said.
         var unresolved: [String: String] = [:]
+        /// The host already had all of it from the last sync: nothing was sent.
+        var upToDate = false
 
         /// For the row of the host called `host`.
         func note(on host: String) -> String {
+            if upToDate { return L("Up to date.") }
             var parts = [L("Synced.")]
             if !copied.isEmpty { parts.append(L("Servers copied: \(copied.joined(separator: ", ")).")) }
             if !skipped.isEmpty {
@@ -242,20 +323,22 @@ enum HostSync {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Run on the host with the archive on its stdin (nothing: all that was sent is gone here)
-    /// and its data folder as `$1`: unpacks it in the home, and removes the files an earlier
-    /// sync put there that this one no longer has. Which those are is kept in
-    /// `synced-files.txt` of the data folder, so nothing the host had on its own is removed.
+    /// Run on the host with an archive of the new and changed files on its stdin (nothing: none
+    /// are) and its data folder as `$1`, after the list of all that this Mac has was put in
+    /// `synced-files.txt.next` there: removes the files an earlier sync put in the home that the
+    /// new list no longer has, unpacks, and makes the new list `synced-files.txt`. Only what
+    /// that list names is ever removed, so nothing the host had on its own is.
     static let unpackScript = #"""
         set -e
         list="$1/synced-files.txt"
-        mkdir -p "$1"
         packed=$(mktemp)
-        trap 'rm -f "$packed" "$list.next"' EXIT
+        trap 'rm -f "$packed" "$packed.old" "$packed.new"' EXIT
         cat > "$packed"
-        if [ -s "$packed" ]; then tar -tzf "$packed" | grep -v '/$' | LC_ALL=C sort > "$list.next"; else : > "$list.next"; fi
+        paths() { sed -E 's/^[0-9a-f]{64} //' "$1" | LC_ALL=C sort; }
         if [ -f "$list" ]; then
-            LC_ALL=C comm -23 "$list" "$list.next" | while IFS= read -r file; do
+            paths "$list" > "$packed.old"
+            paths "$list.next" > "$packed.new"
+            LC_ALL=C comm -23 "$packed.old" "$packed.new" | while IFS= read -r file; do
                 case "$file" in *..*) ;; .claude/*) rm -f -- "$HOME/$file" ;; esac
             done
         fi
@@ -264,44 +347,71 @@ enum HostSync {
         """#
 
     static func run(from home: URL, to files: HostFiles, dataFolder: String) async throws -> Outcome {
-        let packed: Data? = try await Task.detached(operation: { try archive(of: home) }).value
-        guard let unpacked = await files.run("sh", ["-c", unpackScript, "sh", dataFolder], packed ?? Data()) else { throw Failure(message: L("The host stopped answering.")) }
-        guard unpacked.status == 0 else { throw Failure(message: String(decoding: unpacked.error, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) }
+        let stopped = Failure(message: L("The host stopped answering."))
+        func said(_ ran: CoreClient.Ran) -> Failure { Failure(message: String(decoding: ran.error, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) }
+        // Off the main thread: hashing reads every file, and finding the user's PATH asks a login shell.
+        let pinsFolder = dataFolder + "/synced-pins"
+        let (here, servers) = await Task.detached {
+            (manifest(of: home), (try? Data(contentsOf: home.appendingPathComponent(".claude.json"))).map { Self.servers(in: $0, pinsFolder: pinsFolder) })
+        }.value
+        let listing = listing(here)
+        let sent = try servers.map { try JSONSerialization.data(withJSONObject: ["servers": $0.copied, "pins": $0.pins], options: .sortedKeys) }
+        let digest = hex(SHA256.hash(data: Data(listing.utf8) + (sent ?? Data())))
+
+        // One small question first: what the last sync left there. The same as now: nothing to send.
+        guard let had = await files.run("sh", ["-c", #"cat "$1/synced.digest" 2>/dev/null; echo; cat "$1/synced-files.txt" 2>/dev/null; true"#, "sh", dataFolder], nil) else { throw stopped }
+        let answer = String(decoding: had.output, as: UTF8.self)
+        let firstLine = answer.firstIndex(of: "\n") ?? answer.endIndex
+        var outcome = Outcome()
+        if answer[..<firstLine] == digest {
+            outcome.upToDate = true
+            return outcome
+        }
+        let there = manifest(listed: String(answer[firstLine...]))
+        if there != here {
+            // Only the new and changed files travel; the whole list goes along, for what to remove.
+            let changed = here.filter { there[$0.key] != $0.value }.keys.sorted()
+            guard let listed = await files.run("sh", ["-c", #"mkdir -p "$1" && cat > "$1/synced-files.txt.next""#, "sh", dataFolder], Data(listing.utf8)) else { throw stopped }
+            guard listed.status == 0 else { throw said(listed) }
+            let packed: Data? = try await Task.detached(operation: { try archive(of: home, paths: changed) }).value
+            guard let unpacked = await files.run("sh", ["-c", unpackScript, "sh", dataFolder], packed ?? Data()) else { throw stopped }
+            guard unpacked.status == 0 else { throw said(unpacked) }
+        }
         // Who commits: a host that has no git identity gets this Mac's, or agents there can't commit.
         for key in ["user.name", "user.email"] {
             guard let value = localGit(["config", "--global", "--get", key]), !value.isEmpty else { continue }
             _ = await files.run("sh", ["-c", "git config --global --get \"$1\" >/dev/null || git config --global \"$1\" \"$2\"", "sh", key, value], nil)
         }
-        var outcome = Outcome()
-        guard let config = try? Data(contentsOf: home.appendingPathComponent(".claude.json")) else { return outcome }
-        // Off the main thread: finding the user's PATH asks a login shell.
-        let pinsFolder = dataFolder + "/synced-pins"
-        let servers = await Task.detached { Self.servers(in: config, pinsFolder: pinsFolder) }.value
-        outcome.skipped = servers.skipped
-        let sent = try JSONSerialization.data(withJSONObject: ["servers": servers.copied, "pins": servers.pins])
-        guard let ran = await files.run("sh", ["-c", "exec python3 -c \"$1\" \"$HOME/.claude.json\" \"$2\" \"$3\"", "sh", mergeScript, dataFolder + "/synced-mcp.json", pinsFolder], sent) else {
-            throw Failure(message: L("The host stopped answering."))
+        if let servers, let sent {
+            outcome.skipped = servers.skipped
+            guard let ran = await files.run("sh", ["-c", "exec python3 -c \"$1\" \"$HOME/.claude.json\" \"$2\" \"$3\"", "sh", mergeScript, dataFolder + "/synced-mcp.json", pinsFolder], sent) else { throw stopped }
+            guard ran.status == 0 else { throw said(ran) }
+            outcome.kept = ((try? JSONSerialization.jsonObject(with: ran.output)) as? [String: [String]])?["kept"] ?? []
+            // Asked once, with the PATH agents get there: a server whose program the host lacks isn't one it has.
+            let programs = servers.copied.filter { !outcome.kept.contains($0.key) }.compactMapValues { ($0 as? [String: Any])?["command"] as? String }
+            let distinct = Set(programs.values).sorted()
+            if !distinct.isEmpty, let lacking = await files.run("sh", ["-c", #"PATH="$HOME/.local/bin:$PATH"; for p in "$@"; do command -v "$p" >/dev/null 2>&1 || echo "$p"; done"#, "sh"] + distinct, nil) {
+                let absent = Set(String(decoding: lacking.output, as: UTF8.self).split(separator: "\n").map(String.init))
+                outcome.missing = programs.filter { absent.contains($0.value) }
+            }
+            // A pinned tool is installed now, held to this Mac's versions: where one has no build for
+            // the host, that is known here and not when an agent first needs the server.
+            for (name, value) in servers.copied where !outcome.kept.contains(name) && outcome.missing[name] == nil {
+                guard let server = value as? [String: Any], server["command"] as? String == "uvx",
+                      let arguments = server["args"] as? [Any], arguments.first as? String == "--constraints" else { continue }
+                let pinned = arguments.prefix(4).compactMap { $0 as? String }
+                // Fetching a tool's packages takes what it takes: minutes on a slow line.
+                guard let tried = await files.carried("sh", ["-c", #"PATH="$HOME/.local/bin:$PATH"; exec uvx "$@" python -c pass"#, "sh"] + pinned, patience: 600),
+                      tried.status != 0 else { continue }
+                let lines = String(decoding: tried.error, as: UTF8.self).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                outcome.unresolved[name] = String((lines.first { $0.contains("error") || $0.contains("×") } ?? lines.last ?? "uvx").prefix(200))
+            }
+            outcome.copied = servers.copied.keys.filter { !outcome.kept.contains($0) && outcome.missing[$0] == nil && outcome.unresolved[$0] == nil }.sorted()
         }
-        guard ran.status == 0 else { throw Failure(message: String(decoding: ran.error, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) }
-        outcome.kept = ((try? JSONSerialization.jsonObject(with: ran.output)) as? [String: [String]])?["kept"] ?? []
-        // Asked once, with the PATH agents get there: a server whose program the host lacks isn't one it has.
-        let programs = servers.copied.filter { !outcome.kept.contains($0.key) }.compactMapValues { ($0 as? [String: Any])?["command"] as? String }
-        let distinct = Set(programs.values).sorted()
-        if !distinct.isEmpty, let lacking = await files.run("sh", ["-c", #"PATH="$HOME/.local/bin:$PATH"; for p in "$@"; do command -v "$p" >/dev/null 2>&1 || echo "$p"; done"#, "sh"] + distinct, nil) {
-            let absent = Set(String(decoding: lacking.output, as: UTF8.self).split(separator: "\n").map(String.init))
-            outcome.missing = programs.filter { absent.contains($0.value) }
+        // Remembered only when all of it is as it should be there: a server that won't start is said again next time.
+        if outcome.missing.isEmpty, outcome.unresolved.isEmpty {
+            _ = await files.run("sh", ["-c", #"printf %s "$2" > "$1/synced.digest""#, "sh", dataFolder, digest], nil)
         }
-        // A pinned tool is installed now, held to this Mac's versions: where one has no build for
-        // the host, that is known here and not when an agent first needs the server.
-        for (name, value) in servers.copied where !outcome.kept.contains(name) && outcome.missing[name] == nil {
-            guard let server = value as? [String: Any], server["command"] as? String == "uvx",
-                  let arguments = server["args"] as? [Any], arguments.first as? String == "--constraints" else { continue }
-            let pinned = arguments.prefix(4).compactMap { $0 as? String }
-            guard let tried = await files.run("sh", ["-c", #"PATH="$HOME/.local/bin:$PATH"; exec uvx "$@" python -c pass"#, "sh"] + pinned, nil), tried.status != 0 else { continue }
-            let lines = String(decoding: tried.error, as: UTF8.self).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            outcome.unresolved[name] = String((lines.first { $0.contains("error") || $0.contains("×") } ?? lines.last ?? "uvx").prefix(200))
-        }
-        outcome.copied = servers.copied.keys.filter { !outcome.kept.contains($0) && outcome.missing[$0] == nil && outcome.unresolved[$0] == nil }.sorted()
         return outcome
     }
 }

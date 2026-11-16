@@ -15,6 +15,7 @@ subtle = "2"
 x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
 ed25519-dalek = { version = "2", features = ["zeroize"] }
 hkdf = "0.12"
+hmac = "0.12"
 sha2 = "0.10"
 chacha20poly1305 = "0.10"
 # TLS is rustls on ring everywhere: the Linux binary is static (musl), with no OpenSSL.

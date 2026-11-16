@@ -301,12 +301,19 @@ pub fn serve(mut wire: Wire, identity: &SigningKey, tickets: Option<(&Tickets, &
     let mut kind = next(&mut wire)?;
     from_board.open(&mut kind)?;
     let carrying = Carrying::parse(&kind).ok_or("the board asked for something this host doesn't carry")?;
+    let caller = STANDARD.encode(board);
     if carrying == Carrying::Boards {
         wire.incoming.patience(None);
-        return manage(wire, boards, &STANDARD.encode(board), from_board, to_board);
+        return manage(wire, from_board, to_board, &|request| boards::answer(boards, &caller, request, boards::now()));
+    }
+    if carrying == Carrying::Vault {
+        wire.incoming.patience(None);
+        // Asked again each time: a board forgotten meanwhile gets no key.
+        let trusted = || boards::load(boards).is_ok_and(|list| list.trusted.iter().any(|board| board.key == caller));
+        return manage(wire, from_board, to_board, &|request| trusted().then(|| crate::vault::answer(boards, request)));
     }
     let target = match carrying {
-        Carrying::Boards => unreachable!("handled above"),
+        Carrying::Boards | Carrying::Vault => unreachable!("handled above"),
         Carrying::Core => UnixStream::connect(core).map(OwnedFd::from).map_err(|error| format!("no core to connect to: {error}"))?,
         // Loopback only: a board reaches what runs on this host, never what this host can reach.
         Carrying::Tcp(port) => {
@@ -323,9 +330,9 @@ pub fn serve(mut wire: Wire, identity: &SigningKey, tickets: Option<(&Tickets, &
     Ok(())
 }
 
-/// A channel carrying `boards`: one JSON line per request and per reply, answered here. The
-/// core never learns who a board is.
-fn manage(mut wire: Wire, boards: &Path, caller: &str, mut from_board: Sealed, mut to_board: Sealed) -> Result<(), String> {
+/// A channel carrying `boards` or `vault`: one JSON line per request and per reply, answered
+/// here by `answer` (None ends the channel). The core never learns who a board is.
+fn manage(mut wire: Wire, mut from_board: Sealed, mut to_board: Sealed, answer: &dyn Fn(&[u8]) -> Option<String>) -> Result<(), String> {
     let mut unread = Vec::new();
     while let Some(mut message) = wire.incoming.next() {
         from_board.open(&mut message)?;
@@ -333,7 +340,7 @@ fn manage(mut wire: Wire, boards: &Path, caller: &str, mut from_board: Sealed, m
         while let Some(end) = unread.iter().position(|byte| *byte == b'\n') {
             let request: Vec<u8> = unread.drain(..=end).collect();
             // None: the board was forgotten since, by itself or at the host's terminal.
-            let Some(reply) = boards::answer(boards, caller, &request[..end], boards::now()) else {
+            let Some(reply) = answer(&request[..end]) else {
                 wire.outgoing.finish();
                 return Ok(());
             };
@@ -859,6 +866,27 @@ mod tests {
         assert_closed(&mut ws);
         let (mut ws, mut board) = host.proved(&listen, Board::of(host.board.clone()));
         assert_eq!(board.open(&ws.read().unwrap().into_data()).unwrap(), b"pending 0");
+        assert_closed(&mut ws);
+    }
+
+    #[test]
+    fn a_trusted_board_gets_and_sets_the_vault_key_over_a_channel() {
+        let host = host(TOKEN);
+        let listen = host.listen();
+        let (mut ws, mut board) = host.channel(&listen, "vault");
+        let mut ask = |request: String| -> serde_json::Value {
+            ws.send(Message::Binary(board.seal(format!("{request}\n").as_bytes()))).unwrap();
+            serde_json::from_slice(&board.open(&ws.read().unwrap().into_data()).unwrap()).unwrap()
+        };
+        let (key, other) = (STANDARD.encode([1u8; 32]), STANDARD.encode([2u8; 32]));
+        assert_eq!(ask(r#"{"get":{}}"#.into()), serde_json::json!({ "error": "no_key" }));
+        assert_eq!(ask(format!(r#"{{"set":{{"key":"{key}"}}}}"#)), serde_json::json!({ "ok": true }));
+        assert_eq!(ask(format!(r#"{{"set":{{"key":"{other}"}}}}"#)), serde_json::json!({ "error": "different_key" }));
+        assert_eq!(ask(r#"{"get":{}}"#.into()), serde_json::json!({ "key": key }));
+
+        // Forgotten, a board's next request ends the channel, with no key.
+        assert_eq!(boards::answer(&host.folder, &STANDARD.encode(host.board.verifying_key().as_bytes()), format!(r#"{{"forget":{{"key":"{}"}}}}"#, STANDARD.encode(host.board.verifying_key().as_bytes())).as_bytes(), boards::now()), Some("{\"ok\":true}\n".into()));
+        ws.send(Message::Binary(board.seal(b"{\"get\":{}}\n"))).unwrap();
         assert_closed(&mut ws);
     }
 

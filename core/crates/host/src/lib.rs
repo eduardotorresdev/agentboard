@@ -10,6 +10,7 @@ mod direct;
 mod relay;
 mod service;
 mod setup;
+mod vault;
 mod wire;
 #[cfg(test)]
 mod test_support;
@@ -19,3 +20,4 @@ pub use boards::{first_board, show as boards, trust_named as trust, untrust_name
 pub use relay::serve_relay;
 pub use service::{install_service, status, uninstall_service};
 pub use setup::setup;
+pub use vault::{pull_at_start as pull_vault_at_start, pull_command as vault_pull, status as vault_status};

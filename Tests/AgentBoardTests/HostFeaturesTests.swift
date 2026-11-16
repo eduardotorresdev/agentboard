@@ -824,3 +824,98 @@ func aRealPageReachesWhatOnlyTheHostServes() throws {
     #expect(host.requests.contains { $0.contains("Host: builder.localhost:45173") }, "the server sees a localhost name")
     #expect(printed.contains("\"lost\":\"unreachable\""), "a page without the proxy doesn't reach the host: \(printed)")
 }
+
+// MARK: Sending only what changed
+
+@Test func aSyncSendsOnlyWhatTheHostDoesNotHave() async throws {
+    let home = try temporaryFolder("sync-home"), host = try temporaryFolder("sync-host")
+    defer { [home, host].forEach { try? FileManager.default.removeItem(at: $0) } }
+    for (path, text) in [("skills/a/SKILL.md", "a"), ("skills/b/SKILL.md", "b"), ("skills/b/notes/more.md", "more"), ("CLAUDE.md", "rules")] {
+        try write(text, to: home.appendingPathComponent(".claude/" + path))
+    }
+    try write("the host's own", to: host.appendingPathComponent(".claude/skills/own/SKILL.md"))
+    // What is asked of the host, and what each request carries.
+    final class Asked: @unchecked Sendable {
+        let lock = NSLock()
+        var inputs: [Data] = []
+    }
+    let asked = Asked(), machine = machine(home: host), data = host.appendingPathComponent("data").path
+    let files = HostFiles { executable, arguments, input in
+        asked.lock.withLock { asked.inputs.append(input ?? Data()) }
+        return await machine.run(executable, arguments, input)
+    }
+    func sync() async throws -> (outcome: HostSync.Outcome, inputs: [Data]) {
+        asked.lock.withLock { asked.inputs = [] }
+        let outcome = try await HostSync.run(from: home, to: files, dataFolder: data)
+        return (outcome, asked.lock.withLock { asked.inputs })
+    }
+    func packed(_ archive: Data) throws -> Set<String> {
+        let file = host.appendingPathComponent("seen.tgz")
+        try archive.write(to: file)
+        let tar = Process(), listed = Pipe()
+        tar.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
+        tar.arguments = ["-tzf", file.path]
+        tar.standardOutput = listed
+        try tar.run()
+        let names = String(decoding: listed.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        tar.waitUntilExit()
+        return Set(names.split(separator: "\n").map(String.init))
+    }
+    let there = { (path: String) in try? String(contentsOf: host.appendingPathComponent(".claude/" + path), encoding: .utf8) }
+
+    // The first time everything goes.
+    let first = try await sync()
+    #expect(!first.outcome.upToDate && there("skills/b/notes/more.md") == "more" && there("CLAUDE.md") == "rules")
+    #expect(try first.inputs.contains { try $0.count > 100 && packed($0).count == 4 })
+
+    // Nothing changed: one question, no bytes sent, and it says so.
+    let again = try await sync()
+    #expect(again.outcome.upToDate && again.outcome.note(on: "builder") == AgentBoard.L("Up to date."))
+    #expect(again.inputs.count == 1 && again.inputs[0].isEmpty)
+
+    // One file changed and one added: only those two travel.
+    try write("b, improved", to: home.appendingPathComponent(".claude/skills/b/SKILL.md"))
+    try write("c", to: home.appendingPathComponent(".claude/skills/c/SKILL.md"))
+    let changed = try await sync()
+    let archives = try changed.inputs.filter { $0.starts(with: [0x1F, 0x8B]) }.map(packed)
+    #expect(archives == [[".claude/skills/b/SKILL.md", ".claude/skills/c/SKILL.md"]])
+    #expect(there("skills/b/SKILL.md") == "b, improved" && there("skills/c/SKILL.md") == "c" && there("skills/a/SKILL.md") == "a")
+
+    // One removed here: removed there with no file sent, and the host's own stays.
+    try FileManager.default.removeItem(at: home.appendingPathComponent(".claude/skills/a"))
+    let removed = try await sync()
+    #expect(!removed.inputs.contains { $0.starts(with: [0x1F, 0x8B]) })
+    #expect(there("skills/a/SKILL.md") == nil && there("skills/own/SKILL.md") == "the host's own" && there("skills/c/SKILL.md") == "c")
+    #expect(try await sync().outcome.upToDate)
+
+    // A list from before there were hashes: every file counts as changed, once.
+    try write(".claude/CLAUDE.md\n.claude/skills/gone/SKILL.md\n", to: URL(fileURLWithPath: data + "/synced-files.txt"))
+    try FileManager.default.removeItem(atPath: data + "/synced.digest")
+    try write("left by an old sync", to: host.appendingPathComponent(".claude/skills/gone/SKILL.md"))
+    let migrated = try await sync()
+    #expect(try migrated.inputs.contains { try $0.starts(with: [0x1F, 0x8B]) && packed($0).count == 4 } && there("skills/gone/SKILL.md") == nil)
+    #expect(HostSync.manifest(listed: try String(contentsOfFile: data + "/synced-files.txt", encoding: .utf8)) == HostSync.manifest(of: home))
+}
+
+@Test func aCallToAHostIsWaitedForByWhatItSendsAndNoLonger() async {
+    #expect(HostFiles.patience(sending: 0) == 30 && HostFiles.patience(sending: 5_000_000) == 130)
+    #expect(HostFiles.patience(sending: 1 << 40) == GitHost.patience)
+    let started = Date()
+    let late = await HostFiles.within(0.2) { try? await Task.sleep(for: .seconds(5)); return 1 }
+    #expect(late == nil && Date().timeIntervalSince(started) < 2)
+    #expect(await HostFiles.within(5) { 2 } == 2)
+    #expect(HostFiles.unanswered.status != 0 && !HostFiles.unanswered.error.isEmpty)
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_SYNC_TIMING"] == "1"))
+func timingOfWhatASyncReadsHere() throws {
+    let home = URL(fileURLWithPath: String(cString: getpwuid(getuid()).pointee.pw_dir))
+    var clock = Date()
+    func lap(_ what: String) { print("timing: \(what) \(Int(Date().timeIntervalSince(clock) * 1000)) ms"); clock = Date() }
+    let entries = HostSync.entries(in: home); lap("entries \(entries.count)")
+    let listed = HostSync.manifest(of: home); lap("manifest \(listed.count)")
+    _ = HostSync.manifest(of: home); lap("manifest again")
+    let config = try Data(contentsOf: home.appendingPathComponent(".claude.json")); lap("config \(config.count) bytes")
+    _ = HostSync.servers(in: config, pinsFolder: "/x"); lap("servers")
+    _ = HostSync.servers(in: config, pinsFolder: "/x"); lap("servers again")
+}

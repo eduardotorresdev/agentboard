@@ -7,7 +7,8 @@ use std::process::Command;
 
 use crate::config;
 
-const PACKAGES: [&str; 7] = ["git", "curl", "ca-certificates", "build-essential", "unzip", "bubblewrap", "ffmpeg"];
+// `gh`: the vault signs it in, and `gh auth setup-git` makes git push with it.
+const PACKAGES: [&str; 8] = ["git", "curl", "ca-certificates", "build-essential", "unzip", "bubblewrap", "ffmpeg", "gh"];
 /// The catalog's agents and their install commands (`Sources/AgentRuntime/AgentProvider.swift`).
 /// The agent CLIs, and `uv`: many MCP servers start with `uvx`, as many do with `npx`.
 const AGENTS: [(&str, &str); 4] = [
@@ -91,13 +92,13 @@ fn plan(machine: &Machine) -> Vec<Step> {
     let apt_installs = machine.apt && machine.root;
     let mut node = has("node");
     if !through_sudo {
-        let wanted: Vec<&str> = [("git", "git"), ("curl", "curl"), ("node", "nodejs")]
+        let wanted: Vec<&str> = [("git", "git"), ("curl", "curl"), ("node", "nodejs"), ("gh", "gh")]
             .iter()
             .filter(|(program, package)| !(has(program) || apt_installs && PACKAGES.contains(package)))
             .map(|(_, package)| *package)
             .collect();
         if wanted.is_empty() {
-            step("git and Node", Action::Ok);
+            step("git, Node and gh", Action::Ok);
         } else {
             let tools = &machine.tools;
             let binary = format!("{tools}/bin/micromamba");
@@ -143,7 +144,7 @@ fn output(program: &str, arguments: &[&str]) -> Option<String> {
     output.status.success().then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn on_path(program: &str, path: &str) -> bool {
+pub(crate) fn on_path(program: &str, path: &str) -> bool {
     path.split(':').any(|folder| std::fs::metadata(Path::new(folder).join(program)).is_ok_and(|file| file.is_file() && file.permissions().mode() & 0o111 != 0))
 }
 
@@ -163,7 +164,7 @@ fn inspect(home: &str, path: &str, sudo_user: Option<String>) -> Machine {
         apt: on_path("apt-get", path),
         architecture: std::env::consts::ARCH.into(),
         missing_packages: PACKAGES.into_iter().filter(|package| !output("dpkg-query", &["-W", "-f=${Status}", package]).is_some_and(|status| status.ends_with("ok installed"))).collect(),
-        programs: ["git", "curl", "node", "docker", "claude", "codex", "copilot", "uv"].into_iter().filter(|program| on_path(program, path)).collect(),
+        programs: ["git", "curl", "node", "gh", "docker", "claude", "codex", "copilot", "uv"].into_iter().filter(|program| on_path(program, path)).collect(),
         docker_group: output("id", &["-nG", &group_of]).is_some_and(|groups| groups.split(' ').any(|group| group == "docker")),
         sandbox: output("bwrap", &["--ro-bind", "/", "/", "/bin/true"]).is_some(),
         browser_libraries: ["libnss3.so", "libgbm.so.1", "libatk-bridge-2.0.so.0"].iter().all(|library| libraries.contains(library)),
@@ -258,16 +259,16 @@ mod tests {
     #[test]
     fn without_root_a_fresh_machine_gets_a_private_toolchain() {
         let steps = plan(&fresh());
-        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "micromamba", "git, curl, nodejs", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
-        assert_eq!(*action(&steps, "system packages"), Action::NeedsRoot("sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg".into()));
+        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "micromamba", "git, curl, nodejs, gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+        assert_eq!(*action(&steps, "system packages"), Action::NeedsRoot("sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "Docker"), Action::NeedsRoot("curl -fsSL https://get.docker.com | sudo sh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::NeedsRoot("sudo usermod -aG docker dev".into()));
         assert_eq!(
             *action(&steps, "micromamba"),
             Action::Download { url: "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64".into(), to: "/home/dev/.local/share/agentboard/tools/bin/micromamba".into() }
         );
-        let Action::Run(toolchain) = action(&steps, "git, curl, nodejs") else { panic!() };
-        assert!(toolchain.contains("-c conda-forge git curl nodejs &&") && toolchain.contains("for program in git curl node npm npx;"), "{toolchain}");
+        let Action::Run(toolchain) = action(&steps, "git, curl, nodejs, gh") else { panic!() };
+        assert!(toolchain.contains("-c conda-forge git curl nodejs gh &&") && toolchain.contains("for program in git curl node npm npx gh;"), "{toolchain}");
         assert_eq!(*action(&steps, "browser libraries"), Action::NeedsRoot("sudo env \"PATH=$PATH\" npx -y playwright install-deps chromium".into()));
         assert_eq!(*action(&steps, "claude"), Action::Run("curl -fsSL https://claude.ai/install.sh | bash".into()));
         assert_eq!(*action(&steps, "codex"), Action::Run("npm install -g @openai/codex".into()));
@@ -280,8 +281,8 @@ mod tests {
         // Git already there: only Node comes from the toolchain, and nothing downloads twice.
         let partly = plan(&Machine { programs: vec!["git", "curl"], micromamba: true, ..fresh() });
         assert_eq!(*action(&partly, "micromamba"), Action::Ok);
-        let Action::Run(toolchain) = action(&partly, "nodejs") else { panic!() };
-        assert!(toolchain.contains("-c conda-forge nodejs &&") && toolchain.contains("for program in node npm npx;"));
+        let Action::Run(toolchain) = action(&partly, "nodejs, gh") else { panic!() };
+        assert!(toolchain.contains("-c conda-forge nodejs gh &&") && toolchain.contains("for program in node npm npx gh;"));
         // Every download and script is fetched over HTTPS.
         for step in &steps {
             let text = format!("{:?}", step.action);
@@ -293,7 +294,7 @@ mod tests {
     fn with_sudo_the_system_installs_what_it_can_and_node_stays_private() {
         let steps = plan(&Machine { root: true, ..fresh() });
         assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "micromamba", "nodejs", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
-        assert_eq!(*action(&steps, "system packages"), Action::Run("sudo -n apt-get update && sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg".into()));
+        assert_eq!(*action(&steps, "system packages"), Action::Run("sudo -n apt-get update && sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "Docker"), Action::Run("curl -fsSL https://get.docker.com | sudo -n sh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::Run("sudo -n usermod -aG docker dev".into()));
         assert_eq!(*action(&steps, "browser libraries"), Action::Run("npx -y playwright install-deps chromium".into()));
@@ -305,7 +306,7 @@ mod tests {
         let asked = Machine { root: true, superuser: true, user: "root".into(), sudo_user: Some("dev".into()), programs: vec!["node"], ..fresh() };
         let steps = plan(&asked);
         assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "browser libraries"]);
-        assert_eq!(*action(&steps, "system packages"), Action::Run("apt-get update && env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg".into()));
+        assert_eq!(*action(&steps, "system packages"), Action::Run("apt-get update && env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::Run("usermod -aG docker dev".into()));
         assert_eq!(*action(&steps, "browser libraries"), Action::Run("npx -y playwright install-deps chromium".into()));
         // Node is the user's to install first.
@@ -321,7 +322,7 @@ mod tests {
     fn a_machine_already_set_up_has_nothing_to_do() {
         let done = Machine {
             missing_packages: vec![],
-            programs: vec!["git", "curl", "node", "docker", "claude", "codex", "copilot", "uv"],
+            programs: vec!["git", "curl", "node", "gh", "docker", "claude", "codex", "copilot", "uv"],
             docker_group: true,
             sandbox: true,
             browser_libraries: true,
@@ -332,7 +333,7 @@ mod tests {
         for root in [false, true] {
             let steps = plan(&Machine { root, ..done.clone() });
             assert!(steps.iter().all(|step| step.action == Action::Ok), "{steps:?}");
-            assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "git and Node", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+            assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "git, Node and gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
         }
     }
 
@@ -340,6 +341,6 @@ mod tests {
     fn without_apt_the_user_level_setup_still_runs() {
         let steps = plan(&Machine { apt: false, ..fresh() });
         assert!(matches!(action(&steps, "system packages"), Action::Skip(_)));
-        assert_eq!(names(&steps), ["system packages", "micromamba", "git, curl, nodejs", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+        assert_eq!(names(&steps), ["system packages", "micromamba", "git, curl, nodejs, gh", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
     }
 }

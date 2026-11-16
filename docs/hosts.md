@@ -36,8 +36,16 @@ same gate (`GOAL.md`); the Rust core ships on Linux first.
   host with no git identity gets this Mac's `user.name` and `user.email`. Not copied:
   `settings.json` (its hooks run programs of this Mac), project-scoped MCP servers, the other
   agent programs' own settings (`~/.codex`, `~/.copilot`), logins, transcripts, history.
-  What an earlier sync put on the host and is gone here is removed there (the host keeps the
-  lists in `synced-files.txt` and `synced-mcp.json` of its data folder); what the host had on
+  Only what the host doesn't have travels: the host keeps, in its data folder, the list of
+  what the last sync left (`synced-files.txt`, a SHA-256 and a path per line) and a digest of
+  all of it, servers included (`synced.digest`); a sync first reads those in one small
+  request, sends nothing when the digest is this Mac's, and otherwise the new and changed
+  files alone. What is large (a sync's upload, a picture, a file over 256 KB) goes over a
+  second connection to the host, opened for it and closed when idle, so keys and screens never
+  wait behind it; and a request to a host is waited for 30 seconds plus one per 50 KB it
+  sends, then given up on.
+  What an earlier sync put on the host and is gone here is removed there (the lists are
+  `synced-files.txt` and `synced-mcp.json`); what the host had on
   its own is never removed, and a server it has under the same name is kept. The first sync to
   a host asks first, saying what goes; after a yes (or a click on "Sync skills") it runs by
   itself each time the host first answers after launch. A host whose identity key changed is
@@ -248,6 +256,91 @@ itself trusts. A lying server, or a stolen token, gets "pending" at most.
   The host handles this itself: the core never
   learns who a board is. `agentboard logout` empties the list. Forgetting the last board leaves
   the list empty, with no new first-use window.
+
+### The vault
+
+What every host of an account should have — skills, commands, subagents and instructions
+(`~/.claude`), the user's MCP servers, the GitHub login, the git identity — is kept once, in
+the account, sealed so the server can't read it. A board (a Mac) writes it; every host, with
+or without a screen, reads it and applies it to its home, once per version. It replaces
+copying from a Mac to each host.
+
+- **The key.** 32 random bytes, made by the first board that finds no vault. Boards keep it
+  where they keep their token; a host keeps it in `vault.key` (0600) in its data folder, as base64 on one line.
+  It only ever travels over a channel, between a host and a board that host trusts: kind
+  `vault`, one JSON line each way — `{"get":{}}` → `{"key":"<base64>"}` or
+  `{"error":"no_key"}`; `{"set":{"key":"…"}}` → `{"ok":true}`, or `{"error":"different_key"}`
+  when the host holds another (nothing is replaced); anything else → `{"error":"invalid_request"}`.
+  A board forgotten meanwhile has its channel closed at its next request. A new board gets
+  the key from any host that trusts it. `agentboard logout` forgets `vault.key` and
+  `vault.applied`, not what the vault wrote.
+- **Sealing.** ChaCha20-Poly1305 under HKDF-SHA256(key, no salt, info `agentboard vault v1`, 32 bytes), no
+  associated data; a sealed
+  thing is `nonce (12 random bytes) ‖ ciphertext ‖ tag`. A chunk's id is the lowercase hex
+  HMAC-SHA256 keyed with the vault key itself (not the derived one) over `agentboard vault blob v1` ‖ its plain bytes: the same bytes always have
+  the same id, and the id says nothing without the key. `core/fixtures/vault.json` pins this
+  down with fixed keys and nonces.
+- **The manifest** (sealed JSON): `{"files":[{"path", "mode", "size", "chunks":[id…]}],
+  "mcp":{name: entry}, "pins":{tool: text}, "github":{"user","token"}?, "git":{"name",
+  "email"}?, "updated": <Unix seconds>, "by": "<board fingerprint>"}`. `path` is relative to
+  home and under `.claude/`; `mode` is the permission bits as a number (0o644 is 420); a file
+  is cut in chunks of at most 1,000,000 plain bytes, in order. A `pins` tool is a plain name
+  (letters, digits, `.`, `_`, `-`, not starting with `.`); a host keeps each pin in
+  `synced-pins/<tool>.txt` in its data folder and deletes the ones no longer sent.
+- **Per host.** The manifest may carry `"hosts": {"<host id>": {"mcp": {name: entry},
+  "without": [name…]}}`: servers only that host gets (or its own version of one of the
+  account's, by the same name: a program that is another binary there), and account servers
+  that host leaves out. A host applies the account's `mcp`, minus its `without`, then its own
+  `mcp` over them. The report's `servers` is what it ended with. Host ids compare as UUIDs.
+- **The server** (any session of the account reads; only a board's writes):
+
+  | Call | Does |
+  |---|---|
+  | `GET /v1/vault` | → `{version, manifest}` (base64), or 404 `no_vault`. |
+  | `PUT /v1/vault` `{version, manifest, chunks:[id…]}` | Replaces the manifest when `version` is the current one (0: none yet) → `{version}` (one more); else 409 `stale`. Chunks not in `chunks` (at most 20000 ids) are deleted. The manifest is at most 1,500,000 bytes (413 `too_large`). |
+  | `POST /v1/vault/have` `{ids:[…]}` | → `{missing:[…]}`: which of up to 5000 ids the server lacks. |
+  | `PUT /v1/vault/chunks/:id` (body: sealed bytes, at most 1,100,000; over: 413 `too_large`) | Stores one chunk (the same id again replaces it) → `{}`. |
+  | `GET /v1/vault/chunks/:id` | → its bytes, or 404. |
+
+  512 MiB of chunks per account at most (413 `vault_full`). An id is exactly 64 lowercase hex
+  (else 400 `invalid_id`, `invalid_ids`, `invalid_chunks`). A host's session gets 403
+  `wrong_session` on the two `PUT`s. Another account's chunk is 404.
+- **A host applies it** with `agentboard vault pull` (run when the service starts, and by a
+  board when it connects or has written a new version): nothing to do when the version is
+  the one in `vault.applied` (it still reports `servers` and `lacking`, with `files` and
+  `removed` 0); no vault on the account reports version 0. Otherwise it checks every path
+  first (only under `~/.claude/`; never `..`, an absolute path, or a symbolic link on the way,
+  `~/.claude` itself included: any of them and nothing is written), fetches the chunks of the
+  files that differ from what is on disk (it keeps no cache), checks each chunk's id once
+  opened, writes each file aside and renames it into place with its `mode`, removes the files
+  a previous version put there and this one dropped, and the folders that leaves empty
+  (`vault.files` lists them; the host's own files are never touched), merges the MCP servers
+  into `mcpServers` of `~/.claude.json` (taking out the names `vault.mcp` recorded, putting
+  this version's in; a vault server wins over a host's of the same name; every other key
+  stays; made when absent, written aside, 0600; left alone if it is a link or not JSON),
+  writes the pins, signs `gh` in with the token
+  (`gh auth login --hostname github.com --with-token`, the token on stdin, then
+  `gh auth setup-git`, when `gh` is on the PATH: `~/.local/bin` first, then the system's) and
+  sets `user.name` and `user.email` in the global git config when they are unset. `files`
+  counts the files written this time, `removed` the ones removed, `github` whether `gh` took
+  the token. `agentboard vault status` says which version is applied and whether the key is
+  here (never the key). `agentboard setup` installs `gh` (the `gh` apt package with root, else
+  conda-forge's in the private toolchain). It prints one JSON line: `{"version", "files", "removed", "servers":[…],
+  "lacking":[{"server","command"}], "github": true|false}` — `lacking`: servers whose program
+  (a bare name, looked up on that PATH) isn't on the host. What it writes lands in the home every agent on that host shares.
+- **More than one writer.** Several boards (and other kinds of them, later) write the same
+  vault, so no write may undo another's. The server refuses a manifest whose `version` isn't
+  the current one (409 `stale`) and one that names a chunk it doesn't hold (409
+  `missing_chunks`, with `{"missing":[id…]}`): replacing the manifest and deleting the chunks
+  it no longer names is one transaction. A board never sends "what I have": it sends the
+  server's current manifest with its own changes applied — it remembers the manifest it last
+  wrote or merged (its base), and what differs between its base and its home is what it
+  changes: an entry (a file, a server, a pin, a host's section, the GitHub login) it added or
+  edited is set, one it removed is removed, and every other entry stays as the server has
+  it, whoever wrote it. On `stale` or `missing_chunks` it reads again and repeats.
+- **A board writes it** when what it would send changed: it asks `have`, uploads the missing
+  chunks, puts the manifest, and tells its connected hosts to pull. Entries that only work on
+  a Mac are rewritten or left out there, before sealing (see `HostSync`).
 
 ### The direct path
 

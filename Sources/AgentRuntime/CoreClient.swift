@@ -205,6 +205,12 @@ public final class CoreClient: @unchecked Sendable {
         public var status: Int32
         public var output: Data
         public var error: Data
+
+        public init(status: Int32, output: Data = Data(), error: Data = Data()) {
+            self.status = status
+            self.output = output
+            self.error = error
+        }
     }
 
     /// Runs a program on the core's machine; nil when the core can't (older than protocol 8) or

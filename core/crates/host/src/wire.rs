@@ -46,9 +46,27 @@ impl Wire {
     pub fn direct(tcp: TcpStream, deadline: Instant) -> io::Result<Wire> {
         tcp.set_nodelay(true)?;
         tcp.set_write_timeout(Some(PATIENCE * 4))?;
+        keep_alive(&tcp);
         let incoming = Framed { stream: tcp.try_clone()?, deadline: Some(deadline) };
         let outgoing = Framing { stream: tcp.try_clone()?, frame: Vec::new() };
         Ok(Wire { incoming: Box::new(incoming), outgoing: Box::new(outgoing), tcp })
+    }
+}
+
+/// A board that vanished (its network changed, its lid closed) is noticed in about half a
+/// minute instead of never: its channel ends and what it held is let go.
+fn keep_alive(tcp: &TcpStream) {
+    use std::os::fd::AsRawFd;
+    let set = |level, option, value: libc::c_int| {
+        // SAFETY: setsockopt reads one int from `value`, which lives through the call.
+        unsafe { libc::setsockopt(tcp.as_raw_fd(), level, option, (&value as *const libc::c_int).cast(), std::mem::size_of::<libc::c_int>() as libc::socklen_t) };
+    };
+    set(libc::SOL_SOCKET, libc::SO_KEEPALIVE, 1);
+    #[cfg(target_os = "linux")]
+    {
+        set(libc::IPPROTO_TCP, libc::TCP_KEEPIDLE, 20);
+        set(libc::IPPROTO_TCP, libc::TCP_KEEPINTVL, 5);
+        set(libc::IPPROTO_TCP, libc::TCP_KEEPCNT, 3);
     }
 }
 

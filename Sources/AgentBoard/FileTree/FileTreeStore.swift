@@ -75,7 +75,10 @@ final class FileTreeStore {
         if let model = browsers[record.id] { return model }
         // Another host's files are read there, by whichever store is connected to it at the time.
         let files = record.host.map { host in
-            HostFiles { [weak self] executable, arguments, input in await self?.agents(host)?.run(executable, arguments, input: input) }
+            HostFiles(run: { [weak self] executable, arguments, input in await self?.agents(host)?.run(executable, arguments, input: input) },
+                      carry: { [weak self] executable, arguments, input, bulk, patience in
+                          await self?.agents(host)?.run(executable, arguments, input: input, bulk: bulk, patience: patience)
+                      })
         }
         let model = FileBrowserModel(root: record.worktree, files: files)
         browsers[record.id] = model

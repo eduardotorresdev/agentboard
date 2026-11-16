@@ -351,6 +351,8 @@ func theRealKeychainKeepsReplacesAndForgetsAToken() {
         said.lock.withLock {
             said.asked.append(carrying)
             guard case .channel = said.verdict else { return said.verdict }
+            // The core standing in for the host speaks no `boards`: only its own stream is opened to it.
+            guard case .core = carrying else { return .failed }
             return (try? UnixSocket.connect(to: socket)).map { .channel($0) } ?? .failed
         }
     })
@@ -414,4 +416,51 @@ func theRealKeychainKeepsReplacesAndForgetsAToken() {
     await account.refreshHosts()
     try await Task.sleep(for: .milliseconds(200))
     #expect(asked().count == before)
+}
+
+@MainActor @Test func whatIsLargeTravelsOnAConnectionOfItsOwnAndASilentHostIsGivenUpOn() async throws {
+    let rig = try await Rig()
+    defer { rig.cleanUp() }
+    let socket = rig.socket, host = rig.host
+    final class Opened: @unchecked Sendable {
+        let lock = NSLock()
+        var count = 0
+    }
+    let opened = Opened()
+    let hosts = HostStores(local: rig.hosts.local, account: rig.hosts.account, open: { _, carrying in
+        // The core standing in for the host speaks no `boards`: only its own stream is opened to it.
+        guard case .core = carrying else { return .failed }
+        opened.lock.withLock { opened.count += 1 }
+        return (try? UnixSocket.connect(to: socket)).map { .channel($0) } ?? .failed
+    })
+    hosts.bulkIdle = 0.3
+    let count = { opened.lock.withLock { opened.count } }
+    let store = hosts.store(for: host)
+    try await waitUntil { store.isLoaded }
+    let own = try #require(store.core), files = try #require(store.files)
+    // Small: the store's own connection.
+    #expect(await files.run("sh", ["-c", "printf ok"], nil)?.output == Data("ok".utf8))
+    #expect(count() == 1)
+    // Past the limit: a second connection, opened for it; the store's own is the one it had.
+    let large = Data(repeating: 7, count: HostFiles.bulkBytes + 1)
+    #expect(await files.run("wc", ["-c"], large).map { String(decoding: $0.output, as: UTF8.self).trimmingCharacters(in: .whitespaces) } == "\(large.count)\n")
+    #expect(count() == 2 && store.core === own)
+    // Much to come back: the same second connection, still open.
+    let file = NSTemporaryDirectory() + "abbulk-\(UUID().uuidString)"
+    defer { try? FileManager.default.removeItem(atPath: file) }
+    try large.write(to: URL(fileURLWithPath: file))
+    #expect(await files.read(file, limit: 4 * 1024 * 1024) == large)
+    #expect(await files.read(file, limit: 16)?.count == 17)
+    #expect(count() == 2)
+    // Idle, it is closed; the next large one opens another.
+    try await Task.sleep(for: .milliseconds(700))
+    #expect(await files.run("wc", ["-c"], large)?.status == 0)
+    #expect(count() == 3 && store.core === own)
+
+    // A program that outlasts what it is given: an answer saying so, not a wait.
+    let started = Date()
+    let silent = try #require(await files.carried("sleep", ["20"], patience: 0.3))
+    #expect(silent.status != 0 && silent.error == HostFiles.unanswered.error && Date().timeIntervalSince(started) < 5)
+    #expect(await files.run("sh", ["-c", "printf alive"], nil)?.output == Data("alive".utf8), "the store's connection is as live as before")
+    store.quit()
 }

@@ -311,6 +311,13 @@ public enum HostChannel {
         // an error to handle, not a signal.
         setsockopt(winner, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(winner, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        // A path that died without a word (a network left, a relay that dropped it) closes in
+        // about 35 seconds, and whoever reads it reconnects: 20 idle, then 3 probes 5 apart.
+        setsockopt(winner, SOL_SOCKET, SO_KEEPALIVE, &one, socklen_t(MemoryLayout<Int32>.size))
+        for (option, value) in [(TCP_KEEPALIVE, Int32(20)), (TCP_KEEPINTVL, 5), (TCP_KEEPCNT, 3)] {
+            var value = value
+            setsockopt(winner, IPPROTO_TCP, option, &value, socklen_t(MemoryLayout<Int32>.size))
+        }
         return winner
     }
 

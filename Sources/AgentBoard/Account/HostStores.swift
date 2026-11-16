@@ -26,6 +26,38 @@ final class HostStores {
     private(set) var syncQuestion: UUID?
     @ObservationIgnored private let connect: (UUID) -> @Sendable () -> Result<CoreClient, CoreClient.Failure>
     @ObservationIgnored private let channels = Channels()
+    /// A connection to a host's core that isn't a store's own.
+    @ObservationIgnored private let apart: (UUID) -> @Sendable () -> Result<CoreClient, CoreClient.Failure>
+    /// Each host's connection for what is large (see `AgentStore.bulkRun`), and how many use it now.
+    @ObservationIgnored private var bulk: [UUID: (client: CoreClient, uses: Int)] = [:]
+    @ObservationIgnored private var bulkClosing: [UUID: Task<Void, Never>] = [:]
+    /// Seconds an unused bulk connection is kept.
+    @ObservationIgnored var bulkIdle: Double = 30
+
+    /// Runs a program on `host` over its bulk connection, opened now if there is none; the
+    /// outer nil when it can't be opened.
+    private func runApart(on host: UUID, _ executable: String, _ arguments: [String], _ input: Data?) async -> CoreClient.Ran?? {
+        bulkClosing[host]?.cancel()
+        if bulk[host]?.client.isConnected != true {
+            bulk[host] = nil
+            let connect = apart(host)
+            guard let client = try? await Task.detached(operation: { connect() }).value.get() else { return nil }
+            // Two asked at once: one connection is enough.
+            if bulk[host] == nil { bulk[host] = (client, 0) } else { client.disconnect() }
+        }
+        guard let client = bulk[host]?.client else { return nil }
+        bulk[host]?.uses += 1
+        let ran = await client.run(executable, arguments, input: input)
+        bulk[host]?.uses -= 1
+        if bulk[host]?.uses == 0 {
+            bulkClosing[host] = Task { [weak self, bulkIdle] in
+                try? await Task.sleep(for: .seconds(bulkIdle))
+                guard !Task.isCancelled, self?.bulk[host]?.uses == 0 else { return }
+                self?.bulk.removeValue(forKey: host)?.client.disconnect()
+            }
+        }
+        return .some(ran)
+    }
     /// Opens a channel to a host straight to it, or gives nothing: what `retryDirect` tries.
     @ObservationIgnored var openDirect: (UUID) async -> Int32? = { _ in nil }
     @ObservationIgnored private var retrying: Task<Void, Never>?
@@ -119,6 +151,7 @@ final class HostStores {
                 return CoreClient.open(on: channel)
             }
         }
+        apart = given
         self.connect = { host in
             let connect = given(host)
             return {
@@ -143,6 +176,8 @@ final class HostStores {
         }
         account.onSignOut = { [weak self] in
             self?.remote.values.forEach { $0.quit() }
+            self?.bulk.values.forEach { $0.client.disconnect() }
+            self?.bulk = [:]
             self?.waiting = [:]
             self?.knocked = [:]
             self?.boards = [:]
@@ -334,6 +369,7 @@ final class HostStores {
         let store = AgentStore(connect: connect(host), host: (host, name))
         store.organizationID = local.organizationID
         prepare?(store)
+        store.bulkRun = { [weak self] executable, arguments, input in await self?.runApart(on: host, executable, arguments, input) ?? nil }
         store.downReason = { [weak self, weak account] in
             if account?.identityChanged(host) == true { return AccountStore.identityChangedNote }
             return self?.waiting[host] == nil ? nil : L("\(name) is waiting to approve this Mac. The account menu says how.")
@@ -354,7 +390,7 @@ final class HostStores {
     func sync(_ host: UUID, from home: URL) async {
         account.allowSync(to: host)
         let store = store(for: host)
-        syncNotes[host] = L("Syncing…")
+        syncNotes[host] = L("Syncing skills…")
         do {
             guard let files = store.files, let dataFolder = await store.askHostDataFolder() else {
                 throw HostSync.Failure(message: L("Couldn't reach \(store.host?.name ?? L("the host")). It may be offline."))
@@ -404,7 +440,8 @@ extension GitHost {
             let done = DispatchSemaphore(value: 0)
             let result = Answer()
             Task.detached { [weak store] in
-                let ran = await store?.run(executable, arguments)
+                // Git's own programs take as long as they take (a clone): the long wait, not the one by size.
+                let ran = await store?.run(executable, arguments, patience: GitHost.patience)
                 result.lock.withLock { result.value = ran }
                 done.signal()
             }

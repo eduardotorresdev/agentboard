@@ -124,6 +124,8 @@ pub enum Carrying {
     Tcp(u16),
     /// The list of boards this host trusts, kept by the host itself.
     Boards,
+    /// The vault's key, kept by the host itself.
+    Vault,
 }
 
 impl Carrying {
@@ -133,6 +135,9 @@ impl Carrying {
         }
         if text == b"boards" {
             return Some(Carrying::Boards);
+        }
+        if text == b"vault" {
+            return Some(Carrying::Vault);
         }
         // Plain decimal only: `parse` alone would take "+80".
         let digits = text.strip_prefix(b"tcp:").filter(|digits| !digits.is_empty() && digits.iter().all(u8::is_ascii_digit) && digits[0] != b'0')?;
@@ -343,6 +348,7 @@ pub mod tests {
         assert_eq!(Carrying::parse(b"tcp:1"), Some(Carrying::Tcp(1)));
         assert_eq!(Carrying::parse(b"tcp:65535"), Some(Carrying::Tcp(65535)));
         assert_eq!(Carrying::parse(b"boards"), Some(Carrying::Boards));
+        assert_eq!(Carrying::parse(b"vault"), Some(Carrying::Vault));
         for refused in ["", "Core", "core ", "tcp:", "tcp:0", "tcp:65536", "tcp:+80", "tcp:080", "tcp: 80", "tcp:80\n", "tcp:example.com:80", "tcp:10.0.0.1:80", "udp:80", "unix:/x", "board", "boards\n"] {
             assert_eq!(Carrying::parse(refused.as_bytes()), None, "{refused:?}");
         }

@@ -140,17 +140,36 @@ final class AgentStore {
 
     /// Runs a program on the store's machine through its core, giving a core that is still
     /// connecting a few seconds; nil when it can't be reached.
-    func run(_ executable: String, _ arguments: [String], input: Data? = nil) async -> CoreClient.Ran? {
+    /// On another host: what sends more than `HostFiles.bulkBytes`, or is `bulk` (a lot comes
+    /// back), goes over `bulkRun`'s connection, so keys and screens never wait behind it; and an
+    /// answer is waited for `patience` seconds (nil: by what is sent), then given up on as
+    /// `HostFiles.unanswered`.
+    func run(_ executable: String, _ arguments: [String], input: Data? = nil, bulk: Bool = false, patience: Double? = nil) async -> CoreClient.Ran? {
         let deadline = Date().addingTimeInterval(8)
         while core == nil, Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
-        return await core?.run(executable, arguments, input: input)
+        guard host != nil else { return await core?.run(executable, arguments, input: input) }
+        let size = input?.count ?? 0
+        let apart = bulk || size > HostFiles.bulkBytes ? bulkRun : nil
+        let answered = await HostFiles.within(patience ?? HostFiles.patience(sending: size)) { [weak self] () -> CoreClient.Ran? in
+            // No connection of its own to be had: the one there is.
+            if let apart, let ran = await apart(executable, arguments, input) { return ran }
+            return await self?.core?.run(executable, arguments, input: input)
+        }
+        return answered ?? HostFiles.unanswered
     }
+
+    /// Runs a program on the store's host over a connection apart from the store's own, opened
+    /// when needed; the outer nil when there is none to be had.
+    @ObservationIgnored var bulkRun: (@Sendable (String, [String], Data?) async -> CoreClient.Ran??)?
 
     /// The host's files, for what reads a worktree's folder; nil on this Mac, whose disk is
     /// read as it always was.
     var files: HostFiles? {
         guard host != nil else { return nil }
-        return HostFiles { [weak self] executable, arguments, input in await self?.run(executable, arguments, input: input) }
+        return HostFiles(run: { [weak self] executable, arguments, input in await self?.run(executable, arguments, input: input) },
+                         carry: { [weak self] executable, arguments, input, bulk, patience in
+                             await self?.run(executable, arguments, input: input, bulk: bulk, patience: patience)
+                         })
     }
 
     /// The core next to this executable, launched if it isn't running. `AGENTBOARD_LOCAL=1`

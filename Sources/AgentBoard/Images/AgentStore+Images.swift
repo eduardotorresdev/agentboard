@@ -147,7 +147,7 @@ extension AgentStore {
         Task {
             var note: String? = L("Couldn't fetch this from \(host.name).")
             if let folder = await hostMediaFolder(),
-               let ran = await run("sh", ["-c", Self.fetchScript, "sh", folder + "/" + file, String(limit)]) {
+               let ran = await run("sh", ["-c", Self.fetchScript, "sh", folder + "/" + file, String(limit)], bulk: true, patience: HostFiles.patience(sending: limit)) {
                 if ran.status == 3 {
                     note = L("Larger than \(limit / 1024 / 1024) MB: too large to bring from \(host.name).")
                 } else if ran.status == 0 {

@@ -16,6 +16,8 @@ pub const USAGE: &str = "usage: agentboard <command>
   setup        install what agents need here (git, Node, Docker, Chromium, the agent CLIs)
   service      run the host in the background from now on (service remove: stop doing so)
   status       who is signed in, and whether the host is up
+  vault pull   apply the account's vault (skills, MCP servers, GitHub login) to this home
+  vault status which vault version is applied, and whether its key is here
   boards       the computers this host trusts, and the ones waiting to be
   trust <fingerprint or key>    let that computer use this host
   untrust <fingerprint or key>  stop letting it
@@ -44,6 +46,7 @@ fn log(message: &str) {
 /// server, and never exits for being idle: boards come and go over the relay.
 pub fn host() {
     let socket_path = core_protocol::socket_path();
+    host::pull_vault_at_start();
     std::thread::spawn({
         let socket_path = socket_path.clone();
         move || host::serve_relay(Path::new(&socket_path))

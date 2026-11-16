@@ -1,0 +1,11 @@
+{
+  "chunk": "6167656e74626f617264207661756c742074657374206368756e6b0a",
+  "chunk_id": "20e676d96e809f9e0d3fb27efaffb44b51e0a7ac3ca546763be9512740bc9ca9",
+  "chunk_nonce": "404142434445464748494a4b",
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "manifest": "{\"files\":[{\"path\":\".claude/CLAUDE.md\",\"mode\":420,\"size\":28,\"chunks\":[\"20e676d96e809f9e0d3fb27efaffb44b51e0a7ac3ca546763be9512740bc9ca9\"]}],\"mcp\":{\"docs\":{\"command\":\"npx\",\"args\":[\"-y\",\"docs-mcp\"]}},\"pins\":{\"claude\":\"2.0.1\"},\"git\":{\"name\":\"Octo Cat\",\"email\":\"octo@example.com\"},\"hosts\":{\"0f8fad5b-d9cb-469f-a165-70867728950e\":{\"mcp\":{\"local\":{\"command\":\"local-mcp\"}},\"without\":[\"docs\"]}},\"updated\":1700000000,\"by\":\"4604 7895 a6f2 8626 01ab\"}",
+  "manifest_nonce": "505152535455565758595a5b",
+  "sealed_chunk": "404142434445464748494a4b84e28897e37c58f385f6ca6821ccabbc211c3f6e8420e7feda959e5b4360bba84207a526c0528eb574896996",
+  "sealed_manifest": "UFFSU1RVVldYWVpbT9LH/tWGoi9RpK9zDqujV9l0KLxPrP1pe5TrxKybVDDrEjxvCbnLrjrr/4DOy5ebW/Mx2LRYxNPT79JuDwiX+Cjq1JTfTTsYlfBg5+YKO1AR2R6GkOjjRQub9qHHOwrAMyZPiBnXu8avlDmE+16hpi1lGmGJQgifGtvh9j0HMNXlm5WuvEMFdTM81EUeFj64ARQhLGYEK0vrm5Wwbyi6YQaV8s9tc2sTboiqTeD5PmRkHo8DgqtHWukyIONFrydBeGbvmJ5C/h1ZzncN786PtRmMRAXXw8GJTNEpPO6cK4ercUOe7LsLG2p5/Ez6wU7aR6S+tGrK2H2qc3uFRVEnZUKzzzs3HgqUXeOfmfvCezFDqTm6J0g6BiSwWi5HAiFIjbm0VjmbndXOcqa1eg/BXr09lnA8/AruEnZVAP6bPBtrJ1sFkZy4SrvUwYTn5gbWuPIr7F2DrzcnREZy1G4sngPF0ZrGy3GSQz4ePIS+0UEdoBivqfVB/pCBqBhNZOMB2FkL31BetyUozIIuoH3160iClEEJPYHJAS15GjiWpXjnxbHSLt0rGOmsC3Xl8HXy+CX6xS1g5B5sF+sPRsmuuySxO/S5Qik=",
+  "sealing_key": "8e9cbdaf067f3032d2527903d0e3b61690374cd53a16ae1197d22242a5c57983"
+}

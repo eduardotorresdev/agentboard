@@ -412,7 +412,7 @@
 "Larger than %lld MB: too large to bring from %@." = "Mais de %lld MB: grande demais para trazer de %@.";
 "Pull" = "Atualizar (pull)";
 "Sync skills" = "Sincronizar skills";
-"Syncing…" = "Sincronizando…";
+"Syncing skills…" = "Sincronizando skills…";
 "Synced." = "Sincronizado.";
 "Not synced: %@" = "Não sincronizado: %@";
 "Not copied: %@." = "Não copiados: %@.";
@@ -467,3 +467,5 @@
 "Online hosts forget this Mac's key: it needs approval there again." = "Os hosts online esquecem a chave deste Mac: ele precisa ser aprovado lá de novo.";
 "%@ wants to use %@. The same fingerprint shows in that computer's account menu." = "%1$@ quer usar %2$@. A mesma impressão digital aparece no menu da conta desse computador.";
 "%@ stops reaching %@ until approved again." = "%1$@ deixa de alcançar %2$@ até ser aprovado de novo.";
+"The host didn't answer in time." = "O host não respondeu a tempo.";
+"Up to date." = "Atualizado.";
