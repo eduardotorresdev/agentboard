@@ -45,7 +45,7 @@ public struct ToolServerLink: Sendable {
 
 /// The agents the app knows about. Adding one means adding a provider here.
 public enum AgentCatalog {
-    public static let all: [any AgentProvider] = [ClaudeCode(), Codex()]
+    public static let all: [any AgentProvider] = [ClaudeCode(), Codex(), Copilot()]
 
     public static func provider(id: String) -> (any AgentProvider)? {
         all.first { $0.id == id }
@@ -54,7 +54,14 @@ public enum AgentCatalog {
     /// Where agent CLIs usually land, for when the login shell's PATH misses them.
     public static func fallbackDirectories(home: String = NSHomeDirectory()) -> [String] {
         ["/opt/homebrew/bin", "/usr/local/bin", "\(home)/.local/bin", "\(home)/.npm-global/bin",
-         "\(home)/.volta/bin", "\(home)/.bun/bin", "\(home)/.claude/local"]
+         "\(home)/.volta/bin", "\(home)/.bun/bin", "\(home)/.claude/local"] + nvmDirectories(home: home)
+    }
+
+    /// nvm's node versions, newest first: GUI apps never source nvm, so its PATH is missing.
+    static func nvmDirectories(home: String) -> [String] {
+        let root = "\(home)/.nvm/versions/node"
+        let versions = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+        return versions.sorted { $0.compare($1, options: .numeric) == .orderedDescending }.map { "\(root)/\($0)/bin" }
     }
 
     /// The executable's path: as given when absolute, else the first match in `searchPath`
@@ -220,6 +227,38 @@ public struct Codex: AgentProvider {
             if file.hasSuffix(suffix) { return true }
         }
         return false
+    }
+}
+
+/// GitHub's Copilot CLI. The board's server joins its MCP config for this launch only
+/// (`--additional-mcp-config`), never ~/.copilot/mcp-config.json.
+// shortcut: no "waiting for you" state; the CLI shows no hook or notify option in --help (v1.0.61). Add one when it does.
+public struct Copilot: AgentProvider {
+    public let id = "copilot"
+    public let title = "Copilot"
+    public let subtitle = "GitHub's Copilot CLI"
+    public let executable = "copilot"
+    public let installCommand: String? = "npm install -g @github/copilot"
+
+    public init() {}
+
+    public func environment(_ base: [String: String]) -> [String: String] { base }
+
+    public func arguments(session: UUID, tools: ToolServerLink?) -> [String] {
+        // Agents run unattended on the board: they never stop to ask for a permission.
+        var arguments = ["--allow-all"]
+        if let tools, let config = Self.mcpConfig(tools) { arguments += ["--additional-mcp-config", config] }
+        // `--session-id` starts a session with this id, or resumes it when it exists.
+        return arguments + ["--session-id", session.uuidString.lowercased()]
+    }
+
+    /// The board's server in the shape `copilot mcp add --transport http` writes.
+    static func mcpConfig(_ tools: ToolServerLink) -> String? {
+        let server: [String: Any] = ["type": "http", "url": tools.url.absoluteString, "tools": ["*"],
+                                     "headers": ["Authorization": "Bearer \(tools.token)"]]
+        let data = try? JSONSerialization.data(withJSONObject: ["mcpServers": [tools.name: server]],
+                                               options: [.sortedKeys, .withoutEscapingSlashes])
+        return data.map { String(decoding: $0, as: UTF8.self) }
     }
 }
 
