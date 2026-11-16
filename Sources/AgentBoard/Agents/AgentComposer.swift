@@ -107,6 +107,19 @@ extension AgentStore {
 enum ComposerDrafts {
     private static var drafts: [UUID: NSAttributedString] = [:]
     fileprivate static var views: [UUID: ComposerTextView] = [:]
+    private static var lineCounts: [UUID: Int] = [:]
+    /// Posted with the agent's id as object when its composer grows or shrinks a line.
+    static let linesChanged = Notification.Name("ComposerLinesChanged")
+
+    /// Lines the agent's draft takes in its composer, at least one.
+    static func lines(_ id: UUID) -> Int { lineCounts[id] ?? 1 }
+
+    fileprivate static func setLines(_ lines: Int, for id: UUID) {
+        let lines = min(max(lines, 1), CardMetrics.composerMaxLines)
+        guard lines != self.lines(id) else { return }
+        lineCounts[id] = lines
+        NotificationCenter.default.post(name: linesChanged, object: id)
+    }
     /// Serialized drafts, read from the data folder once and written back on each change.
     private static var saved: [String: String] = {
         (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
@@ -135,6 +148,7 @@ enum ComposerDrafts {
     static func forget(_ id: UUID) {
         drafts[id] = nil
         views[id] = nil
+        lineCounts[id] = nil
         store(nil, for: id)
     }
 
@@ -161,9 +175,9 @@ enum ComposerDrafts {
     }
 }
 
-/// Below an agent card: a field the user writes a prompt in, apart from the terminal, so a
-/// message arriving from another agent never mixes with a half-written draft. `@` mentions
-/// board elements.
+/// At the bottom of an agent card: a field the user writes a prompt in, apart from the terminal,
+/// so a message arriving from another agent never mixes with a half-written draft. `@` mentions
+/// board elements, `/` commands go to the agent as typed, Shift-Return breaks the line.
 struct AgentComposer: View {
     let store: AgentStore
     let id: UUID
@@ -174,9 +188,9 @@ struct AgentComposer: View {
     var body: some View {
         let blocker = store.promptBlocker(id)
         let notice = notice ?? store.composerNotices[id]
-        HStack(spacing: 6) {
+        HStack(alignment: .bottom, spacing: 6) {
             MentionField(store: store, id: id, isEmpty: $isEmpty, notice: $notice)
-                .frame(height: 22)
+                .padding(.vertical, 5)
             if let held = store.heldMessages[id] {
                 Button { store.send(.deliverHeld(id)) } label: {
                     Text(held == 1 ? L("1 message waiting · Deliver now") : L("\(held) messages waiting · Deliver now"))
@@ -189,6 +203,7 @@ struct AgentComposer: View {
             }
             if let notice = notice ?? blocker {
                 Text(notice).font(Theme.Font.caption).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                    .frame(height: 26)
                     .help(notice)
             }
             let off = isEmpty || blocker != nil
@@ -201,22 +216,20 @@ struct AgentComposer: View {
             .disabled(off)
             .help(blocker ?? L("Sends the text to the agent as your prompt."))
             .accessibilityLabel(L("Send"))
+            .padding(.bottom, 6)
         }
         .padding(.leading, 14)
-        .padding(.trailing, 5)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.trailing, 6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .modifier(ComposerGlass())
     }
-
-    /// Whether the agent has unsent text, which keeps its composer shown off focus.
-    static func hasDraft(_ id: UUID) -> Bool { ComposerDrafts.hasDraft(id) }
 }
 
-/// Liquid Glass where the system has it, solid paper before that; glass chrome keeps the system
-/// capsule. The paper wash under the text keeps ink at AA over the deepest sky blue (8.2:1 at
-/// 60%) and over cloud (14.5:1).
+/// Liquid Glass where the system has it, solid paper before that; a capsule on one line that
+/// keeps its round ends as it grows. The paper wash under the text keeps ink at AA over the
+/// deepest sky blue (8.2:1 at 60%) and over cloud (14.5:1).
 private struct ComposerGlass: ViewModifier {
-    private var shape: Capsule { Capsule() }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 18, style: .continuous) }
 
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
@@ -236,12 +249,13 @@ private struct MentionField: NSViewRepresentable {
     @Binding var isEmpty: Bool
     @Binding var notice: String?
 
-    func makeNSView(context: Context) -> ComposerTextView {
+    func makeNSView(context: Context) -> NSScrollView {
         let view = ComposerTextView()
         view.store = store
         view.agent = id
         view.onChange = { draft in
             ComposerDrafts.save(draft, for: id)
+            ComposerDrafts.setLines(view.lineCount, for: id)
             isEmpty = draft.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             notice = nil
             store.composerNotices[id] = nil
@@ -251,13 +265,29 @@ private struct MentionField: NSViewRepresentable {
         let empty = view.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         DispatchQueue.main.async { isEmpty = empty }
         ComposerDrafts.views[id] = view
-        return view
+        let scroll = PassingScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = false
+        view.isVerticallyResizable = true
+        view.autoresizingMask = .width
+        scroll.documentView = view
+        DispatchQueue.main.async { ComposerDrafts.setLines(view.lineCount, for: id) }
+        return scroll
     }
 
-    func updateNSView(_ view: ComposerTextView, context: Context) {}
+    func updateNSView(_ view: NSScrollView, context: Context) {}
 }
 
-/// One-line text view that turns picked elements into tokens and sends on Return. A token is
+/// Hands the wheel to the board while the draft fits, so panning over a card doesn't stall here.
+private final class PassingScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        let fits = (documentView?.frame.height ?? 0) <= contentSize.height + 1
+        if fits { nextResponder?.scrollWheel(with: event) } else { super.scrollWheel(with: event) }
+    }
+}
+
+/// Text view that turns picked elements into tokens, sends on Return and breaks the line on
+/// Shift- or Option-Return. A token is
 /// one piece: editing inside it replaces it whole.
 final class ComposerTextView: NSTextView, NSTextViewDelegate {
     weak var store: AgentStore?
@@ -269,6 +299,14 @@ final class ComposerTextView: NSTextView, NSTextViewDelegate {
     private var mentionStart: Int?
 
     static let font = NSFont.systemFont(ofSize: Theme.Font.bodySize)
+    static let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
+
+    /// Lines the text takes, wrapped at the field's width.
+    var lineCount: Int {
+        guard let layoutManager, let textContainer else { return 1 }
+        layoutManager.ensureLayout(for: textContainer)
+        return max(1, Int((layoutManager.usedRect(for: textContainer).height / Self.lineHeight).rounded()))
+    }
     static let plain: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(Theme.ink)]
 
     static func token(_ mention: BoardMention) -> NSAttributedString {
@@ -314,7 +352,12 @@ final class ComposerTextView: NSTextView, NSTextViewDelegate {
 
     private static let placeholder = L("Write to the agent; @ mentions a card")
 
-    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 22) }
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        // A narrower card wraps the draft onto more lines.
+        if widthChanged { ComposerDrafts.setLines(lineCount, for: agent) }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -389,6 +432,9 @@ final class ComposerTextView: NSTextView, NSTextViewDelegate {
         let model = picker.model
         let open = picker.isShown && !model.matches.isEmpty
         switch selector {
+        case #selector(insertNewline(_:)) where NSApp.currentEvent?.modifierFlags.contains(.shift) == true,
+             #selector(insertNewlineIgnoringFieldEditor(_:)):
+            insertText("\n", replacementRange: selectedRange())
         case #selector(insertNewline(_:)):
             if open { pick(model.matches[model.selected]) } else { submit() }
         case #selector(moveDown(_:)) where open:

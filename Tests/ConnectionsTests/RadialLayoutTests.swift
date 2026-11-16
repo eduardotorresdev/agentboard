@@ -45,17 +45,6 @@ struct RadialLayoutTests {
         for item in items { #expect(result[item.id]!.size == item.frame.size) }
     }
 
-    @Test func noCardCoversAnAgentsComposer() {
-        let (items, lines) = board(agents: 8)
-        let result = RadialLayout.organize(items, connections: lines)
-        let footprints = items.map { item -> CGRect in
-            var frame = result[item.id]!
-            if item.isHub { frame.size.height += RadialLayout.composerRoom }
-            return frame
-        }
-        #expect(noOverlaps(footprints))
-    }
-
     @Test func satellitesSitNextToTheirAgent() {
         let (items, lines) = board(agents: 6)
         let result = RadialLayout.organize(items, connections: lines)

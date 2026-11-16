@@ -388,6 +388,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         guard let window else { return releaseTerminals() }
         NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged),
                                                name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        // A composer that grows or shrinks a line takes room from its terminal.
+        NotificationCenter.default.addObserver(self, selector: #selector(composerLinesChanged),
+                                               name: ComposerDrafts.linesChanged, object: nil)
         // Reduce Transparency and Increase Contrast change how card headers draw.
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(displayOptionsChanged),
                                                           name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
@@ -401,6 +404,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     @objc private func displayOptionsChanged() { syncLayers() }
+
+    @objc private func composerLinesChanged() { syncLayers() }
 
     @objc private func occlusionChanged() {
         if isOnScreen { syncLayers() } else { releaseTerminals() }
@@ -711,18 +716,20 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if !dirty.isEmpty { displayLink?.isPaused = false }
     }
 
-    /// A strip just below the agent card, at a fixed on-screen height so it reads at any zoom.
-    /// Shown only on the focused card, or one holding a draft, so it rarely covers a card below.
+    /// The field at the bottom of the agent card, laid out in world points and scaled with the
+    /// camera like the rest of the card.
     private func placeComposer(for record: AgentRecord) {
         let view = composers[record.id] ?? {
-            let view = NSHostingView(rootView: AgentComposer(store: store, id: record.id))
+            let view = NSView()
+            view.addSubview(NSHostingView(rootView: AgentComposer(store: store, id: record.id)))
             composers[record.id] = view
             addSubview(view)
             return view
         }()
-        let frame = screen(record.frame)
-        view.frame = CGRect(x: frame.minX, y: frame.maxY + 8, width: frame.width, height: 34)
-        view.isHidden = record.id != focusedID && !AgentComposer.hasDraft(record.id) && store.heldMessages[record.id] == nil
+        let rect = CardMetrics.composer(of: record)
+        view.frame = screen(rect)
+        view.setBoundsSize(rect.size)
+        view.subviews.first?.frame = view.bounds
     }
 
     /// Browser cards sit above the agents, in their own stacking order.
@@ -1415,11 +1422,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             box.current = world(point)
             marquee = box
             let rect = Self.rect(box.start, box.current)
-            // A visible composer (8pt gap + 34pt strip on screen) counts as part of its card.
-            let frames = itemFrames.map { item in
-                (id: item.id, frame: composers[item.id]?.isHidden == false ? CanvasSelection.extended(item.frame, below: 42 / zoom) : item.frame)
-            }
-            selection = CanvasSelection.hits(frames, in: rect, adding: box.base)
+            selection = CanvasSelection.hits(itemFrames, in: rect, adding: box.base)
             return syncLayers()
         }
         if var drag = linkDrag {

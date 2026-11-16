@@ -193,8 +193,26 @@ final class RunnerChromeLayer: CALayer {
 }
 
 extension CardMetrics {
-    /// Where a terminal card shows its terminal: under the title bar, and under the strip on runners.
-    static func terminal(of record: AgentRecord) -> CGRect {
-        record.runner == nil ? content(of: record.frame) : RunnerChromeLayout.terminal(in: record.frame)
+    /// Where a terminal card shows its terminal: under the title bar, and under the strip on
+    /// runners; above the composer on agents.
+    @MainActor static func terminal(of record: AgentRecord) -> CGRect {
+        guard record.runner == nil else { return RunnerChromeLayout.terminal(in: record.frame) }
+        var area = content(of: record.frame)
+        area.size.height -= composerHeight(lines: ComposerDrafts.lines(record.id)) + composerGap
+        return area
+    }
+
+    /// The agent's composer, along the bottom of the card, growing upward one line at a time.
+    @MainActor static func composer(of record: AgentRecord) -> CGRect {
+        let height = composerHeight(lines: ComposerDrafts.lines(record.id))
+        return CGRect(x: record.frame.minX + inset, y: record.frame.maxY - inset - height, width: record.frame.width - inset * 2, height: height)
+    }
+
+    static let composerGap: CGFloat = 8
+    /// Lines the composer grows to before it scrolls.
+    static let composerMaxLines = 6
+
+    static func composerHeight(lines: Int) -> CGFloat {
+        36 + CGFloat(min(max(lines, 1), composerMaxLines) - 1) * ComposerTextView.lineHeight
     }
 }

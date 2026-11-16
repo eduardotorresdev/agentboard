@@ -27,11 +27,4 @@ struct CanvasSelectionTests {
         #expect(moved[b]?.origin == CGPoint(x: 42, y: -13))
         #expect(moved[b]?.size == CGSize(width: 5, height: 5))
     }
-
-    @Test func composerBelowAnAgentCountsForTheBox() {
-        let card = CGRect(x: 0, y: 0, width: 100, height: 100)
-        let box = CGRect(x: 10, y: 120, width: 10, height: 10)
-        #expect(CanvasSelection.hits([(id: a, frame: card)], in: box).isEmpty)
-        #expect(CanvasSelection.hits([(id: a, frame: CanvasSelection.extended(card, below: 42))], in: box) == [a])
-    }
 }

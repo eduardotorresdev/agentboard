@@ -14,13 +14,8 @@ import Foundation
 public enum RadialLayout {
     /// The least room between two cards.
     public static let gap: CGFloat = 48
-    /// Below an agent card: room for its composer (8 pt gap, 34 pt tall), shown when focused or drafting.
-    public static let composerRoom: CGFloat = 42
-
-    /// The room a card takes: an agent's includes its composer below it.
-    static func footprint(_ item: BoardLayout.Item) -> CGSize {
-        CGSize(width: item.frame.width, height: item.frame.height + (item.isHub ? composerRoom : 0))
-    }
+    /// The room a card takes.
+    static func footprint(_ item: BoardLayout.Item) -> CGSize { item.frame.size }
 
     public static func organize(_ items: [BoardLayout.Item], connections: [Connection]) -> [UUID: CGRect] {
         guard !items.isEmpty else { return [:] }
