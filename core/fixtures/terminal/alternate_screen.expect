@@ -1,0 +1,17 @@
+size 12 4
+cursor 8 1 true 0
+modes 40 mouse 0 0
+alternate false synchronizing false scrollback 0
+title -
+cwd none
+bells 0 titleChanged false
+screen 6d61696e2074657874
+screen 7365636f6e64484a
+screen 202049
+screen -
+recent 6d61696e2074657874
+recent 7365636f6e64484a
+recent 202049
+recent3 6d61696e2074657874
+recent3 7365636f6e64484a
+recent3 202049

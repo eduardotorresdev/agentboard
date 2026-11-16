@@ -49,6 +49,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key><string>pt-BR</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>NSLocalNetworkUsageDescription</key><string>Reaches your hosts on this network directly, which is much faster than through the internet.</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict>
 </plist>

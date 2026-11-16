@@ -1,0 +1,31 @@
+size 20 3
+cursor 0 0 true 0
+modes 40 mouse 0 0
+alternate false synchronizing false scrollback 0
+title -
+cwd none
+bells 2 titleChanged false
+notification 436c61756465206e6565647320696e707574
+notification 34
+notification -
+notification -
+notification 343bcc816a6f696e6564
+notification 34cc813b6d61726b
+notification c3a920343b78
+notification d880343b70726570656e64
+notification 5469746c653a20426f64792074657874
+notification 4f6e6c79207469746c65
+notification -
+notification 613a20623b633b64
+notification 3a20656d707479
+notification 613bcc81623a2063
+notification 673a2068cdbe69
+notification 61d8803b623a2063
+notification c3a93a20c3bc
+notification 613be2808d3a2062
+notification 783a2079
+notification 61667465722062656c6c73
+notification 61e0b58e3b62
+screen -
+screen -
+screen -

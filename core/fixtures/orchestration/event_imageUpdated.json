@@ -1,0 +1,25 @@
+{
+  "imageUpdated" : {
+    "_0" : {
+      "duration" : 12.25,
+      "file" : "0000000B-ABCD-4EF0-8A1B-00000000000B.mp4",
+      "frame" : [
+        [
+          1,
+          400
+        ],
+        [
+          480,
+          302
+        ]
+      ],
+      "id" : "00000007-ABCD-4EF0-8A1B-000000000007",
+      "name" : "Signup flow",
+      "pixelSize" : [
+        1920,
+        1080
+      ],
+      "worktree" : "\/work\/tree"
+    }
+  }
+}

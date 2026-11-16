@@ -91,6 +91,18 @@ final class Database {
                 x REAL NOT NULL, y REAL NOT NULL,
                 width REAL NOT NULL, height REAL NOT NULL,
                 organization TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS host_pins (
+                host TEXT PRIMARY KEY,
+                key TEXT NOT NULL,
+                sync_allowed INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS host_worktrees (
+                host TEXT NOT NULL,
+                project TEXT NOT NULL,
+                path TEXT NOT NULL,
+                branch TEXT,
+                PRIMARY KEY (host, path)
             )
             """)
         if try !columns(of: "projects").contains("organization") {
@@ -118,6 +130,9 @@ final class Database {
         try addColumn("browsers", "profile TEXT")
         // Nullable: rows an older build writes without it load in the default organization.
         try addColumn("browsers", "organization TEXT")
+        // The host a card's worktree is on (see docs/hosts.md); null is this Mac.
+        try addColumn("browsers", "host TEXT")
+        try addColumn("file_trees", "host TEXT")
     }
 
     /// Adds a column unless it is there. Another process adding it at the same moment (both
@@ -245,6 +260,75 @@ final class Database {
         }
     }
 
+    /// What other hosts' clones of the projects held when last listed, by host then project
+    /// path, in git's order: the clone itself first, then its worktrees. A host that isn't
+    /// here has no clone of the project, as far as this Mac knows.
+    func hostWorktrees() throws -> [UUID: [String: [Worktree]]] {
+        let stmt = try prepare("SELECT host, project, path, branch FROM host_worktrees ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [UUID: [String: [Worktree]]] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let host = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            let worktree = Worktree(path: String(cString: sqlite3_column_text(stmt, 2)),
+                                    branch: sqlite3_column_text(stmt, 3).map { String(cString: $0) }, host: host)
+            result[host, default: [:]][String(cString: sqlite3_column_text(stmt, 1)), default: []].append(worktree)
+        }
+        return result
+    }
+
+    /// Replaces what `host`'s clone of `project` holds; an empty list forgets the clone.
+    func setHostWorktrees(_ worktrees: [Worktree], host: UUID, project: String) throws {
+        try execute("BEGIN")
+        do {
+            let clear = try prepare("DELETE FROM host_worktrees WHERE host = ? AND project = ?")
+            defer { sqlite3_finalize(clear) }
+            bind(clear, 1, host.uuidString)
+            bind(clear, 2, project)
+            guard sqlite3_step(clear) == SQLITE_DONE else { throw error() }
+            for worktree in worktrees {
+                let stmt = try prepare("INSERT OR REPLACE INTO host_worktrees (host, project, path, branch) VALUES (?, ?, ?, ?)")
+                defer { sqlite3_finalize(stmt) }
+                bind(stmt, 1, host.uuidString)
+                bind(stmt, 2, project)
+                bind(stmt, 3, worktree.path)
+                if let branch = worktree.branch { bind(stmt, 4, branch) } else { sqlite3_bind_null(stmt, 4) }
+                guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
+    }
+
+    /// The identity key each host had when this Mac first saw it (or the user accepted since),
+    /// whether the user allowed syncing to the host with that key, and whether the host with
+    /// that key ever let this Mac in (bits 1 and 2 of `sync_allowed`: no new column for a flag).
+    func hostPins() throws -> [UUID: (key: String, syncAllowed: Bool, trustedHere: Bool)] {
+        let stmt = try prepare("SELECT host, key, sync_allowed FROM host_pins")
+        defer { sqlite3_finalize(stmt) }
+        var result: [UUID: (key: String, syncAllowed: Bool, trustedHere: Bool)] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let host = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            let flags = sqlite3_column_int(stmt, 2)
+            result[host] = (String(cString: sqlite3_column_text(stmt, 1)), flags & 1 != 0, flags & 2 != 0)
+        }
+        return result
+    }
+
+    /// Pins `host` to `key`; a nil key forgets the host.
+    func setHostPin(_ key: String?, syncAllowed: Bool = false, trustedHere: Bool = false, host: UUID) throws {
+        let stmt = try prepare(key == nil ? "DELETE FROM host_pins WHERE host = ?"
+                                          : "INSERT OR REPLACE INTO host_pins (host, key, sync_allowed) VALUES (?, ?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, host.uuidString)
+        if let key {
+            bind(stmt, 2, key)
+            sqlite3_bind_int(stmt, 3, (syncAllowed ? 1 : 0) | (trustedHere ? 2 : 0))
+        }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
     func setWorktreeTitle(_ title: String, path: String) throws {
         let stmt = try prepare("INSERT OR REPLACE INTO worktree_titles (path, title) VALUES (?, ?)")
         defer { sqlite3_finalize(stmt) }
@@ -254,7 +338,7 @@ final class Database {
     }
 
     func browsers() throws -> [BrowserRecord] {
-        let stmt = try prepare("SELECT id, worktree, name, device, url, x, y, width, height, profile, organization FROM browsers ORDER BY rowid")
+        let stmt = try prepare("SELECT id, worktree, name, device, url, x, y, width, height, profile, organization, host FROM browsers ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
         var result: [BrowserRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -269,14 +353,15 @@ final class Database {
                 frame: CGRect(x: sqlite3_column_double(stmt, 5), y: sqlite3_column_double(stmt, 6),
                               width: sqlite3_column_double(stmt, 7), height: sqlite3_column_double(stmt, 8)),
                 profile: profile ?? BrowserProfile.defaultID,
-                organization: sqlite3_column_text(stmt, 10).flatMap { UUID(uuidString: String(cString: $0)) } ?? OrganizationHome.defaultID))
+                organization: sqlite3_column_text(stmt, 10).flatMap { UUID(uuidString: String(cString: $0)) } ?? OrganizationHome.defaultID,
+                host: sqlite3_column_text(stmt, 11).flatMap { UUID(uuidString: String(cString: $0)) }))
         }
         return result
     }
 
     func saveBrowser(_ browser: BrowserRecord) throws {
         let stmt = try prepare("""
-            INSERT OR REPLACE INTO browsers (id, worktree, name, device, url, x, y, width, height, profile, organization) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO browsers (id, worktree, name, device, url, x, y, width, height, profile, organization, host) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
         defer { sqlite3_finalize(stmt) }
         for (index, value) in [browser.id.uuidString, browser.worktree, browser.name, browser.device.stored, browser.url].enumerated() {
@@ -287,11 +372,12 @@ final class Database {
         }
         bind(stmt, 10, browser.profile.uuidString)
         bind(stmt, 11, browser.organization.uuidString)
+        if let host = browser.host { bind(stmt, 12, host.uuidString) } else { sqlite3_bind_null(stmt, 12) }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 
     func fileTrees() throws -> [FileTreeRecord] {
-        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, organization FROM file_trees ORDER BY rowid")
+        let stmt = try prepare("SELECT id, worktree, name, x, y, width, height, organization, host FROM file_trees ORDER BY rowid")
         defer { sqlite3_finalize(stmt) }
         var result: [FileTreeRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -302,13 +388,14 @@ final class Database {
                 name: String(cString: sqlite3_column_text(stmt, 2)),
                 frame: CGRect(x: sqlite3_column_double(stmt, 3), y: sqlite3_column_double(stmt, 4),
                               width: sqlite3_column_double(stmt, 5), height: sqlite3_column_double(stmt, 6)),
-                organization: UUID(uuidString: String(cString: sqlite3_column_text(stmt, 7))) ?? OrganizationHome.defaultID))
+                organization: UUID(uuidString: String(cString: sqlite3_column_text(stmt, 7))) ?? OrganizationHome.defaultID,
+                host: sqlite3_column_text(stmt, 8).flatMap { UUID(uuidString: String(cString: $0)) }))
         }
         return result
     }
 
     func saveFileTree(_ tree: FileTreeRecord) throws {
-        let stmt = try prepare("INSERT OR REPLACE INTO file_trees (id, worktree, name, x, y, width, height, organization) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        let stmt = try prepare("INSERT OR REPLACE INTO file_trees (id, worktree, name, x, y, width, height, organization, host) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, tree.id.uuidString)
         bind(stmt, 2, tree.worktree)
@@ -317,6 +404,7 @@ final class Database {
             sqlite3_bind_double(stmt, Int32(index + 4), value)
         }
         bind(stmt, 8, tree.organization.uuidString)
+        if let host = tree.host { bind(stmt, 9, host.uuidString) } else { sqlite3_bind_null(stmt, 9) }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 

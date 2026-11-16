@@ -4,11 +4,11 @@ import SwiftUI
 
 /// The count of agents waiting on the developer, centered in the toolbar. Opens the deck.
 struct NeedsYouButton: View {
-    let agents: AgentStore
+    let hosts: HostStores
     @Binding var isOpen: Bool
     @State private var isHovered = false
 
-    private var count: Int { agents.attention.count { agents.record($0.id) != nil } }
+    private var count: Int { hosts.attention.count { hosts.store(of: $0.id) != nil } }
 
     var body: some View {
         Button {
@@ -68,7 +68,8 @@ struct NeedsYouButton: View {
 /// sidebar) with a stack of cards. The top one says where the agent works and what it asks, over
 /// its live terminal to answer in; dragging it aside marks it done and brings up the next.
 struct NeedsYouDeck: View {
-    let agents: AgentStore
+    /// The agents wait on this Mac and on the account's hosts: each request is its host's store's.
+    let hosts: HostStores
     let projects: ProjectStore
     @Binding var isOpen: Bool
     /// Opens the agent's worktree on the board, focused on its card.
@@ -95,7 +96,7 @@ struct NeedsYouDeck: View {
     private static let behind = 3
 
     private var queue: [AttentionRequest] {
-        agents.attention.filter { agents.record($0.id) != nil && !leaving.contains($0.id) }
+        hosts.attention.filter { hosts.store(of: $0.id) != nil && !leaving.contains($0.id) }
     }
 
     var body: some View {
@@ -110,11 +111,11 @@ struct NeedsYouDeck: View {
                 .contentShape(.rect)
                 ZStack {
                     // One list, so a card keeps its identity (and its terminal) as it flies off.
-                    let flying = agents.attention.filter { leaving.contains($0.id) }
+                    let flying = hosts.attention.filter { leaving.contains($0.id) }
                     let cards = flying.map { ($0, 0, true) } + queue.prefix(Self.behind).enumerated().map { ($1, $0, false) }
                     ForEach(cards.reversed(), id: \.0.id) { request, depth, isLeaving in
-                        if let record = agents.record(request.id) {
-                            card(request, record, depth: depth, size: size, isLeaving: isLeaving)
+                        if let agents = hosts.store(of: request.id), let record = agents.record(request.id) {
+                            card(request, record, in: agents, depth: depth, size: size, isLeaving: isLeaving)
                                 .zIndex(isLeaving ? 1 : Double(-depth))
                         }
                     }
@@ -161,7 +162,7 @@ struct NeedsYouDeck: View {
     }
 
     @ViewBuilder
-    private func card(_ request: AttentionRequest, _ record: AgentRecord, depth: Int, size: CGSize, isLeaving: Bool = false) -> some View {
+    private func card(_ request: AttentionRequest, _ record: AgentRecord, in agents: AgentStore, depth: Int, size: CGSize, isLeaving: Bool = false) -> some View {
         let drag = drags[request.id] ?? .zero
         let isTop = depth == 0 && !isLeaving
         let progress = isLeaving ? 1 : isTop ? min(abs(drag.width) / Self.threshold, 1) : 0
@@ -233,7 +234,7 @@ struct NeedsYouDeck: View {
             leaving.remove(id)
             drags[id] = nil
             then?()
-            agents.dismissAttention(id)
+            hosts.store(of: id)?.dismissAttention(id)
         }
     }
 

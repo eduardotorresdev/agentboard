@@ -61,7 +61,7 @@ struct OrganizationBarAvatar: View {
 }
 
 /// Where the menu hangs from: the avatar's frame on screen.
-private struct OrganizationMenuAnchor: NSViewRepresentable {
+struct OrganizationMenuAnchor: NSViewRepresentable {
     let panel: OrganizationMenuPanel
 
     func makeNSView(context: Context) -> NSView {
@@ -84,10 +84,14 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
     private var closedAt = Date.distantPast
 
     func toggle(store: ProjectStore, attention: @escaping () -> [UUID: OrganizationAttention]) {
+        toggle { state, close in OrganizationMenu(store: store, attention: attention, state: state, close: close) }
+    }
+
+    /// Opens the panel on `content` (which shows itself as `state.isShown` turns), or closes it.
+    func toggle(_ content: (OrganizationMenuState, @escaping () -> Void) -> some View) {
         if panel != nil { return close() }
         guard Date().timeIntervalSince(closedAt) > 0.25, let anchor, let window = anchor.window else { return }
-        let content = OrganizationMenu(store: store, attention: attention, state: state, close: { [weak self] in self?.close() })
-        let host = NSHostingView(rootView: content)
+        let host = NSHostingView(rootView: content(state, { [weak self] in self?.close() }))
         let size = host.fittingSize
         let below = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
         let panel = NSPanel(contentRect: CGRect(x: below.maxX - size.width + 8, y: below.minY - size.height - 6,
@@ -147,8 +151,6 @@ private struct OrganizationMenu: View {
     @State private var hovered: OrganizationMenuNavigation.Item?
     @FocusState private var isFocused: Bool
 
-    private static let width: CGFloat = 280
-    private static let corner: CGFloat = 14
 
     var body: some View {
         Group {
@@ -158,11 +160,7 @@ private struct OrganizationMenu: View {
                 list
             }
         }
-        .frame(width: Self.width)
-        .modifier(MenuGlass(corner: Self.corner))
-        .scaleEffect(state.isShown ? 1 : 0.94, anchor: .topTrailing)
-        .opacity(state.isShown ? 1 : 0)
-        .padding(1)
+        .modifier(MenuChrome(state: state))
     }
 
     private var list: some View {
@@ -305,6 +303,20 @@ private struct OrganizationMenu: View {
                 hovered = nil
             }
         }
+    }
+}
+
+/// A top bar menu's panel: its width and glass, growing from the corner it hangs from.
+struct MenuChrome: ViewModifier {
+    let state: OrganizationMenuState
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: 280)
+            .modifier(MenuGlass(corner: 14))
+            .scaleEffect(state.isShown ? 1 : 0.94, anchor: .topTrailing)
+            .opacity(state.isShown ? 1 : 0)
+            .padding(1)
     }
 }
 

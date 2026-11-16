@@ -1,0 +1,6 @@
+{
+  "restart" : {
+    "command" : "npm run build",
+    "id" : "00000002-ABCD-4EF0-8A1B-000000000002"
+  }
+}

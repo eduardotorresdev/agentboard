@@ -42,7 +42,8 @@ public enum CoreProtocol {
     /// 5: an agent's questions in its attention request, answered with `answerQuestions`.
     /// 6: the composer's `prompt`, and messages `held` behind the user's terminal line (`deliverHeld`).
     /// 7: `subscribeStatuses`, a board hearing every session's status.
-    public static let version = 7
+    /// 8: hosts: `run` (a program on the core's machine, answered with `ran`) and `subscribeHost`.
+    public static let version = 8
     public static let oldest = 2
     public static let versions = Versions(version: version, oldest: oldest)
 
@@ -110,6 +111,13 @@ enum CoreRequest: Codable {
     /// From a newer core: hand it every session without ending them (see `CoreHandoff`). The
     /// connection leaves frames for the handoff.
     case takeOver
+    /// Runs a program on the core's machine and answers with `ran`: how a board runs git on
+    /// another host. An `executable` without a slash is looked up in the PATH the core launches
+    /// agents with; `input` is what the program reads (nothing when nil). Since 8; an older
+    /// core never answers.
+    case run(call: UUID, executable: String, arguments: [String], directory: String?, input: Data?)
+    /// The machine's stats from now on, as `host` events. Since 8.
+    case subscribeHost
 }
 
 enum CoreEvent: Codable {
@@ -119,6 +127,24 @@ enum CoreEvent: Codable {
     /// follows then, and the board hangs up). `oldest`: since 3.
     case welcome(version: Int, oldest: Int?, sessions: [UUID: SessionStatus], service: Data?)
     case status(id: UUID, status: SessionStatus)
+    /// The answer to `run`: `status` is the exit code, or -1 when the program couldn't start
+    /// (`error` then says why).
+    case ran(call: UUID, status: Int32, output: Data, error: Data)
+    case host(HostStats)
+}
+
+/// What the core's machine is using, as it reports it every couple of seconds.
+public struct HostStats: Codable, Equatable, Sendable {
+    /// Of every processor together, 0 to 1.
+    public var cpu: Double
+    public var memoryUsed: UInt64
+    public var memoryTotal: UInt64
+    /// Of the volume the home folder is on.
+    public var diskUsed: UInt64
+    public var diskTotal: UInt64
+    /// The 1-minute load average.
+    public var load: Double
+    public var cores: Int
 }
 
 extension LaunchSpec: Codable {

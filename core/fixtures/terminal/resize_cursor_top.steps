@@ -1,0 +1,6 @@
+size 10 6 100
+feed 10
+resize 10 2
+feed 1
+resize 4 9
+feed 5

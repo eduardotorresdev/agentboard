@@ -1,0 +1,18 @@
+{
+  "welcome" : {
+    "oldest" : 2,
+    "service" : "AAEC+v8=",
+    "sessions" : [
+      "00000001-ABCD-4EF0-8A1B-000000000001",
+      {
+        "processID" : 4242,
+        "state" : {
+          "running" : {
+
+          }
+        }
+      }
+    ],
+    "version" : 8
+  }
+}

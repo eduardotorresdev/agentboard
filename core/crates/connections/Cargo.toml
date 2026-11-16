@@ -1,0 +1,14 @@
+[package]
+name = "connections"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+hmac = "0.12"
+sha2 = "0.10"
+# Names are cleaned by grapheme cluster and general category, as Swift's String does.
+unicode-segmentation = "1"
+unicode-properties = "0.1"

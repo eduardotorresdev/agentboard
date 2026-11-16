@@ -1,0 +1,24 @@
+[package]
+name = "host"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+uuid.workspace = true
+base64 = "0.22"
+getrandom = "0.2"
+zeroize = "1"
+subtle = "2"
+x25519-dalek = { version = "2", features = ["static_secrets", "zeroize"] }
+ed25519-dalek = { version = "2", features = ["zeroize"] }
+hkdf = "0.12"
+sha2 = "0.10"
+chacha20poly1305 = "0.10"
+# TLS is rustls on ring everywhere: the Linux binary is static (musl), with no OpenSSL.
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+tungstenite = { version = "0.24", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "0.26"

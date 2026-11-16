@@ -1,0 +1,25 @@
+{
+  "imageAdded" : {
+    "_0" : {
+      "file" : "0000000A-ABCD-4EF0-8A1B-00000000000A.png",
+      "frame" : [
+        [
+          1,
+          2
+        ],
+        [
+          480,
+          302
+        ]
+      ],
+      "id" : "00000006-ABCD-4EF0-8A1B-000000000006",
+      "name" : "Login screen",
+      "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+      "pixelSize" : [
+        1280,
+        720
+      ],
+      "worktree" : "\/work\/tree"
+    }
+  }
+}

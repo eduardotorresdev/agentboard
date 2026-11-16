@@ -216,6 +216,27 @@ function readState(path) {
   }
 }
 
+/** The machine's own addresses, as `URL.hostname` gives them. */
+const loopback = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/;
+
+/** `url` for a page of a worktree on another host: a loopback address becomes `alias`, a name
+ * under `.localhost` that the board's proxy sends to that host. WebKit often loads `localhost`
+ * and 127.0.0.1 from this Mac whatever the proxy says (measured: about half the time), and
+ * always sends any other name to the proxy. */
+function onHost(url, alias) {
+  if (!alias) return url;
+  // A typed `localhost:3000` reads as a URL whose scheme is `localhost`: it is a host and a port.
+  const typed = /^(localhost|127\.|\[::1\]|0\.0\.0\.0)/i.test(url) ? 'http://' + url : url;
+  try {
+    const parsed = new URL(typed);
+    if (!loopback.test(parsed.hostname)) return url;
+    parsed.hostname = alias;
+    return parsed.href;
+  } catch {
+    return url;
+  }
+}
+
 /** A typed address as a URL: a bare host gets https:// (http:// for localhost). */
 function address(text) {
   const url = String(text ?? '').trim();
@@ -263,14 +284,31 @@ async function report(block, caller, done) {
 }
 
 const methods = {
-  async open({ block: id, device, url, storageState, profileState }) {
+  async open({ block: id, device, url, storageState, profileState, proxy, loopbackAlias }) {
     const browser = await ensureBrowser();
     const options = contextOptions(device);
     // A card follows a profile: its cookies and local storage are a JSON file on disk, shared by
     // every card on the same profile. Load it, and save it back as the page changes.
     const state = storageState ?? readState(profileState);
-    const context = await browser.newContext({ ...options, storageState: state });
+    // A worktree on another host: its pages go through the board's proxy, which sends loopback
+    // addresses to that host.
+    const context = await browser.newContext({ ...options, storageState: state, ...(proxy ? { proxy } : {}) });
+    // What a page asks of a loopback address itself goes the same way: a request (an API on
+    // another port) is sent on under the alias, and a navigation (a link, a redirect the server
+    // wrote with `localhost`) is answered with a page that goes to the alias, so what opens has
+    // the alias's origin (WebKit takes no redirect status from here).
+    if (loopbackAlias) {
+      await context.route(url => loopback.test(url.hostname), route => {
+        const url = onHost(route.request().url(), loopbackAlias);
+        const answered = route.request().isNavigationRequest()
+          ? route.fulfill({ contentType: 'text/html', body: `<script>location.replace(${JSON.stringify(url).replace(/</g, '\\u003c')})</script>` })
+          : route.continue({ url });
+        return answered.catch(() => route.abort().catch(() => {}));
+      });
+    }
     const entry = new Block(id, options);
+    entry.proxy = proxy;
+    entry.loopbackAlias = loopbackAlias;
     entry.profileState = profileState;
     entry.deviceSpec = device;
     blocks.set(id, entry);
@@ -285,7 +323,7 @@ const methods = {
     await page.goto(`about:blank#agentboard=${id}`);
     await found;
     surfaceWaiters.delete(id);
-    if (url) page.goto(address(url)).catch(error => entry.record('error', `Navigation failed: ${error.message}`));
+    if (url) page.goto(onHost(address(url), loopbackAlias)).catch(error => entry.record('error', `Navigation failed: ${error.message}`));
     return { viewport: page.viewportSize() };
   },
 
@@ -300,7 +338,7 @@ const methods = {
       const old = entry.context;
       blocks.delete(id);
       await old.close().catch(() => {});
-      return methods.open({ block: id, device, url: url.includes('#agentboard=') ? '' : url, storageState, profileState });
+      return methods.open({ block: id, device, url: url.includes('#agentboard=') ? '' : url, storageState, profileState, proxy: entry.proxy, loopbackAlias: entry.loopbackAlias });
     });
   },
 
@@ -315,7 +353,7 @@ const methods = {
       const old = entry.context;
       blocks.delete(id);
       await old.close().catch(() => {});
-      return methods.open({ block: id, device, url: url.includes('#agentboard=') ? '' : url, profileState });
+      return methods.open({ block: id, device, url: url.includes('#agentboard=') ? '' : url, profileState, proxy: entry.proxy, loopbackAlias: entry.loopbackAlias });
     });
   },
 
@@ -406,7 +444,7 @@ const methods = {
         case 'forward': await page.goForward(); break;
         case 'reload': await page.reload(); break;
         default: {
-          await page.goto(address(params.url), { waitUntil: params.waitUntil ?? 'load', timeout: 30000 });
+          await page.goto(onHost(address(params.url), entry.loopbackAlias), { waitUntil: params.waitUntil ?? 'load', timeout: 30000 });
         }
       }
       return report(entry, params.caller, params.action ? `Went ${params.action}.` : 'Navigated.');

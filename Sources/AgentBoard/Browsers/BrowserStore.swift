@@ -98,6 +98,8 @@ struct BrowserRecord: Identifiable, Hashable {
     var profile: UUID = BrowserProfile.defaultID
     /// The organization it was added in; older cards are in the default one.
     var organization: UUID = OrganizationHome.defaultID
+    /// The host its worktree is on (nil: this Mac): its pages reach that host's loopback.
+    var host: UUID?
 }
 
 /// A browser card's live page in the sidecar.
@@ -129,7 +131,14 @@ final class BrowserStore {
 
     @ObservationIgnored private let database: Database?
     @ObservationIgnored let host = BrowserHost()
-    @ObservationIgnored private weak var agents: AgentStore?
+    /// The stores the cards are on, by their worktree's host (nil: this Mac's).
+    @ObservationIgnored private var boards: [UUID?: Board] = [:]
+    /// Sends the pages of another host's worktrees through that host; without it every page
+    /// loads from this Mac.
+    @ObservationIgnored private(set) lazy var proxy: HostProxy? = makeProxy?()
+    /// Makes `proxy` the first time a page of another host's worktree needs it: a board that
+    /// only has this Mac's worktrees never listens.
+    @ObservationIgnored var makeProxy: (() -> HostProxy)?
     @ObservationIgnored private var opening: [UUID: Task<Void, Error>] = [:]
     /// Pointer moves waiting for the one in flight, per card: only the latest is sent.
     @ObservationIgnored private var pendingMoves: [UUID: [String: Any]] = [:]
@@ -146,6 +155,10 @@ final class BrowserStore {
         host.onEvent = { [weak self] event in self?.received(event) }
         host.onStateChange = { [weak self] state in self?.hostChanged(state) }
     }
+
+    private struct Board { weak var store: AgentStore? }
+
+    private func agents(_ host: UUID? = nil) -> AgentStore? { boards[host]?.store }
 
     func profile(_ id: UUID) -> BrowserProfile {
         profiles.first { $0.id == id } ?? .defaultProfile
@@ -173,7 +186,7 @@ final class BrowserStore {
         guard let index = browsers.firstIndex(where: { $0.id == id }), browsers[index].profile != profileID else { return }
         browsers[index].profile = profileID
         try? database?.saveBrowser(browsers[index])
-        agents?.elementsChanged()
+        agents(browsers[index].host)?.elementsChanged()
         guard pages[id] != nil, opening[id] == nil else { return }
         pages[id]?.phase = .opening
         pages[id]?.contextID = nil
@@ -282,24 +295,25 @@ final class BrowserStore {
 
     /// Puts the cards on `agents`' board: lines can reach them and agents get the browser tools.
     func attach(to agents: AgentStore) {
-        self.agents = agents
+        let host = agents.host?.id
+        boards[host] = Board(store: agents)
         agents.browserTools = BrowserTools(store: self, agents: agents)
-        agents.elementSources[ElementKind.browser.rawValue] = { [weak self] in self?.elementInfos ?? [] }
+        agents.elementSources[ElementKind.browser.rawValue] = { [weak self] in self?.elementInfos(on: host) ?? [] }
         agents.elementsChanged()
     }
 
     /// The cards as the core keeps them: lines reach them, and agents see them in `list_peers`.
-    private var elementInfos: [ElementInfo] {
-        browsers.map { record in
+    private func elementInfos(on host: UUID?) -> [ElementInfo] {
+        browsers.filter { $0.host == host }.map { record in
             let element = BrowserElement(id: record.id, store: self)
             return ElementInfo(id: record.id, name: record.name, kind: ElementKind.browser.rawValue, detail: element.detail,
                                worktree: record.worktree, frame: record.frame, organization: record.organization)
         }
     }
 
-    func browsers(in worktree: String) -> [BrowserRecord] {
-        let organization = agents?.organizationID ?? OrganizationHome.defaultID
-        return browsers.filter { $0.worktree == worktree && $0.organization == organization }
+    func browsers(in worktree: String, on host: UUID? = nil) -> [BrowserRecord] {
+        let organization = agents()?.organizationID ?? OrganizationHome.defaultID
+        return browsers.filter { $0.worktree == worktree && $0.organization == organization && $0.host == host }
     }
 
     func record(_ id: UUID) -> BrowserRecord? {
@@ -324,23 +338,24 @@ final class BrowserStore {
     }
 
     @discardableResult
-    func add(_ device: BrowserDevice, to worktree: String, at origin: CGPoint, organization: UUID? = nil,
+    func add(_ device: BrowserDevice, to worktree: String, on host: UUID? = nil, at origin: CGPoint, organization: UUID? = nil,
              named name: String? = nil) -> BrowserRecord {
-        let organization = organization ?? agents?.organizationID ?? OrganizationHome.defaultID
+        let organization = organization ?? agents()?.organizationID ?? OrganizationHome.defaultID
         let trimmed = name?.trimmingCharacters(in: .whitespaces) ?? ""
-        let siblings = browsers.filter { $0.worktree == worktree && $0.organization == organization }
+        let siblings = browsers.filter { $0.worktree == worktree && $0.organization == organization && $0.host == host }
         let record = BrowserRecord(id: UUID(), worktree: worktree,
                                    name: Self.uniqueName(trimmed.isEmpty ? device.title : trimmed, among: siblings),
                                    device: device, url: "",
                                    frame: Self.frame(for: device, at: origin, scale: Self.initialScale(for: device)),
-                                   organization: organization)
+                                   organization: organization, host: host)
         browsers.append(record)
         try? database?.saveBrowser(record)
-        agents?.elementsChanged()
+        agents(host)?.elementsChanged()
         return record
     }
 
     func remove(_ id: UUID) {
+        let agents = self.agents(record(id)?.host)
         agents?.dropConnections(touching: id)
         browsers.removeAll { $0.id == id }
         opening[id]?.cancel()
@@ -360,7 +375,7 @@ final class BrowserStore {
         browsers[index].frame = frame
         if persist {
             try? database?.saveBrowser(browsers[index])
-            agents?.elementsChanged()
+            agents(browsers[index].host)?.elementsChanged()
         }
     }
 
@@ -376,10 +391,10 @@ final class BrowserStore {
         let named = old.name == old.device.title || old.name.range(of: "^\(NSRegularExpression.escapedPattern(for: old.device.title)) \\d+$",
                                                                      options: .regularExpression) != nil
         if named, device.title != old.device.title {
-            browsers[index].name = Self.uniqueName(device.title, among: browsers(in: old.worktree).filter { $0.id != id })
+            browsers[index].name = Self.uniqueName(device.title, among: browsers(in: old.worktree, on: old.host).filter { $0.id != id })
         }
         try? database?.saveBrowser(browsers[index])
-        agents?.elementsChanged()
+        agents(browsers[index].host)?.elementsChanged()
         guard pages[id] != nil, opening[id] == nil else { return }
         pages[id]?.phase = .opening
         pages[id]?.contextID = nil
@@ -457,8 +472,14 @@ final class BrowserStore {
         onPageChange?(id)
         let task = Task { @MainActor in
             do {
-                _ = try await host.request("open", ["block": id.uuidString, "device": record.device.wire, "url": record.url,
-                                                     "profileState": profileState(record.profile).path])
+                var params: [String: Any] = ["block": id.uuidString, "device": record.device.wire, "url": record.url,
+                                             "profileState": profileState(record.profile).path]
+                // A worktree on another host: its pages' localhost is that host's.
+                if let remote = record.host, let proxy {
+                    params["proxy"] = proxy.settings(for: remote)
+                    params["loopbackAlias"] = HostProxy.alias(for: agents(remote)?.host?.name ?? "")
+                }
+                _ = try await host.request("open", params)
                 guard pages[id] != nil else { return }
                 pages[id]?.phase = .open
                 if pages[id]?.url.isEmpty == true { pages[id]?.url = record.url }

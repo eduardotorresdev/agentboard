@@ -378,7 +378,7 @@ public final class Orchestrator: CoreService {
     /// Runs a tool only a board can (a browser's) on a connected one.
     func relay(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
         guard let board = boards.first else {
-            return .error(name.hasPrefix("project_") || name.hasPrefix("worktree_") ? "Projects live in the board, which isn't open right now. Ask the user to open it, then try again." : "Browsers run in the board, which isn't open right now. Ask the user to open it, then try again.")
+            return .error(name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_") ? "Projects live in the board, which isn't open right now. Ask the user to open it, then try again." : "Browsers run in the board, which isn't open right now. Ask the user to open it, then try again.")
         }
         let data = (try? JSONSerialization.data(withJSONObject: arguments)) ?? Data("{}".utf8)
         let call = UUID()

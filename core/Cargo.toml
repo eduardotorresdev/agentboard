@@ -1,0 +1,19 @@
+# The core in Rust: runs on a host (Linux first) and speaks the same protocol as the Swift
+# core the Mac board mirrors. See docs/hosts.md.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+libc = "0.2"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+lto = "thin"
+strip = true

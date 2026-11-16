@@ -1,0 +1,8 @@
+size 8 3 100
+feed 34
+resize 5 3
+snapshot 0
+resize 3 3
+feed 1
+resize 9 2
+feed 6

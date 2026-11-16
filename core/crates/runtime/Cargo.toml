@@ -1,0 +1,15 @@
+[package]
+name = "runtime"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+terminal = { path = "../terminal" }
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+uuid.workspace = true
+base64 = "0.22"
+
+[dev-dependencies]
+libc.workspace = true

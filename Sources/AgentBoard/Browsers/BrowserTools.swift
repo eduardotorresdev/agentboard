@@ -46,7 +46,7 @@ final class BrowserTools {
         case "tablet": BrowserDevice.tablet
         default: BrowserDevice.desktop
         }
-        let record = store.add(device, to: agent.worktree, at: origin(near: agent, device: device),
+        let record = store.add(device, to: agent.worktree, on: agents.host?.id, at: origin(near: agent, device: device),
                                organization: agent.organizationID, named: try? BoardName.argument(arguments["name"]).get())
         agents.connect(caller, record.id)
         guard let url = arguments["url"] as? String, !url.isEmpty else {
@@ -67,7 +67,7 @@ final class BrowserTools {
         let items = agents.agents.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: $0.runner == nil) }
             + agents.postIts.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
             + agents.images.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
-            + store.browsers.filter { $0.worktree == worktree }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
+            + store.browsers.filter { $0.worktree == worktree && $0.host == agents.host?.id }.map { BoardLayout.Item(id: $0.id, frame: $0.frame, isHub: false) }
         return BoardLayout.slot(for: size, parent: agent.id, among: items, connections: agents.connections)
             ?? CGPoint(x: agent.frame.maxX + BoardLayout.columnGap, y: agent.frame.minY)
     }

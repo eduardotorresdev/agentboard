@@ -20,6 +20,10 @@ struct ClaudeUsage: Equatable {
 enum ClaudeUsageClient {
     /// The usage of the account the organization's agents are signed in to.
     static func fetch(organization: UUID) async throws -> ClaudeUsage {
+        // For screenshots of a build under test (see docs/core.md).
+        if ProcessInfo.processInfo.environment["AGENTBOARD_USAGE_SAMPLE"] == "1" {
+            return ClaudeUsage(session: .init(used: 37, resetsAt: Date().addingTimeInterval(2 * 3600)), week: .init(used: 62, resetsAt: Date().addingTimeInterval(3 * 86400)))
+        }
         // An isolated instance (tests, harnesses) never reads the user's keychain, not even to look.
         guard !DataFolder.isIsolated(), ProcessInfo.processInfo.environment["AGENTBOARD_TEST"] != "1" else {
             throw URLError(.userAuthenticationRequired)

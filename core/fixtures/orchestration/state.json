@@ -1,0 +1,238 @@
+{
+  "attention" : [
+    {
+      "context" : "Done:\nall tests pass.",
+      "id" : "00000001-ABCD-4EF0-8A1B-000000000001",
+      "reason" : {
+        "turnEnded" : {
+
+        }
+      },
+      "since" : 784111222.5
+    },
+    {
+      "id" : "00000003-ABCD-4EF0-8A1B-000000000003",
+      "orchestrators" : [
+        "Ada"
+      ],
+      "reason" : {
+        "said" : {
+          "_0" : "Claude needs your permission to use Bash"
+        }
+      },
+      "since" : 784111222.5
+    },
+    {
+      "id" : "00000002-ABCD-4EF0-8A1B-000000000002",
+      "questions" : [
+        {
+          "header" : "Layout",
+          "multiSelect" : true,
+          "options" : [
+            {
+              "description" : "Rows and columns",
+              "label" : "Grid"
+            },
+            {
+              "label" : "List"
+            }
+          ],
+          "question" : "Which layout?"
+        },
+        {
+          "multiSelect" : false,
+          "options" : [
+
+          ],
+          "question" : "Ship it?"
+        }
+      ],
+      "reason" : {
+        "waiting" : {
+
+        }
+      },
+      "since" : 784111222.5
+    }
+  ],
+  "cards" : [
+    {
+      "conversation" : "00000009-ABCD-4EF0-8A1B-000000000009",
+      "frame" : [
+        [
+          12.5,
+          -40
+        ],
+        [
+          640,
+          420
+        ]
+      ],
+      "id" : "00000001-ABCD-4EF0-8A1B-000000000001",
+      "name" : "Ada",
+      "orchestrates" : true,
+      "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+      "providerID" : "claude",
+      "worktree" : "\/work\/tree"
+    },
+    {
+      "frame" : [
+        [
+          716.5,
+          -40
+        ],
+        [
+          600,
+          340
+        ]
+      ],
+      "id" : "00000002-ABCD-4EF0-8A1B-000000000002",
+      "name" : "web",
+      "providerID" : "runner",
+      "runner" : {
+        "command" : "npm run dev",
+        "directory" : "\/work\/tree\/app",
+        "owner" : "00000001-ABCD-4EF0-8A1B-000000000001"
+      },
+      "worktree" : "\/work\/tree"
+    },
+    {
+      "frame" : [
+        [
+          0,
+          500
+        ],
+        [
+          640,
+          420
+        ]
+      ],
+      "id" : "00000003-ABCD-4EF0-8A1B-000000000003",
+      "name" : "Bob",
+      "providerID" : "codex",
+      "worktree" : "\/work\/tree"
+    }
+  ],
+  "connections" : [
+    {
+      "a" : "00000001-ABCD-4EF0-8A1B-000000000001",
+      "aSide" : 1,
+      "b" : "00000002-ABCD-4EF0-8A1B-000000000002",
+      "bSide" : 3,
+      "id" : "00000008-ABCD-4EF0-8A1B-000000000008"
+    },
+    {
+      "a" : "00000001-ABCD-4EF0-8A1B-000000000001",
+      "b" : "00000004-ABCD-4EF0-8A1B-000000000004",
+      "id" : "00000009-ABCD-4EF0-8A1B-000000000009"
+    }
+  ],
+  "images" : [
+    {
+      "file" : "0000000A-ABCD-4EF0-8A1B-00000000000A.png",
+      "frame" : [
+        [
+          1,
+          2
+        ],
+        [
+          480,
+          302
+        ]
+      ],
+      "id" : "00000006-ABCD-4EF0-8A1B-000000000006",
+      "name" : "Login screen",
+      "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+      "pixelSize" : [
+        1280,
+        720
+      ],
+      "worktree" : "\/work\/tree"
+    },
+    {
+      "duration" : 12.25,
+      "file" : "0000000B-ABCD-4EF0-8A1B-00000000000B.mp4",
+      "frame" : [
+        [
+          1,
+          400
+        ],
+        [
+          480,
+          302
+        ]
+      ],
+      "id" : "00000007-ABCD-4EF0-8A1B-000000000007",
+      "name" : "Signup flow",
+      "pixelSize" : [
+        1920,
+        1080
+      ],
+      "worktree" : "\/work\/tree"
+    }
+  ],
+  "postIts" : [
+    {
+      "edited" : 784111222.5,
+      "editor" : "00000001-ABCD-4EF0-8A1B-000000000001",
+      "editorName" : "Ada",
+      "frame" : [
+        [
+          10,
+          20
+        ],
+        [
+          340,
+          320
+        ]
+      ],
+      "id" : "00000004-ABCD-4EF0-8A1B-000000000004",
+      "name" : "Plan",
+      "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+      "text" : "# Plan\n\n- “first”\n- second ✅",
+      "worktree" : "\/work\/tree"
+    },
+    {
+      "editorName" : "",
+      "frame" : [
+        [
+          400,
+          20
+        ],
+        [
+          340,
+          320
+        ]
+      ],
+      "id" : "00000005-ABCD-4EF0-8A1B-000000000005",
+      "name" : "Post-it",
+      "text" : "",
+      "worktree" : "\/work\/tree"
+    }
+  ],
+  "runners" : {
+    "networkAddress" : "192.168.1.20",
+    "starts" : [
+      "00000002-ABCD-4EF0-8A1B-000000000002",
+      784111222.5
+    ],
+    "stats" : [
+      "00000002-ABCD-4EF0-8A1B-000000000002",
+      {
+        "cpu" : 12.5,
+        "memory" : 104857600,
+        "ports" : [
+          {
+            "exposed" : true,
+            "port" : 3000
+          },
+          {
+            "exposed" : false,
+            "port" : 9229
+          }
+        ],
+        "processes" : 3
+      }
+    ]
+  }
+}

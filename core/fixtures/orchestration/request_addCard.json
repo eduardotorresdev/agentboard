@@ -1,0 +1,23 @@
+{
+  "addCard" : {
+    "_0" : {
+      "conversation" : "00000009-ABCD-4EF0-8A1B-000000000009",
+      "frame" : [
+        [
+          12.5,
+          -40
+        ],
+        [
+          640,
+          420
+        ]
+      ],
+      "id" : "00000001-ABCD-4EF0-8A1B-000000000001",
+      "name" : "Ada",
+      "orchestrates" : true,
+      "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+      "providerID" : "claude",
+      "worktree" : "\/work\/tree"
+    }
+  }
+}

@@ -25,6 +25,11 @@ final class FileBrowserModel {
     }
 
     let root: String
+    /// The worktree's host, when its files aren't on this Mac's disk: folders and files are then
+    /// read there, a moment after they are asked for, and again each time a folder opens.
+    @ObservationIgnored private let files: HostFiles?
+    /// Every file of the host's worktree, as git lists them, for search; read once per reload.
+    @ObservationIgnored private var index: Task<[String], Never>?
     private(set) var expanded: Set<String> = []
     private(set) var children: [String: [FileEntry]] = [:]
     /// Git's letter per changed path (M, A, D, U for untracked), and the folders holding one.
@@ -43,9 +48,10 @@ final class FileBrowserModel {
     /// Folders search doesn't walk into.
     nonisolated private static let skipped: Set<String> = [".git", "node_modules", ".build", "DerivedData"]
 
-    init(root: String) {
+    init(root: String, files: HostFiles? = nil) {
         self.root = root
-        children[""] = Self.list("", in: root)
+        self.files = files
+        list("")
         refreshStatus()
     }
 
@@ -65,20 +71,34 @@ final class FileBrowserModel {
     func toggle(_ folder: String) {
         if expanded.remove(folder) == nil {
             expanded.insert(folder)
-            if children[folder] == nil { children[folder] = Self.list(folder, in: root) }
+            if files != nil || children[folder] == nil { list(folder) }
         }
     }
 
     /// Reads the folders again, and git's status.
     func reload() {
-        for path in [""] + expanded { children[path] = Self.list(path, in: root) }
+        index = nil
+        for path in [""] + expanded { list(path) }
         if let openFile { open(openFile) }
         refreshStatus()
     }
 
     func open(_ path: String) {
         openFile = path
-        content = Self.read(URL(fileURLWithPath: root).appendingPathComponent(path))
+        guard let files else { return show(Self.read(URL(fileURLWithPath: root).appendingPathComponent(path)), of: path) }
+        // Nothing of the file before shows under this one's name while it is on its way.
+        content = nil
+        highlighted = []
+        let file = root + "/" + path
+        Task {
+            let data = await files.read(file, limit: Self.maxFileSize)
+            guard openFile == path else { return }
+            show(data.map { $0.count > Self.maxFileSize ? .tooLarge : Self.content(of: $0) } ?? .unreadable, of: path)
+        }
+    }
+
+    private func show(_ content: Content, of path: String) {
+        self.content = content
         if case .lines(let lines) = content, lines.count <= SyntaxHighlighter.maxLines {
             highlighted = SyntaxHighlighter.highlight(lines, fileName: (path as NSString).lastPathComponent)
         } else {
@@ -92,15 +112,32 @@ final class FileBrowserModel {
         highlighted = []
     }
 
+    /// Reads a folder's entries: at once from this Mac's disk, in a moment from another host
+    /// (which keeps what was listed before when it can't be reached).
+    private func list(_ path: String) {
+        guard let files else { return children[path] = Self.list(path, in: root) }
+        let folder = path.isEmpty ? root : root + "/" + path
+        Task {
+            guard let named = await files.list(folder) else { return }
+            children[path] = Self.entries(named, in: path)
+        }
+    }
+
     private static func list(_ path: String, in root: String) -> [FileEntry] {
         let url = path.isEmpty ? URL(fileURLWithPath: root) : URL(fileURLWithPath: root).appendingPathComponent(path)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
-        return names.filter { $0 != ".git" && $0 != ".DS_Store" }.map { name in
+        return entries(names.map { name in
             var isFolder: ObjCBool = false
             FileManager.default.fileExists(atPath: url.appendingPathComponent(name).path, isDirectory: &isFolder)
-            return FileEntry(path: path.isEmpty ? name : path + "/" + name, isFolder: isFolder.boolValue)
-        }
-        .sorted { $0.isFolder != $1.isFolder ? $0.isFolder : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            return (name, isFolder.boolValue)
+        }, in: path)
+    }
+
+    /// A folder's entries as the card shows them: without git's folder, folders first.
+    private static func entries(_ named: [(name: String, isFolder: Bool)], in path: String) -> [FileEntry] {
+        named.filter { $0.name != ".git" && $0.name != ".DS_Store" }
+            .map { FileEntry(path: path.isEmpty ? $0.name : path + "/" + $0.name, isFolder: $0.isFolder) }
+            .sorted { $0.isFolder != $1.isFolder ? $0.isFolder : $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     /// Text files only: a NUL byte in the first few kilobytes marks a binary.
@@ -108,6 +145,10 @@ final class FileBrowserModel {
         guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else { return .unreadable }
         guard size <= maxFileSize else { return .tooLarge }
         guard let data = try? Data(contentsOf: url) else { return .unreadable }
+        return content(of: data)
+    }
+
+    private static func content(of data: Data) -> Content {
         if data.prefix(8000).contains(0) { return .binary }
         let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
         var lines = text.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
@@ -116,9 +157,10 @@ final class FileBrowserModel {
     }
 
     private func refreshStatus() {
-        let root = root
+        let root = root, files = files
         Task {
-            let output = await Task.detached { Self.git(["-C", root, "status", "--porcelain", "-uall"]) }.value
+            let arguments = ["-C", root, "status", "--porcelain", "-uall"]
+            let output = if let files { await files.output("git", arguments) ?? "" } else { await Task.detached { Self.git(arguments) }.value }
             var status: [String: Character] = [:]
             for line in output.split(separator: "\n") where line.count > 3 {
                 let code = line.prefix(2)
@@ -146,11 +188,23 @@ final class FileBrowserModel {
             return
         }
         let root = root
+        if let files, index == nil {
+            // One listing for every search until the next reload, however large the repository.
+            index = Task.detached {
+                (await files.output("git", ["-C", root, "ls-files", "-co", "--exclude-standard"]) ?? "").split(separator: "\n").map(String.init)
+            }
+        }
+        let index = index
         searchTask = Task {
-            let found = await Task.detached { Self.find(query, in: root) }.value
+            let found = if let index { Self.find(query, among: await index.value) } else { await Task.detached { Self.find(query, in: root) }.value }
             guard !Task.isCancelled else { return }
             matches = found
         }
+    }
+
+    nonisolated private static func find(_ query: String, among paths: [String], limit: Int = 300) -> [FileEntry] {
+        Array(paths.lazy.filter { ($0 as NSString).lastPathComponent.lowercased().contains(query) }.prefix(limit)
+            .map { FileEntry(path: $0, isFolder: false) })
     }
 
     nonisolated private static func find(_ query: String, in root: String, limit: Int = 300) -> [FileEntry] {

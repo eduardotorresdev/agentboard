@@ -1,0 +1,29 @@
+{
+  "runners" : {
+    "_0" : {
+      "networkAddress" : "192.168.1.20",
+      "starts" : [
+        "00000002-ABCD-4EF0-8A1B-000000000002",
+        784111222.5
+      ],
+      "stats" : [
+        "00000002-ABCD-4EF0-8A1B-000000000002",
+        {
+          "cpu" : 12.5,
+          "memory" : 104857600,
+          "ports" : [
+            {
+              "exposed" : true,
+              "port" : 3000
+            },
+            {
+              "exposed" : false,
+              "port" : 9229
+            }
+          ],
+          "processes" : 3
+        }
+      ]
+    }
+  }
+}

@@ -7,6 +7,8 @@ import SwiftUI
 struct NewWorktreeDialog: View {
     let store: ProjectStore
     let project: Project
+    /// The account's hosts; without it (or signed out, or with none) there is no host to pick.
+    var hosts: HostStores?
     /// Called with the worktree that was added, after the dialog closes.
     let onAdded: (Worktree) -> Void
 
@@ -14,10 +16,15 @@ struct NewWorktreeDialog: View {
     @State private var draft: WorktreeDraft
     /// Set when git failed after the worktree was in place (e.g. a hook): shown before closing.
     @State private var created: (worktree: Worktree, warning: String)?
+    /// The host picked; nil is this Mac.
+    @State private var hostID: UUID?
+    /// False once the project is known to have no `origin`, which other hosts clone it from.
+    @State private var hasOrigin = true
 
-    init(store: ProjectStore, project: Project, onAdded: @escaping (Worktree) -> Void) {
+    init(store: ProjectStore, project: Project, hosts: HostStores? = nil, onAdded: @escaping (Worktree) -> Void) {
         self.store = store
         self.project = project
+        self.hosts = hosts
         self.onAdded = onAdded
         _draft = State(initialValue: WorktreeDraft(repository: project.path))
     }
@@ -25,7 +32,9 @@ struct NewWorktreeDialog: View {
     var body: some View {
         AppDialog(title: L("New Worktree"), subtitle: project.name) {
             VStack(alignment: .leading, spacing: 14) {
-                FormRow(label: L("Name"), message: message, isError: draft.problem != nil, reservesMessage: true) {
+                FormRow(label: L("Name"), message: message, isError: draft.problem != nil,
+                        // With the host row under it, room kept for a message is a hole in the form.
+                        reservesMessage: remoteHosts.isEmpty) {
                     TextField("", text: $draft.name, prompt: Text(L("Fix the login redirect")))
                         .textFieldStyle(.roundedBorder)
                         .controlSize(.large)
@@ -34,6 +43,7 @@ struct NewWorktreeDialog: View {
                 }
                 // The full path, where the short form above leaves some out.
                 .help(draft.check?.fullPath ?? "")
+                if !remoteHosts.isEmpty { hostRow }
                 if let created {
                     DialogError(message: L("The worktree was created, but git reported a problem: \(created.warning)"))
                 } else if let error = draft.error {
@@ -60,22 +70,84 @@ struct NewWorktreeDialog: View {
                 }
                 .buttonStyle(DialogButtonStyle(prominent: true))
                 .keyboardShortcut(.defaultAction)
-                .disabled(draft.trimmedName.isEmpty || draft.problem != nil || draft.isCreating)
+                .disabled(draft.trimmedName.isEmpty || draft.problem != nil || draft.isCreating || (hostID != nil && draft.host == nil))
             }
         }
+        .task(id: hostID) { await reach(hostID) }
         // Restarts on each keystroke and after a failure, so only the latest state is checked.
         .task(id: draft.revision) { await draft.validate() }
         .onAppear {
             draft.onCreated = { result in
-                guard let worktree = store.worktree(at: result.path, in: project) else { dismiss(); return }
-                // The typed name is the initial title; agents may refine it, unlike a user rename.
-                store.setInitialTitle(draft.trimmedName, path: worktree.path)
-                if let warning = result.warning {
-                    created = (worktree, WorktreeDraft.cause(of: warning))
+                if let hostID {
+                    Task { opened(await store.hostWorktree(at: result.path, branch: draft.check?.branch, on: hostID, in: project), result) }
+                } else if let worktree = store.worktree(at: result.path, in: project) {
+                    opened(worktree, result)
                 } else {
-                    finish(worktree)
+                    dismiss()
                 }
             }
+        }
+    }
+
+    private func opened(_ worktree: Worktree, _ result: Git.CreatedWorktree) {
+        // The typed name is the initial title; agents may refine it, unlike a user rename.
+        store.setInitialTitle(draft.trimmedName, path: worktree.path)
+        if let warning = result.warning {
+            created = (worktree, WorktreeDraft.cause(of: warning))
+        } else {
+            finish(worktree)
+        }
+    }
+
+    /// The account's hosts, when signed in.
+    private var remoteHosts: [Host] { hosts?.account.account == nil ? [] : hosts?.account.hosts ?? [] }
+
+    /// Where the worktree goes: this Mac, or one of the account's hosts that is online.
+    private var hostRow: some View {
+        FormRow(label: L("Host"), message: hasOrigin
+            ? L("Where the worktree's folder is and its agents and runners run.")
+            : L("This project has no origin remote, so its worktrees can only be on this Mac.")) {
+            Menu {
+                Button(L("This Mac")) { hostID = nil }
+                ForEach(remoteHosts) { host in
+                    Button(host.online ? host.name : L("\(host.name) (offline)")) { hostID = host.id }
+                        .disabled(!host.online || !hasOrigin)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(remoteHosts.first { $0.id == hostID }?.name ?? L("This Mac"))
+                    Image(systemName: "chevron.up.chevron.down").font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.inkMuted)
+                }
+                .font(Theme.Font.body)
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.control))
+                .contentShape(.rect(cornerRadius: Theme.Radius.control))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(draft.isCreating || created != nil)
+        }
+        .task {
+            let repository = project.path
+            hasOrigin = await Task.detached { Git.originURL(of: repository) != nil }.value
+        }
+    }
+
+    /// Connects to the picked host, so the name is checked and the worktree made there.
+    private func reach(_ host: UUID?) async {
+        if draft.host != nil { draft.host = nil }
+        guard let host else { return }
+        do {
+            let git = try await store.gitHost(host)
+            guard !Task.isCancelled else { return }
+            draft.host = git
+        } catch {
+            guard !Task.isCancelled else { return }
+            draft.error = error.localizedDescription
         }
     }
 
@@ -104,7 +176,7 @@ struct NewWorktreeDialog: View {
     }
 
     private func abbreviated(_ path: String) -> String {
-        DisplayPath.short(path, base: project.path)
+        DisplayPath.short(path, base: draft.host?.knownClone(of: project.path) ?? project.path)
     }
 }
 
@@ -136,6 +208,14 @@ final class WorktreeDraft {
     }
 
     let repository: String
+    /// The host the worktree is made on; nil is this Mac. Checks made for another don't count.
+    var host: GitHost? {
+        didSet {
+            check = nil
+            error = nil
+            revision += 1
+        }
+    }
     var name = "" {
         didSet {
             // Return rewrites the binding with the same text; that isn't an edit.
@@ -165,11 +245,11 @@ final class WorktreeDraft {
     var problem: String? { check?.name == trimmedName ? check?.problem : nil }
 
     func validate() async {
-        let name = trimmedName, repository = repository
+        let name = trimmedName, repository = repository, host = host
         guard !name.isEmpty else { check = nil; return }
         try? await Task.sleep(for: .milliseconds(120))
         guard !Task.isCancelled, !isCreating else { return }
-        let result = await Task.detached { Self.inspect(name, in: repository) }.value
+        let result = await Task.detached { Self.inspect(name, in: repository, on: host) }.value
         guard !Task.isCancelled, !isCreating, result.name == trimmedName else { return }
         check = result
         if wantsSubmit {
@@ -188,8 +268,10 @@ final class WorktreeDraft {
         guard check.problem == nil else { return }
         isCreating = true
         error = nil
-        let branch = check.branch, repository = repository
-        let work = Task.detached { try Git.createWorktree(branch: branch, in: repository) }
+        let branch = check.branch, repository = repository, host = host
+        let work = Task.detached {
+            try host.map { try Git.createWorktree(branch: branch, in: repository, on: $0) } ?? Git.createWorktree(branch: branch, in: repository)
+        }
         do {
             let result = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
             onCreated?(result)
@@ -210,43 +292,49 @@ final class WorktreeDraft {
     /// What decides the branch and folder for `name`: the name itself when a branch has
     /// exactly that name (locally or on a remote); otherwise a slug of it, numbered past folders
     /// and branches already taken. Branch names are compared ignoring case, as the volume may.
-    nonisolated static func inspect(_ name: String, in repository: String) -> Check {
-        let locals = (Git.refs("refs/heads/", in: repository) ?? []).map { String($0.dropFirst("refs/heads/".count)) }
-        let open = Git.worktrees(at: repository) ?? []
+    /// On `host` the folder goes beside its clone of the repository, and what that clone already
+    /// has (worktrees, folders, branches) is taken too; where the branch starts is still decided
+    /// here, as for a worktree on this Mac.
+    nonisolated static func inspect(_ name: String, in repository: String, on host: GitHost? = nil) -> Check {
+        let home = host?.clone(of: repository) ?? repository
+        func there<T>(_ body: () -> T) -> T { Git.$host.withValue(host, operation: body) }
+        let locals = ((Git.refs("refs/heads/", in: repository) ?? []) + (host == nil ? [] : there { Git.refs("refs/heads/", in: home) } ?? []))
+            .map { String($0.dropFirst("refs/heads/".count)) }
+        let open = there { Git.worktrees(at: home) } ?? []
         let same = { (a: String, b: String) in a.caseInsensitiveCompare(b) == .orderedSame }
 
         if Git.isValidBranchName(name) {
             let start = Git.worktreeStart(for: name, in: repository)
             if case .newBranch = start {} else {
-                let location = Git.worktreeLocation(for: name, in: repository)
+                let location = Git.worktreeLocation(for: name, in: home)
                 if let other = open.first(where: { $0.branch.map { same($0, name) } ?? false }) {
                     return Check(name: name, branch: name, location: location,
-                                 problem: L("\(name) is already open in \(DisplayPath.short(other.path, base: repository))."),
+                                 problem: L("\(name) is already open in \(DisplayPath.short(other.path, base: home))."),
                                  start: start, fullPath: other.path)
                 }
-                if FileManager.default.fileExists(atPath: location.path) {
+                if there({ Git.exists(location.path) }) {
                     return Check(name: name, branch: name, location: location,
-                                 problem: L("\(DisplayPath.short(location.path, base: repository)) already exists. Pick another name."), start: start)
+                                 problem: L("\(DisplayPath.short(location.path, base: home)) already exists. Pick another name."), start: start)
                 }
                 return Check(name: name, branch: name, location: location, start: start)
             }
         }
         let base = slug(name).nonEmptyOr("worktree")
         guard Git.headCommit(in: repository) != nil else {
-            return Check(name: name, branch: base, location: Git.worktreeLocation(for: base, in: repository),
+            return Check(name: name, branch: base, location: Git.worktreeLocation(for: base, in: home),
                          problem: L("The repository has no commits yet. Make a first commit, then add worktrees."), start: .newBranch(from: nil))
         }
         for number in 1 ... 99 {
             let branch = number == 1 ? base : "\(base)-\(number)"
-            let location = Git.worktreeLocation(for: branch, in: repository)
+            let location = Git.worktreeLocation(for: branch, in: home)
             // Taken: a folder there, or a branch with this name, inside it ("x/y"), or holding it ("x" for "x/y").
             let clashes = locals.contains { same($0, branch) || $0.lowercased().hasPrefix(branch.lowercased() + "/") || branch.lowercased().hasPrefix($0.lowercased() + "/") }
-            guard !clashes, !FileManager.default.fileExists(atPath: location.path), Git.isValidBranchName(branch) else { continue }
+            guard !clashes, !there({ Git.exists(location.path) }), Git.isValidBranchName(branch) else { continue }
             let start = Git.worktreeStart(for: branch, in: repository)
             guard case .newBranch = start else { continue }
             return Check(name: name, branch: branch, location: location, start: start)
         }
-        return Check(name: name, branch: base, location: Git.worktreeLocation(for: base, in: repository),
+        return Check(name: name, branch: base, location: Git.worktreeLocation(for: base, in: home),
                      problem: L("Too many worktrees already use this name. Pick another name."), start: .newBranch(from: nil))
     }
 

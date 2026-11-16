@@ -1,0 +1,24 @@
+{
+  "postItAdded" : {
+    "_0" : {
+      "edited" : 784111222.5,
+      "editor" : "00000001-ABCD-4EF0-8A1B-000000000001",
+      "editorName" : "Ada",
+      "frame" : [
+        [
+          10,
+          20
+        ],
+        [
+          340,
+          320
+        ]
+      ],
+      "id" : "00000004-ABCD-4EF0-8A1B-000000000004",
+      "name" : "Plan",
+      "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+      "text" : "# Plan\n\n- “first”\n- second ✅",
+      "worktree" : "\/work\/tree"
+    }
+  }
+}

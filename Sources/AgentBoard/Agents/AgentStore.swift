@@ -21,8 +21,18 @@ final class AgentStore {
     var postIts: [PostItRecord] = []
     /// Images (see AgentStore+Images.swift).
     var images: [ImageRecord] = []
-    /// Where pictures are stored: the folder the core shares.
+    /// Where pictures are stored: the folder the core shares. For another host, this Mac's copy
+    /// of that host's pictures (see AgentStore+Images.swift).
     @ObservationIgnored var dataFolder = DataFolder.url
+    /// The host's own data folder, asked once (`agentboard data-folder`); tests give their own.
+    @ObservationIgnored var hostDataFolder: String?
+    /// The host's pictures on their way here or that couldn't come, by file name, with what the
+    /// card says meanwhile.
+    @ObservationIgnored var mediaNotes: [String: String] = [:]
+    /// Called with the file name when a host's picture arrived or couldn't, so the board redraws its card.
+    @ObservationIgnored var onMediaChange: ((String) -> Void)?
+    /// Called each time the host's core answers (see `HostStores`).
+    @ObservationIgnored var onConnect: (() -> Void)?
     /// Agents waiting on the developer, in every organization, oldest first.
     private(set) var attention: [AttentionRequest] = []
     /// Messages held behind the text the user typed in an agent's terminal, by agent.
@@ -89,16 +99,35 @@ final class AgentStore {
     /// Called when runner stats or states change, so the board redraws their cards.
     @ObservationIgnored var onRunnersChange: (() -> Void)?
 
+    /// The host whose core this mirrors (see docs/hosts.md); nil for this Mac's. Another host's
+    /// core is only ever connected to: never launched, replaced, run in this process or shut down.
+    @ObservationIgnored let host: (id: UUID, name: String)?
+    /// The host's machine stats, as its core last reported them; nil for this Mac and while
+    /// the host doesn't answer.
+    private(set) var hostStats: HostStats?
+    /// How the host was last reached, straight or through the account server's relay.
+    var hostPath: HostChannel.Path?
+    /// Why the host can't be reached, when it is more than being offline (see `HostStores`).
+    @ObservationIgnored var downReason: (() -> String?)?
+
     /// `database`: where a core in this process keeps the cards (the data folder's by default).
     /// `connect` finds the core (the one next to this executable by default; another in tests).
-    init(database: URL? = nil, connect: (@Sendable () -> Result<CoreClient, CoreClient.Failure>)? = nil) {
+    init(database: URL? = nil, connect: (@Sendable () -> Result<CoreClient, CoreClient.Failure>)? = nil,
+         host: (id: UUID, name: String)? = nil) {
+        self.host = host
+        if let host { dataFolder = DataFolder.url.appendingPathComponent("hosts/\(host.id.uuidString)", isDirectory: true) }
         link = CoreLink(connect: connect ?? { AgentStore.connectCore() })
+        if host != nil {
+            // Over the network: slower to retry, quicker to say the host can't be reached.
+            link.retryInterval = 5
+            link.patience = 2
+        }
         link.onConnect = { [weak self] client, state, waiting in self?.connected(client, state.applying(waiting)) }
         link.onEvent = { [weak self] event in self?.received(event) }
         link.onDown = { [weak self] in self?.coreDown() }
         link.onIncompatible = { [weak self] core in self?.incompatible(core) }
         Task {
-            let started = await link.start { [weak self] in
+            let started = host != nil ? await link.start(retrying: true) : await link.start { [weak self] in
                 self?.local = try? InProcessCore(database: database)
                 return self?.local?.socketPath
             }
@@ -106,7 +135,23 @@ final class AgentStore {
         }
     }
 
+
     var core: CoreClient? { link.client }
+
+    /// Runs a program on the store's machine through its core, giving a core that is still
+    /// connecting a few seconds; nil when it can't be reached.
+    func run(_ executable: String, _ arguments: [String], input: Data? = nil) async -> CoreClient.Ran? {
+        let deadline = Date().addingTimeInterval(8)
+        while core == nil, Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+        return await core?.run(executable, arguments, input: input)
+    }
+
+    /// The host's files, for what reads a worktree's folder; nil on this Mac, whose disk is
+    /// read as it always was.
+    var files: HostFiles? {
+        guard host != nil else { return nil }
+        return HostFiles { [weak self] executable, arguments, input in await self?.run(executable, arguments, input: input) }
+    }
 
     /// The core next to this executable, launched if it isn't running. `AGENTBOARD_LOCAL=1`
     /// skips it, as bench builds do: programs then run in this process and end with it.
@@ -129,6 +174,11 @@ final class AgentStore {
     /// The core runs a build this one can't talk to. An older one is replaced with this build's,
     /// which takes its programs over; a newer one is the user's to open.
     private func incompatible(_ core: CoreProtocol.Versions) {
+        if let host {
+            return show(core.version < CoreProtocol.oldest
+                ? L("\(host.name) runs an older version this app can't talk to. Update it to see its agents.")
+                : L("\(host.name) runs a newer version. Update this app to see its agents."))
+        }
         guard core.version < CoreProtocol.oldest else {
             return show(L("Your agents run on a newer build. Open that build to see them."))
         }
@@ -158,6 +208,8 @@ final class AgentStore {
     /// the ones that were running.
     private func connected(_ client: CoreClient, _ state: BoardState) {
         connection += 1
+        // What couldn't be fetched while the host was away is tried again.
+        mediaNotes = [:]
         notice = nil
         replacedCore = false
         agents = state.cards
@@ -172,6 +224,11 @@ final class AgentStore {
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.statuses[id] = status } }
         }
         client.subscribeToStatuses()
+        client.onHost = { [weak self] stats in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.hostStats = stats } }
+        }
+        if host != nil { client.subscribeToHost() }
+        onConnect?()
         client.send(.elements(elements()))
         for (id, session) in sessions {
             guard let record = record(id) else {
@@ -185,9 +242,33 @@ final class AgentStore {
 
     /// The core has been gone a while: say so on every card until it is back.
     private func coreDown() {
-        NSLog("AgentBoard: the core stopped; reconnecting")
-        for session in sessions.values { session.fail(L("Lost the process that runs the agents. Reconnecting…")) }
+        guard let host else {
+            NSLog("AgentBoard: the core stopped; reconnecting")
+            for session in sessions.values { session.fail(L("Lost the process that runs the agents. Reconnecting…")) }
+            return
+        }
+        // Its agents keep running there; cards shown meanwhile say the same (see `session(for:)`).
+        hostStats = nil
+        saidDown = downNote(host.name)
+        show(saidDown ?? "")
     }
+
+    /// The last thing `coreDown` showed.
+    @ObservationIgnored private var saidDown: String?
+
+    private func downNote(_ name: String) -> String {
+        downReason?() ?? L("Can't reach \(name). Its agents keep running there; reconnecting…")
+    }
+
+    /// Says again why the host can't be reached, when that changed.
+    func explainDown() {
+        // Only over its own words: a core of another build says something else.
+        guard let host, notice != nil, notice == saidDown, core == nil, downNote(host.name) != notice else { return }
+        coreDown()
+    }
+
+    /// Connects to the host again, onto a better path that just opened.
+    func reconnect() { link.reconnectNow() }
 
     private func unavailable() {
         isUnavailable = true
@@ -228,6 +309,7 @@ final class AgentStore {
             guard let index = images.firstIndex(where: { $0.id == record.id }) else { return }
             images[index] = record
         case .imageRemoved(let id):
+            forgetHostMedia(of: id)
             images.removeAll { $0.id == id }
             connections.removeAll { $0.touches(id) }
         case .attention(let list):
@@ -240,7 +322,7 @@ final class AgentStore {
         case .toolCall(let call, let name, let arguments, let caller):
             let parsed = (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]
             Task {
-                let result: ToolResult? = name.hasPrefix("project_") || name.hasPrefix("worktree_")
+                let result: ToolResult? = name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_")
                     ? await projectTools?.call(name, arguments: parsed, caller: caller)
                     : await browserTools?.call(name, arguments: parsed, caller: caller)
                 link.send(.toolResult(call: call, result: WireToolResult(result
@@ -267,6 +349,8 @@ final class AgentStore {
     /// Ends every card's program as the app quits; a board that is killed or rebuilt instead
     /// leaves them running on the core, to attach to next launch.
     func quit() {
+        // Another host's agents keep running there: only hang up.
+        guard host == nil else { return link.close() }
         core?.shutdown()
     }
 
@@ -382,6 +466,8 @@ final class AgentStore {
             session.fail(L("Couldn't start the process that runs the agents."))
         } else if let core {
             begin(record, in: session, on: core)
+        } else if host != nil, let notice {
+            session.fail(notice)
         }
         return session
     }

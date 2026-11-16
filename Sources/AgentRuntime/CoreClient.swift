@@ -16,6 +16,9 @@ public final class CoreClient: @unchecked Sendable {
     private var serviceHandler: ((Data) -> Void)?
     /// Service frames that came before anyone listened for them.
     private var serviceBacklog: [Data] = []
+    /// Programs run on the core's machine, waiting for their `ran`.
+    private var runs: [UUID: CheckedContinuation<Ran?, Never>] = [:]
+    private var _onHost: ((HostStats) -> Void)?
 
     /// Called on the main queue if the core goes away.
     public var onDisconnect: (() -> Void)?
@@ -71,6 +74,14 @@ public final class CoreClient: @unchecked Sendable {
             }
         }
         guard let fd else { return .failure(.noCore) }
+        return open(on: fd, timeout: max(0.1, deadline.timeIntervalSinceNow), versions: versions)
+    }
+
+    /// Says hello over `fd`, a stream to a core however it was reached (its socket, or a
+    /// channel to another host), which the client owns from here on.
+    public static func open(on fd: Int32, timeout: Double = 10,
+                            versions: CoreProtocol.Versions = CoreProtocol.versions) -> Result<CoreClient, Failure> {
+        let deadline = Date().addingTimeInterval(timeout)
         let client = CoreClient(fd: fd)
         client.socket.start()
         client.socket.send(CoreRequest.hello(version: versions.version, oldest: versions.oldest))
@@ -189,6 +200,38 @@ public final class CoreClient: @unchecked Sendable {
         socket.send(request)
     }
 
+    /// What a program run on the core's machine exited with and printed.
+    public struct Ran: Sendable {
+        public var status: Int32
+        public var output: Data
+        public var error: Data
+    }
+
+    /// Runs a program on the core's machine; nil when the core can't (older than protocol 8) or
+    /// went away first.
+    public func run(_ executable: String, _ arguments: [String], in directory: String? = nil, input: Data? = nil) async -> Ran? {
+        guard version >= 8 else { return nil }
+        let call = UUID()
+        return await withCheckedContinuation { done in
+            let connected = lock.withLock { () -> Bool in
+                if _connected { runs[call] = done }
+                return _connected
+            }
+            guard connected else { return done.resume(returning: nil) }
+            request(.run(call: call, executable: executable, arguments: arguments, directory: directory, input: input))
+        }
+    }
+
+    /// Called on the client's queue with the machine's stats, once `subscribeToHost` asked for them.
+    public var onHost: ((HostStats) -> Void)? {
+        get { lock.withLock { _onHost } }
+        set { lock.withLock { _onHost = newValue } }
+    }
+
+    public func subscribeToHost() {
+        request(.subscribeHost)
+    }
+
     func input(_ bytes: [UInt8], to id: UUID) {
         socket.send(.data, id: id, bytes)
     }
@@ -216,6 +259,10 @@ public final class CoreClient: @unchecked Sendable {
                 }
                 mirror(id)?.coreStatus(status)
                 notify?(id, status)
+            case .ran(let call, let status, let output, let error):
+                lock.withLock { runs.removeValue(forKey: call) }?.resume(returning: Ran(status: status, output: output, error: error))
+            case .host(let stats):
+                onHost?(stats)
             }
         case .data:
             guard let id = UUID(bytes: payload), let session = mirror(id) else { return }
@@ -236,7 +283,12 @@ public final class CoreClient: @unchecked Sendable {
     /// The sessions mirrored here keep what they last showed: whoever reconnects decides what
     /// becomes of them.
     private func lost() {
-        lock.withLock { _connected = false }
+        let waiting = lock.withLock { () -> [CheckedContinuation<Ran?, Never>] in
+            _connected = false
+            defer { runs.removeAll() }
+            return Array(runs.values)
+        }
+        waiting.forEach { $0.resume(returning: nil) }
         welcomed.signal()
         DispatchQueue.main.async { [weak self] in self?.onDisconnect?() }
     }

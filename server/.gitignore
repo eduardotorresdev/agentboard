@@ -1,0 +1,4 @@
+node_modules/
+.wrangler/
+public/download/
+public/install.sh

@@ -1,0 +1,11 @@
+size 20 6 100
+feed 62
+resize 12 3
+snapshot 0
+feed 1
+resize 25 9
+feed 9
+resize 25 4
+feed 12
+resize 10 2
+feed 1

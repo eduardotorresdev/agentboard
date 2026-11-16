@@ -1,0 +1,15 @@
+{
+  "toolResult" : {
+    "call" : "00000009-ABCD-4EF0-8A1B-000000000009",
+    "result" : {
+      "isError" : true,
+      "items" : [
+        {
+          "text" : {
+            "_0" : "No browser is connected to you."
+          }
+        }
+      ]
+    }
+  }
+}

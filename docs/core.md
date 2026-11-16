@@ -74,6 +74,14 @@ Status: in progress, see `GOAL.md`.
   `AGENTBOARD_CORE_VERBOSE=1` logs each session a board attaches to as well.
 - For tests, the app takes `AGENTBOARD_BACKGROUND=1` (stays behind other windows) and
   `AGENTBOARD_SCREENS=<path>` (on SIGUSR1, writes every card's terminal there).
+- For looking at it: `AGENTBOARD_SHOTS=<folder>` (on SIGUSR2, writes a PNG of each of its
+  windows there, menus and sheets included, then an empty `done`), and `AGENTBOARD_SHOW`, a
+  list separated by commas of what to open at launch: `account-menu`, `sign-in`,
+  `new-worktree` (of the first project), `host-waiting` and `host-approval` (the first host as
+  one that doesn't trust this Mac yet, or with sample computers to approve and forget) and the
+  path of a worktree. `AGENTBOARD_ACCOUNT=<file>`
+  (JSON with `token` and `account`) signs the instance in from that file without touching the
+  Keychain; `AGENTBOARD_USAGE_SAMPLE=1` shows sample numbers in the agent usage capsule.
 
 ## How it is built
 
@@ -116,7 +124,7 @@ Status: in progress, see `GOAL.md`.
 
 ## Verified
 
-- `swift test`: the takeover keeps the programs, every byte of their output once, the tool
+- `scripts/test-safe` (the only way to run the tests: plain `swift test` stops at the data folder's guard): the takeover keeps the programs, every byte of their output once, the tool
   calls made throughout, and a board's screen (`aNewerCoreTakesOverWithoutEndingPrograms`);
   builds one version apart talk, builds further apart are told apart (`CoreTests`,
   `linkReportsACoreOfAnotherBuild`); two data folders side by side (`instancesRunSideBySide`).

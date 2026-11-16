@@ -6,7 +6,7 @@ import SwiftUI
 /// it blurred, so the board stays in view behind the list.
 struct Sidebar: View {
     let store: ProjectStore
-    let agents: AgentStore
+    let hosts: HostStores
     let browsers: BrowserStore
     @Binding var selection: WorktreeSelection?
     @Binding var renaming: Worktree?
@@ -54,8 +54,13 @@ struct Sidebar: View {
         } message: { removal in
             Text(removal.warning)
         }
+        .task {
+            guard DebugShow.items.contains("new-worktree") else { return }
+            try? await Task.sleep(for: .seconds(2))
+            addingWorktreeTo = store.projects.first
+        }
         .sheet(item: $addingWorktreeTo) { project in
-            NewWorktreeDialog(store: store, project: project) { worktree in
+            NewWorktreeDialog(store: store, project: project, hosts: hosts) { worktree in
                 collapsed.remove(project.id)
                 withAnimation(.snappy(duration: 0.3)) {
                     selection = WorktreeSelection(projectID: project.id, worktree: worktree)
@@ -66,7 +71,18 @@ struct Sidebar: View {
 
     /// Removes right away when nothing would be lost; otherwise asks first.
     private func requestRemoval(of worktree: Worktree, in project: Project) {
-        let removal = PendingRemoval(worktree: worktree, project: project, work: Git.pendingWork(at: worktree.path))
+        if let host = worktree.host {
+            // Asked on its host; one that can't be reached says so when the removal fails.
+            Task {
+                let work = try? await store.onHost(host) { _ in Git.pendingWork(at: worktree.path) }
+                confirm(PendingRemoval(worktree: worktree, project: project, work: work ?? Git.PendingWork(changedFiles: 0, unpushedCommits: 0)))
+            }
+            return
+        }
+        confirm(PendingRemoval(worktree: worktree, project: project, work: Git.pendingWork(at: worktree.path)))
+    }
+
+    private func confirm(_ removal: PendingRemoval) {
         if removal.work.isEmpty { remove(removal) } else { pendingRemoval = removal }
     }
 
@@ -116,8 +132,10 @@ struct Sidebar: View {
         let tag = WorktreeSelection(projectID: project.id, worktree: worktree)
         let source: WorktreeRow.Source = store.isNamedByUser(worktree) ? .user
             : store.agentTitles[worktree.path] != nil ? .agent : .fallback
+        let host = worktree.host.flatMap { id in hosts.account.hosts.first { $0.id == id } }
         return WorktreeRow(name: store.displayName(of: worktree), source: source,
                            isMain: store.isMain(worktree, in: project), contents: contents(of: worktree),
+                           host: host?.name, isOffline: host?.online == false,
                            isSelected: selection == tag, isRenaming: renaming == worktree,
                            selectionSpace: selectionSpace,
                            onSelect: { withAnimation(.snappy(duration: 0.3)) { selection = tag } },
@@ -135,6 +153,7 @@ struct Sidebar: View {
                     // Your name stays until you hand the title back.
                     Button(L("Let Agents Rename")) { store.rename(worktree, to: "") }
                 }
+                Button(L("Pull")) { store.pull(worktree) }
                 if !store.isMain(worktree, in: project) {
                     Divider()
                     Button(L("Remove"), role: .destructive) { requestRemoval(of: worktree, in: project) }
@@ -144,6 +163,8 @@ struct Sidebar: View {
 
     /// What is on the worktree's canvas, each kind at its most pressing status.
     private func contents(of worktree: Worktree) -> WorktreeContents {
+        // A host not in use, or one that doesn't answer, shows no status.
+        guard let agents = hosts[worktree.host], hosts.connected.contains(where: { $0 === agents }) else { return WorktreeContents(agents: nil, runners: nil) }
         let cards = agents.agents(in: worktree.path)
         return WorktreeContents(agents: cards.filter { $0.runner == nil }.map(agents.cardStatus).max(),
                                 runners: cards.filter { $0.runner != nil }.map(agents.cardStatus).max())
@@ -258,6 +279,10 @@ private struct WorktreeRow: View {
     /// The project's own checkout: marked, so no title can pass for it.
     let isMain: Bool
     let contents: WorktreeContents
+    /// The name of the host it lives on, when not this Mac.
+    var host: String?
+    /// Its host isn't online: what is known of it shows, dimmed.
+    var isOffline = false
     let isSelected: Bool
     let isRenaming: Bool
     let selectionSpace: Namespace.ID
@@ -278,7 +303,16 @@ private struct WorktreeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            title
+            // The title gets the row's width; where it lives goes under it.
+            VStack(alignment: .leading, spacing: 1) {
+                title
+                if let host {
+                    Text(isOffline ? L("\(host) · offline") : host)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(Theme.inkMuted)
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 0)
             if isMain && source != .fallback {
                 Text(L("main"))
@@ -290,7 +324,7 @@ private struct WorktreeRow: View {
         }
         .padding(.leading, Self.textInset)
         .padding(.trailing, 12)
-        .frame(height: 32)
+        .frame(height: host == nil ? 32 : 46)
         .background { background }
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onStartRename)
@@ -320,7 +354,8 @@ private struct WorktreeRow: View {
         } else {
             Text(name)
                 .font(Theme.Font.body.weight(needsUser ? .bold : isSelected ? .medium : .regular))
-                .foregroundStyle(needsUser || isSelected ? Theme.ink : Theme.ink.opacity(0.82))
+                // Dimmed with the muted ink, which still passes AA, not with opacity.
+                .foregroundStyle(isOffline ? Theme.inkMuted : needsUser || isSelected ? Theme.ink : Theme.ink.opacity(0.82))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(source == .user ? L("\(name) · Named by you; agents can't rename it") : name)

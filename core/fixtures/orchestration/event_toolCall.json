@@ -1,0 +1,8 @@
+{
+  "toolCall" : {
+    "arguments" : "eyJ0YXJnZXQiOiJlMTIifQ==",
+    "call" : "00000009-ABCD-4EF0-8A1B-000000000009",
+    "caller" : "00000001-ABCD-4EF0-8A1B-000000000001",
+    "name" : "browser_click"
+  }
+}

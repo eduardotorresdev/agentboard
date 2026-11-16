@@ -2,16 +2,19 @@ import Connections
 import Foundation
 import Orchestration
 
-/// Runs the project tools the core lists (see `ProjectRelay`): what Add Project does in the UI,
-/// for an agent, in the organization of the agent's card.
+/// Runs the project, worktree and host tools the core lists (see `ProjectRelay` and
+/// `WorktreeTools`): what Add Project and New Worktree do in the UI, for an agent, in the
+/// organization of the agent's card. One per store: `agents` is the calling agent's host's.
 @MainActor
 final class ProjectTools {
     private let projects: ProjectStore
     private unowned let agents: AgentStore
+    private weak var hosts: HostStores?
 
-    init(projects: ProjectStore, agents: AgentStore) {
+    init(projects: ProjectStore, agents: AgentStore, hosts: HostStores? = nil) {
         self.projects = projects
         self.agents = agents
+        self.hosts = hosts
     }
 
     func call(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
@@ -22,6 +25,8 @@ final class ProjectTools {
         case "project_list": return .text(list(in: organization))
         case "project_create": return await create(arguments, in: organization)
         case "worktree_set_title": return setTitle(arguments, caller: caller)
+        case "worktree_create": return await createWorktree(arguments, caller: caller)
+        case "host_list": return .text(await hostList())
         default: return .error("Unknown tool “\(name)”.")
         }
     }
@@ -29,7 +34,7 @@ final class ProjectTools {
     private func setTitle(_ arguments: [String: Any], caller: UUID) -> ToolResult {
         guard let record = agents.record(caller) else { return .error("Your card isn't on the board.") }
         let title = arguments["title"] as? String ?? ""
-        switch projects.setAgentTitle(title, path: record.worktree, in: record.organizationID) {
+        switch projects.setAgentTitle(title, path: record.worktree, in: record.organizationID, on: agents.host?.id) {
         case .applied: return .text("The worktree is titled “\(WorktreeTitle.clean(title) ?? title)”.")
         case .keptUserTitle(let user):
             return .text("Kept the user's title “\(user)”: they named this worktree, so yours wasn't applied.")
@@ -39,11 +44,91 @@ final class ProjectTools {
         }
     }
 
+    /// The account's hosts, when signed in.
+    private var remoteHosts: [Host] { hosts?.account.account == nil ? [] : hosts?.account.hosts ?? [] }
+
+    /// How long `host_list` waits for a host it wasn't connected to.
+    nonisolated(unsafe) static var statsPatience: Double = 6
+
+    private func hostList() async -> String {
+        let own = { (id: UUID?) in id == self.agents.host?.id ? ", the host you run on" : "" }
+        var lines = ["- This Mac (id: local, online\(own(nil)))"]
+        // Every online host is asked, connecting to the ones this board had no use for yet.
+        let online = remoteHosts.filter(\.online).compactMap { hosts?.store(for: $0.id) }
+        let deadline = Date().addingTimeInterval(Self.statsPatience)
+        while online.contains(where: { $0.hostStats == nil }), Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+        lines += remoteHosts.map { host in
+            var line = "- \(host.name) (id: \(host.id.uuidString.lowercased()), \(host.online ? "online" : "offline"), \(host.platform)\(own(host.id)))"
+            guard host.online else { return line }
+            if let stats = hosts?[host.id]?.hostStats {
+                let gigabytes = { (bytes: UInt64) in String(format: "%.1f", Double(bytes) / 1_073_741_824) }
+                line += ": CPU \(Int((stats.cpu * 100).rounded()))%, memory \(gigabytes(stats.memoryUsed)) of \(gigabytes(stats.memoryTotal)) GB, disk \(gigabytes(stats.diskUsed)) of \(gigabytes(stats.diskTotal)) GB"
+            } else {
+                line += ": stats: not connected"
+            }
+            return line
+        }
+        if hosts?.account.account == nil {
+            lines.append("The user isn't signed in to an account, so there are no other hosts. They sign in from the board's top bar.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func createWorktree(_ arguments: [String: Any], caller: UUID) async -> ToolResult {
+        guard let record = agents.record(caller) else { return .error("Your card isn't on the board.") }
+        guard let branch = (arguments["branch"] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty else {
+            return .error("Give the `branch` to check out.")
+        }
+        let candidates = projects.projects(in: record.organizationID)
+        let project: Project?
+        if let wanted = (arguments["project"] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty {
+            project = candidates.first { $0.path == wanted } ?? candidates.first { $0.name == wanted }
+            guard project != nil else { return .error("No project “\(wanted)” in your organization. project_list shows them.") }
+        } else {
+            project = projects.project(ofWorktree: record.worktree, on: agents.host?.id, in: record.organizationID)
+            guard project != nil else { return .error("Your card's folder isn't a worktree of a project in your organization. Give the `project`.") }
+        }
+        guard let project else { return .error("Give the `project`.") }
+
+        var host = agents.host?.id
+        if let wanted = (arguments["host"] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty {
+            if ["local", "this mac"].contains(wanted.lowercased()) {
+                host = nil
+            } else if let known = remoteHosts.first(where: { $0.id.uuidString.caseInsensitiveCompare(wanted) == .orderedSame }) ?? remoteHosts.first(where: { $0.name == wanted }) {
+                guard known.online else { return .error("\(known.name) is offline. host_list shows which hosts are online.") }
+                host = known.id
+            } else {
+                return .error("No host “\(wanted)”. host_list shows them.")
+            }
+        }
+        do {
+            let repository = project.path
+            guard let host else {
+                // Off the main actor: hooks and a large checkout mustn't freeze the board.
+                let created = try await Task.detached { try Git.createWorktree(branch: branch, in: repository) }.value
+                projects.reload()
+                return .text("Created the worktree at \(created.path) on This Mac, on \(branch)." + (created.warning.map { " git reported: \(WorktreeDraft.cause(of: $0))" } ?? ""))
+            }
+            let git = try await projects.gitHost(host)
+            let created = try await Task.detached { try Git.createWorktree(branch: branch, in: repository, on: git) }.value
+            _ = await projects.hostWorktree(at: created.path, branch: branch, on: host, in: project)
+            return .text("Created the worktree at \(created.path) on \(git.name), on \(branch)." + (created.warning.map { " git reported: \(WorktreeDraft.cause(of: $0))" } ?? ""))
+        } catch {
+            return .error(WorktreeDraft.cause(of: error.localizedDescription))
+        }
+    }
+
     private func list(in organization: UUID) -> String {
         let found = projects.projects(in: organization)
         guard !found.isEmpty else { return "No projects yet." }
         return found.map { project in
-            let worktrees = (Git.worktrees(at: project.path) ?? []).map { "  - \($0.path) (\($0.branch ?? "detached"))" }
+            var worktrees = (Git.worktrees(at: project.path) ?? []).map { "  - \($0.path) (\($0.branch ?? "detached"))" }
+            // Those on the account's hosts, as last listed; a host's first is its clone, not shown.
+            for host in remoteHosts {
+                worktrees += (projects.hostWorktrees[host.id]?[project.path] ?? []).dropFirst().map {
+                    "  - \($0.path) (\($0.branch ?? "detached"), on \(host.name))"
+                }
+            }
             return (["\(project.name): \(project.path)"] + worktrees).joined(separator: "\n")
         }.joined(separator: "\n")
     }

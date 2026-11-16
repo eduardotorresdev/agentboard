@@ -1,0 +1,25 @@
+size 6 8
+cursor 0 3 true 0
+modes 40 mouse 0 0
+alternate false synchronizing false scrollback 0
+title -
+cwd none
+bells 0 titleChanged false
+screen 4c31
+screen -
+screen -
+screen -
+screen -
+screen -
+screen 4c36
+screen -
+recent 4c31
+recent -
+recent -
+recent -
+recent -
+recent -
+recent 4c36
+recent3 -
+recent3 -
+recent3 4c36

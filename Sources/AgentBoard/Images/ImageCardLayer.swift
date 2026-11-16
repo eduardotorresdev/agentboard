@@ -59,14 +59,15 @@ final class ImageCardLayer: CALayer {
     /// The picture as last loaded, for copying.
     var image: CGImage? { picture.contents.map { $0 as! CGImage } }
 
-    @MainActor func update(frame: CGRect, record: ImageRecord, dataFolder: URL, focused: Bool, closeHovered: Bool, renaming: Bool, scale: CGFloat, visible: Bool = true) {
+    @MainActor func update(frame: CGRect, record: ImageRecord, dataFolder: URL, focused: Bool, closeHovered: Bool, renaming: Bool, scale: CGFloat, visible: Bool = true, note: String? = nil) {
         self.frame = frame
         let layout = ImageCardLayout(size: frame.size)
         self.focused = focused
         CardFrame.style(self, focused: focused)
         // While renaming, a field covers the name.
         bar.update(size: bounds.size, height: ImageRecord.titleHeight, icon: .symbol(record.isVideo ? "film" : "photo", color: Theme.Hex.inkMuted), status: nil, title: renaming ? "" : record.name,
-                   detail: nil, focused: focused, reserve: bounds.width - layout.title.maxX, scale: scale)
+                   // Why a picture kept on another host isn't showing yet, or can't.
+                   detail: note, focused: focused, reserve: bounds.width - layout.title.maxX, scale: scale)
         CardFrame.closeButton(closeHover, closeGlyph, in: layout.close, hovered: closeHovered, scale: scale)
         picture.frame = layout.picture
 

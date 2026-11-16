@@ -1,0 +1,60 @@
+{
+  "attention" : {
+    "_0" : [
+      {
+        "context" : "Done:\nall tests pass.",
+        "id" : "00000001-ABCD-4EF0-8A1B-000000000001",
+        "reason" : {
+          "turnEnded" : {
+
+          }
+        },
+        "since" : 784111222.5
+      },
+      {
+        "id" : "00000003-ABCD-4EF0-8A1B-000000000003",
+        "orchestrators" : [
+          "Ada"
+        ],
+        "reason" : {
+          "said" : {
+            "_0" : "Claude needs your permission to use Bash"
+          }
+        },
+        "since" : 784111222.5
+      },
+      {
+        "id" : "00000002-ABCD-4EF0-8A1B-000000000002",
+        "questions" : [
+          {
+            "header" : "Layout",
+            "multiSelect" : true,
+            "options" : [
+              {
+                "description" : "Rows and columns",
+                "label" : "Grid"
+              },
+              {
+                "label" : "List"
+              }
+            ],
+            "question" : "Which layout?"
+          },
+          {
+            "multiSelect" : false,
+            "options" : [
+
+            ],
+            "question" : "Ship it?"
+          }
+        ],
+        "reason" : {
+          "waiting" : {
+
+          }
+        },
+        "since" : 784111222.5
+      }
+    ]
+  }
+}

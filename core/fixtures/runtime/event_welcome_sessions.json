@@ -1,0 +1,34 @@
+{
+  "welcome" : {
+    "oldest" : 2,
+    "sessions" : [
+      "00000003-ABCD-4EF0-8A1B-000000000003",
+      {
+        "state" : {
+          "stopped" : {
+
+          }
+        }
+      },
+      "00000001-ABCD-4EF0-8A1B-000000000001",
+      {
+        "processID" : 1,
+        "state" : {
+          "running" : {
+
+          }
+        }
+      },
+      "00000002-ABCD-4EF0-8A1B-000000000002",
+      {
+        "exitCode" : 0,
+        "state" : {
+          "exited" : {
+
+          }
+        }
+      }
+    ],
+    "version" : 8
+  }
+}

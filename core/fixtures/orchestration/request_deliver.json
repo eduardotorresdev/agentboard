@@ -1,0 +1,6 @@
+{
+  "deliver" : {
+    "from" : "00000005-ABCD-4EF0-8A1B-000000000005",
+    "text" : "src\/main.rs:12 rename this"
+  }
+}

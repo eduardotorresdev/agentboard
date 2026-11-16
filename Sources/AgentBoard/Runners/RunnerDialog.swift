@@ -7,6 +7,9 @@ import SwiftUI
 /// the login shell, to use as an ordinary terminal.
 struct RunnerDialog: View {
     let worktree: String
+    /// The worktree's host, when it isn't this Mac: the folder is then typed as a path there
+    /// and its scripts are read there.
+    var files: HostFiles?
     let onDone: (_ command: String, _ name: String?, _ directory: String?) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +17,8 @@ struct RunnerDialog: View {
     @State private var folder = ""
     @State private var command = ""
     @State private var scripts: [PackageScript] = []
+    /// Whether the typed folder is one on the host; nil until the host said.
+    @State private var folderExists: Bool?
 
     var body: some View {
         AppDialog(title: L("New runner")) {
@@ -30,7 +35,7 @@ struct RunnerDialog: View {
                     TextField("", text: $command, prompt: Text("npm run dev"))
                         .font(Theme.Font.body.monospaced())
                 }
-                FormRow(label: L("Folder")) { folderLine }
+                FormRow(label: L("Folder"), message: files != nil && folderExists == false ? L("No folder at this path on the host.") : nil, isError: true) { folderLine }
             }
         } footer: {
             Button(L("Cancel"), role: .cancel) { dismiss() }
@@ -41,9 +46,23 @@ struct RunnerDialog: View {
             }
             .buttonStyle(DialogButtonStyle(prominent: true))
             .keyboardShortcut(.defaultAction)
+            // A runner can't start in a folder its host doesn't have.
+            .disabled(files != nil && folderExists != true)
         }
         .onAppear { folder = worktree }
-        .onChange(of: folder) { _, folder in loadScripts(in: folder) }
+        .onChange(of: folder) { _, folder in if files == nil { show(PackageScript.read(in: folder)) } }
+        // On another host: checked and read there, once the typing pauses.
+        .task(id: folder) {
+            guard let files, !folder.isEmpty else { return }
+            folderExists = nil
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let exists = await files.isFolder(folder)
+            let found = exists ? await PackageScript.read(in: folder, files: files) : []
+            guard !Task.isCancelled else { return }
+            folderExists = exists
+            show(found)
+        }
     }
 
     /// The folder: its path, a way back to the worktree, and Change….
@@ -51,27 +70,35 @@ struct RunnerDialog: View {
         HStack(spacing: 8) {
             Image(systemName: "folder")
                 .foregroundStyle(Theme.inkMuted)
-            Text(DisplayPath.short(folder, base: worktree))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .help(folder)
+            if files != nil {
+                // No picker reaches another host's folders: the path is typed.
+                TextField("", text: $folder, prompt: Text(worktree))
+                    .font(Theme.Font.body.monospaced())
+            } else {
+                Text(DisplayPath.short(folder, base: worktree))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(folder)
+            }
             if folder != worktree {
                 Button { folder = worktree } label: { Image(systemName: "arrow.uturn.backward") }
                     .buttonStyle(.borderless)
                     .help(L("Back to the worktree's folder"))
             }
-            Button(L("Change…"), action: chooseFolder)
-                .buttonStyle(DialogButtonStyle())
+            if files == nil {
+                Button(L("Change…"), action: chooseFolder)
+                    .buttonStyle(DialogButtonStyle())
+            }
         }
     }
 
     private var trimmedCommand: String { command.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    /// Reads the folder's scripts and fills in the one most likely wanted (`dev`, `start`…).
-    private func loadScripts(in folder: String) {
+    /// Shows the folder's scripts and fills in the one most likely wanted (`dev`, `start`…).
+    private func show(_ found: [PackageScript]) {
         let previous = scripts.first { $0.command == command }
-        scripts = PackageScript.read(in: folder)
+        scripts = found
         let pick = scripts.first { $0.name == previous?.name } ?? PackageScript.likeliest(in: scripts)
         // A command typed by hand stays; one taken from the old folder's scripts follows the new folder.
         if command.isEmpty || previous != nil { command = pick?.command ?? "" }
@@ -191,10 +218,22 @@ struct PackageScript: Identifiable, Hashable {
     /// Every script, alphabetically.
     static func read(in folder: String) -> [PackageScript] {
         let url = URL(fileURLWithPath: folder).appendingPathComponent("package.json")
-        guard let data = try? Data(contentsOf: url),
-              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return scripts(in: data, manager: packageManager(in: folder))
+    }
+
+    /// The same for a folder on another host, read through `files`.
+    static func read(in folder: String, files: HostFiles) async -> [PackageScript] {
+        let limit = 1024 * 1024
+        guard let data = await files.read(folder + "/package.json", limit: limit), data.count <= limit else { return [] }
+        let lockfile = await files.output("sh", ["-c", lockfileScript, "sh", folder])?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return scripts(in: data, manager: lockfiles.first { $0.0 == lockfile }?.1 ?? "npm")
+    }
+
+    private static func scripts(in data: Data, manager: @autoclosure () -> String) -> [PackageScript] {
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let scripts = json["scripts"] as? [String: String] else { return [] }
-        let manager = packageManager(in: folder)
+        let manager = manager()
         return scripts.keys.sorted().map { name in
             PackageScript(name: name, body: scripts[name] ?? "", command: manager == "npm" ? "npm run \(name)" : "\(manager) \(name)")
         }
@@ -208,8 +247,16 @@ struct PackageScript: Identifiable, Hashable {
 
     /// The package manager whose lockfile the project has; npm when none. A package inside a
     /// monorepo uses the lockfile at the repository's root.
+    private static let lockfiles = [("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lockb", "bun"), ("bun.lock", "bun")]
+
+    /// `packageManager(in:)` as a shell script: prints the first lockfile found from `$1` up to
+    /// the repository's root.
+    private static let lockfileScript = """
+        d=$1; while :; do for f in \(lockfiles.map(\.0).joined(separator: " ")); do [ -e "$d/$f" ] && { echo "$f"; exit 0; }; done; \
+        { [ -e "$d/.git" ] || [ "$d" = / ]; } && exit 0; d=$(dirname "$d"); done
+        """
+
     private static func packageManager(in folder: String) -> String {
-        let lockfiles = [("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lockb", "bun"), ("bun.lock", "bun")]
         var directory = folder
         while true {
             if let match = lockfiles.first(where: { FileManager.default.fileExists(atPath: (directory as NSString).appendingPathComponent($0.0)) }) {

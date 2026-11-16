@@ -58,6 +58,15 @@ enum ImageSource: Equatable {
     }
 }
 
+/// Why a picture couldn't be sent to another host.
+enum HostMediaFailure: Error {
+    case tooLarge
+    case unreachable
+
+    /// The most one `run` carries to or from a host in one piece (see docs/hosts.md).
+    static let maximumBytes = 64 * 1024 * 1024
+}
+
 /// Images: pictures on the board, which connected agents see with `image_read`. The core keeps
 /// them; the board stores the file the user gives, shows them and sends the user's changes.
 extension AgentStore {
@@ -77,6 +86,13 @@ extension AgentStore {
         case .file(let url): try await ImageFiles.storeMedia(contentsOf: url, in: dataFolder)
         case .data(let data): try ImageFiles.store(data, in: dataFolder)
         }
+        if host != nil {
+            // The host's core reads the picture from its own folder: it goes there first.
+            do { try await upload(stored.file) } catch {
+                ImageFiles.remove(stored.file, in: dataFolder)
+                throw error
+            }
+        }
         // A file's name reaches agents: one line of visible text.
         let name = BoardName.clean(name) ?? (stored.duration == nil ? L("Image") : L("Video"))
         let record = ImageRecord(id: UUID(), worktree: worktree, name: ImageRecord.uniqueName(name, among: images(in: worktree)),
@@ -88,7 +104,76 @@ extension AgentStore {
         return record
     }
 
+    // MARK: Another host's pictures
+
+    /// The host's own data folder, asked once; nil when the host can't say.
+    func askHostDataFolder() async -> String? {
+        if hostDataFolder == nil, let printed = await files?.output("agentboard", ["data-folder"]) {
+            let path = printed.trimmingCharacters(in: .whitespacesAndNewlines)
+            if path.hasPrefix("/") { hostDataFolder = path }
+        }
+        return hostDataFolder
+    }
+
+    /// The host's pictures folder, inside its data folder.
+    private func hostMediaFolder() async -> String? {
+        await askHostDataFolder().map { $0 + "/images" }
+    }
+
+    /// Copies a picture this Mac just stored (in its copy of the host's pictures) to the host.
+    private func upload(_ file: String) async throws {
+        let url = ImageFiles.url(of: file, in: dataFolder)
+        guard let data = await Task.detached(operation: { try? Data(contentsOf: url, options: .mappedIfSafe) }).value,
+              data.count <= HostMediaFailure.maximumBytes else { throw HostMediaFailure.tooLarge }
+        guard let folder = await hostMediaFolder(), let files, await files.write(data, to: folder + "/" + file) else {
+            throw HostMediaFailure.unreachable
+        }
+    }
+
+    /// Prints the file when it is no larger than `$2` bytes; exits with 3 when it is.
+    private static let fetchScript = "n=$(wc -c < \"$1\") || exit 1; [ \"$n\" -le \"$2\" ] || exit 3; cat \"$1\""
+
+    /// Brings a picture kept on another host (one an agent made there) to this Mac's copy of
+    /// that host's pictures, off the main thread, and says when it is here (`onMediaChange`).
+    /// Does nothing for this Mac's own pictures, or one already here, on its way, or refused.
+    func fetchMedia(_ record: ImageRecord, limit: Int = HostMediaFailure.maximumBytes) {
+        let file = record.file
+        // A plain file name inside the pictures folder, never a path out of it.
+        guard let host, mediaNotes[file] == nil, !file.isEmpty, file != ".", file != "..",
+              (file as NSString).lastPathComponent == file else { return }
+        let destination = ImageFiles.url(of: file, in: dataFolder)
+        guard !FileManager.default.fileExists(atPath: destination.path) else { return }
+        mediaNotes[file] = L("Fetching from \(host.name)…")
+        Task {
+            var note: String? = L("Couldn't fetch this from \(host.name).")
+            if let folder = await hostMediaFolder(),
+               let ran = await run("sh", ["-c", Self.fetchScript, "sh", folder + "/" + file, String(limit)]) {
+                if ran.status == 3 {
+                    note = L("Larger than \(limit / 1024 / 1024) MB: too large to bring from \(host.name).")
+                } else if ran.status == 0 {
+                    let saved = await Task.detached {
+                        try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        // Whole or not at all: a card never loads half a picture.
+                        return (try? ran.output.write(to: destination, options: .atomic)) != nil
+                    }.value
+                    if saved { note = nil }
+                }
+            }
+            mediaNotes[file] = note
+            onMediaChange?(file)
+        }
+    }
+
+    /// A removed card's picture leaves this Mac's copy of the host's pictures too. This Mac's
+    /// own pictures are its core's to remove.
+    func forgetHostMedia(of id: UUID) {
+        guard host != nil, let record = image(id) else { return }
+        ImageFiles.remove(record.file, in: dataFolder)
+        mediaNotes[record.file] = nil
+    }
+
     func removeImage(_ id: UUID) {
+        forgetHostMedia(of: id)
         images.removeAll { $0.id == id }
         dropConnections(touching: id)
         send(.removeImage(id))

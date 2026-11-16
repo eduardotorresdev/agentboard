@@ -1,0 +1,15 @@
+size 5 4
+cursor 4 2 true 0
+modes 40 mouse 0 0
+alternate false synchronizing false scrollback 0
+title -
+cwd none
+bells 0 titleChanged false
+screen 6162636465
+screen 6667682078
+screen 3132333454
+screen -
+recent 61626364656667682078
+recent 3132333454
+recent3 61626364656667682078
+recent3 3132333454

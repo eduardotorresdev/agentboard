@@ -1,0 +1,13 @@
+{
+  "host" : {
+    "_0" : {
+      "cores" : 8,
+      "cpu" : 0.25,
+      "diskTotal" : 500000000000,
+      "diskUsed" : 200000000000,
+      "load" : 1.75,
+      "memoryTotal" : 16000000000,
+      "memoryUsed" : 6000000000
+    }
+  }
+}

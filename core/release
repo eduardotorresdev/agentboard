@@ -1,0 +1,15 @@
+#!/bin/sh
+# Builds the static Linux host binary and puts it, with the installer, where the account
+# server serves them (`server/public`); `npx wrangler deploy` in `server/` then publishes.
+# Needs zig and cargo-zigbuild.
+set -eu
+cd "$(dirname "$0")"
+out=../server/public
+mkdir -p "$out/download"
+for arch in x86_64 aarch64; do
+    rustup target add "$arch-unknown-linux-musl" >/dev/null
+    cargo zigbuild --release -p agentboard --target "$arch-unknown-linux-musl"
+    cp "target/$arch-unknown-linux-musl/release/agentboard" "$out/download/agentboard-linux-$arch"
+    (cd "$out/download" && shasum -a 256 "agentboard-linux-$arch" | cut -d' ' -f1 > "agentboard-linux-$arch.sha256")
+done
+cp install.sh "$out/install.sh"

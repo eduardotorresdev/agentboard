@@ -1,0 +1,20 @@
+[package]
+name = "orchestration"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+connections = { path = "../connections" }
+runtime = { path = "../runtime" }
+terminal = { path = "../terminal" }
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+# The board's SQLite file, shared with the Mac app; bundled so a host needs no system library.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# A picture's size from its header, and the downscaled copy `image_read` gives.
+imagesize = "0.13"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[dev-dependencies]
+libc.workspace = true

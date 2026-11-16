@@ -1,0 +1,118 @@
+]7;file:///Users/me/board]133;A[1;34m~/board[0m [32m❯[0m ls --color
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;198m1[39m	Sources docs Package.swift core 日本語.txt core Tests
+[38;5;200m2[39m	Package.swift docs README.md README.md Sources Package.swift 日本語.txt core docs 日本語.txt
+[38;5;160m3[39m	日本語.txt docs 日本語.txt 日本語.txt 日本語.txt Tests docs 日本語.txt 日本語.txt 日本語.txt build.sh
+[2m⠋ working 3[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 3[39m
+[2K[38;5;121m4[39m	build.sh build.sh Tests README.md core build.sh docs build.sh Package.swift Package.swift Sources
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;121m6[39m	Tests 日本語.txt core docs Package.swift Package.swift README.md Tests core Tests docs
+[38;5;102m7[39m	build.sh docs Tests Package.swift build.sh README.md Package.swift core
+[38;5;75m8[39m	Tests docs
+[38;5;84m9[39m	日本語.txt Sources core Sources build.sh docs
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[2m⠋ working 10[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 10[39m
+[2K[38;5;167m11[39m	日本語.txt build.sh docs 日本語.txt README.md Tests Tests docs core build.sh
+[38;5;122m12[39m	docs Tests Tests 日本語.txt Tests Package.swift Package.swift 日本語.txt build.sh docs
+[38;5;104m13[39m	docs 日本語.txt core core 日本語.txt Sources 日本語.txt README.md 日本語.txt Tests Sources README.md README.md 日本語.txt
+[38;5;85m14[39m	core Tests README.md Package.swift docs docs core Sources Tests Package.swift docs README.md Tests
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;213m16[39m	build.sh README.md Sources build.sh docs docs Sources docs README.md README.md Package.swift
+[38;5;31m17[39m	README.md README.md README.md Tests core Sources README.md
+[2m⠋ working 17[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 17[39m
+[2K[38;5;112m18[39m	core build.sh docs Sources Package.swift
+[38;5;78m19[39m	Tests Package.swift build.sh Sources README.md Package.swift README.md build.sh Package.swift Package.swift
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;67m21[39m	docs README.md 日本語.txt Tests Tests Sources README.md 日本語.txt build.sh Sources Tests docs 日本語.txt
+[38;5;169m22[39m	README.md core core build.sh 日本語.txt Sources docs 日本語.txt docs
+[38;5;108m23[39m	build.sh build.sh docs Package.swift
+[38;5;117m24[39m	docs Sources 日本語.txt docs Tests Sources Tests core README.md core build.sh Package.swift 日本語.txt Sources
+[2m⠋ working 24[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 24[39m
+[2K[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;16m26[39m	Sources 日本語.txt docs Package.swift Tests build.sh
+[38;5;191m27[39m	core Tests core core 日本語.txt 日本語.txt docs 日本語.txt Sources
+[38;5;169m28[39m	Package.swift docs Package.swift build.sh 日本語.txt core Package.swift 日本語.txt Tests docs Tests 日本語.txt
+[38;5;157m29[39m	README.md 日本語.txt
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;140m31[39m	docs build.sh Sources docs Package.swift 日本語.txt docs core README.md
+[2m⠋ working 31[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 31[39m
+[2K[38;5;141m32[39m	Sources build.sh Sources build.sh README.md
+[38;5;166m33[39m	Sources core Sources 日本語.txt Package.swift Sources Tests 日本語.txt 日本語.txt
+[38;5;175m34[39m	日本語.txt Package.swift docs README.md
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;104m36[39m	日本語.txt Tests 日本語.txt
+[38;5;178m37[39m	core docs Package.swift Sources README.md Package.swift Tests
+[38;5;114m38[39m	Sources docs README.md Package.swift docs Sources 日本語.txt
+[2m⠋ working 38[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 38[39m
+[2K[38;5;191m39[39m	core core build.sh build.sh 日本語.txt
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;204m41[39m	Tests core core Tests
+[38;5;211m42[39m	Sources docs build.sh Package.swift 日本語.txt Sources
+[38;5;106m43[39m	Sources Sources core docs README.md Tests 日本語.txt
+[38;5;103m44[39m	Package.swift Tests Sources README.md Sources 日本語.txt Package.swift core
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[2m⠋ working 45[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 45[39m
+[2K[38;5;178m46[39m	Sources Package.swift Package.swift build.sh Tests Tests Tests Sources Tests Package.swift Sources
+[38;5;27m47[39m	Tests Sources 日本語.txt README.md Tests 日本語.txt Package.swift
+[38;5;140m48[39m	Sources core Package.swift core Sources README.md core README.md README.md core README.md 日本語.txt Tests
+[38;5;29m49[39m	Package.swift build.sh Package.swift Package.swift README.md 日本語.txt build.sh README.md docs
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;93m51[39m	build.sh core Package.swift Package.swift 日本語.txt Package.swift core 日本語.txt Sources core core docs README.md Sources
+[38;5;142m52[39m	Sources README.md core 日本語.txt 日本語.txt build.sh Package.swift
+[2m⠋ working 52[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 52[39m
+[2K[38;5;199m53[39m	Tests Tests core 日本語.txt docs Tests Package.swift 日本語.txt
+[38;5;173m54[39m	日本語.txt Tests 日本語.txt README.md core
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;184m56[39m	Sources core Tests core core core Package.swift Sources Sources README.md
+[38;5;47m57[39m	Sources Sources Sources README.md docs README.md core build.sh 日本語.txt
+[38;5;147m58[39m	Package.swift Tests build.sh 日本語.txt Sources Tests Package.swift Tests core README.md Sources build.sh docs Tests
+[38;5;70m59[39m	日本語.txt core docs Package.swift
+[2m⠋ working 59[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 59[39m
+[2K[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;225m61[39m	core build.sh docs Tests
+[38;5;38m62[39m	Tests Tests 日本語.txt Package.swift Tests Package.swift docs build.sh docs
+[38;5;20m63[39m	build.sh Tests
+[38;5;198m64[39m	Tests core core core README.md Sources Package.swift core Package.swift build.sh core Tests docs
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;48m66[39m	Sources README.md core build.sh Tests
+[2m⠋ working 66[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 66[39m
+[2K[38;5;145m67[39m	日本語.txt core core core
+[38;5;151m68[39m	Package.swift 日本語.txt Sources docs
+[38;5;198m69[39m	Sources core Package.swift Tests README.md Package.swift docs 日本語.txt Tests Tests core Sources
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;214m71[39m	Sources Sources docs 日本語.txt Sources docs core Package.swift Sources Sources README.md build.sh
+[38;5;203m72[39m	Package.swift docs Package.swift
+[38;5;193m73[39m	Package.swift Package.swift 日本語.txt docs build.sh
+[2m⠋ working 73[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 73[39m
+[2K[38;5;17m74[39m	docs core Tests docs README.md 日本語.txt Package.swift build.sh
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;133m76[39m	core Package.swift 日本語.txt
+[38;5;118m77[39m	Sources 日本語.txt Package.swift README.md build.sh Sources core core docs docs README.md Tests
+[38;5;52m78[39m	Sources Tests Sources Tests Tests Sources
+[38;5;194m79[39m	Tests core README.md
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[2m⠋ working 80[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 80[39m
+[2K[38;5;156m81[39m	docs 日本語.txt core build.sh docs Package.swift Package.swift core 日本語.txt Sources
+[38;5;217m82[39m	README.md build.sh Sources
+[38;5;159m83[39m	Sources Tests Package.swift build.sh 日本語.txt Tests
+[38;5;91m84[39m	README.md build.sh core docs
+[0mPackage.swift[0m  [1;36mSources[0m  [1;36mTests[0m  [0mREADME.md[0m  [1;36mcore[0m  [1;36mdocs[0m  [0m日本語.txt[0m  [0mbuild.sh[0m
+[38;5;66m86[39m	README.md Sources Tests Sources build.sh build.sh Tests Package.swift README.md
+[38;5;20m87[39m	Package.swift Sources
+[2m⠋ working 87[22m
+[2m  step two[22m[1A[2K[G[32m✔ done 87[39m
+[2K[38;5;157m88[39m	Package.swift 日本語.txt Package.swift core docs 日本語.txt Sources Tests docs build.sh Tests Tests
+[38;5;154m89[39m	Package.swift core Tests build.sh Package.swift
+[?2004h[1;34m~/board[0m [32m❯[0m 

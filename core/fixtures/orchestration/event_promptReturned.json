@@ -1,0 +1,7 @@
+{
+  "promptReturned" : {
+    "id" : "00000001-ABCD-4EF0-8A1B-000000000001",
+    "reason" : "it exited",
+    "text" : "run the tests"
+  }
+}

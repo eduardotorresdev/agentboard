@@ -1,0 +1,27 @@
+size 40 12
+cursor 7 4 true 0
+modes 40 mouse 0 0
+alternate false synchronizing false scrollback 0
+title -
+cwd none
+bells 0 titleChanged false
+screen 50505050505050505050505050505050
+screen 414243444546
+screen 4748494a4b4c4d4e4f50
+screen 414243444546
+screen 4748494a4b4c4d
+screen -
+screen -
+screen -
+screen -
+screen -
+screen -
+screen -
+recent 50505050505050505050505050505050
+recent 414243444546
+recent 4748494a4b4c4d4e4f50
+recent 414243444546
+recent 4748494a4b4c4d
+recent3 4748494a4b4c4d4e4f50
+recent3 414243444546
+recent3 4748494a4b4c4d

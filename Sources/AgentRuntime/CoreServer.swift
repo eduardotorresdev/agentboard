@@ -265,6 +265,45 @@ public final class CoreServer: @unchecked Sendable {
             shutDown()
         case .takeOver:
             handOff(to: client)
+        case .run(let call, let executable, let arguments, let directory, let input):
+            // Off the queue: the program may take as long as it likes.
+            Thread.detachNewThread {
+                let process = Process()
+                // A bare name is looked up in the PATH, as the protocol says.
+                let named = !executable.contains("/")
+                process.executableURL = URL(fileURLWithPath: named ? "/usr/bin/env" : executable)
+                process.arguments = named ? [executable] + arguments : arguments
+                if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
+                let output = Pipe(), errors = Pipe()
+                process.standardOutput = output
+                process.standardError = errors
+                let typed = input.map { _ in Pipe() }
+                process.standardInput = typed ?? FileHandle.nullDevice
+                do { try process.run() } catch {
+                    return client.socket.send(CoreEvent.ran(call: call, status: -1, output: Data(), error: Data("\(error.localizedDescription)".utf8)))
+                }
+                if let typed, let input {
+                    Thread.detachNewThread {
+                        try? typed.fileHandleForWriting.write(contentsOf: input)
+                        try? typed.fileHandleForWriting.close()
+                    }
+                }
+                // Read on a thread of its own, so a program filling one pipe can't block on the other.
+                var printed = Data()
+                let reading = DispatchGroup()
+                reading.enter()
+                Thread.detachNewThread {
+                    printed = output.fileHandleForReading.readDataToEndOfFile()
+                    reading.leave()
+                }
+                let failed = errors.fileHandleForReading.readDataToEndOfFile()
+                reading.wait()
+                process.waitUntilExit()
+                client.socket.send(CoreEvent.ran(call: call, status: process.terminationStatus, output: printed, error: failed))
+            }
+        case .subscribeHost:
+            // This Mac's board doesn't show its own machine's stats; the hosts' core reports them.
+            break
         }
     }
 

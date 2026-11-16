@@ -28,7 +28,7 @@ enum OpenWorktree {
 
 struct ContentView: View {
     let store: ProjectStore
-    let agents: AgentStore
+    let hosts: HostStores
     let browsers: BrowserStore
     let fileTrees: FileTreeStore
     @State private var selection: WorktreeSelection?
@@ -39,6 +39,9 @@ struct ContentView: View {
     @State private var isNeedsYouOpen = false
     /// Set in code per screen; not a user-facing toggle.
     var canvasMode: CanvasMode = .canvas
+
+    /// This Mac's store: what isn't about one worktree reads it.
+    private var agents: AgentStore { hosts.local }
 
     var body: some View {
         Group {
@@ -58,24 +61,25 @@ struct ContentView: View {
         // On every screen, the first run of a new organization included.
         .overlay {
             if isNeedsYouOpen {
-                NeedsYouDeck(agents: agents, projects: store, isOpen: $isNeedsYouOpen, onReveal: reveal)
+                NeedsYouDeck(hosts: hosts, projects: store, isOpen: $isNeedsYouOpen, onReveal: reveal)
                     .transition(.opacity)
             }
         }
         .toolbar {
             if #available(macOS 26, *) {
                 // The button is its own capsule: no toolbar glass around it.
-                ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
+                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, isOpen: $isNeedsYouOpen) }
                     .sharedBackgroundVisibility(.hidden)
             } else {
-                ToolbarItem(placement: .principal) { NeedsYouButton(agents: agents, isOpen: $isNeedsYouOpen) }
+                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, isOpen: $isNeedsYouOpen) }
             }
             if !boardController.isZen {
+                ToolbarItem(placement: .primaryAction) { AccountControl(hosts: hosts) }
                 ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store, agents: agents) }
             }
         }
         .onChange(of: store.organizationID, initial: true) { old, id in
-            agents.organizationID = id
+            hosts.organizationID = id
             if old != id {
                 selection = nil
                 withAnimation(.snappy(duration: 0.3)) { isNeedsYouOpen = false }
@@ -83,18 +87,37 @@ struct ContentView: View {
                 restoreSelection()
             }
         }
-        .onAppear(perform: restoreSelection)
+        .onAppear {
+            if let path = DebugShow.worktree { OpenWorktree.set(path, in: store.organizationID) }
+            if DebugShow.items.contains("sign-in") { hosts.account.signIn() }
+            restoreSelection()
+        }
         .onChange(of: selection) { _, selection in
             if let path = selection?.worktree.path { OpenWorktree.set(path, in: store.organizationID) }
+            // Connects to the worktree's host, the first time one of its worktrees opens.
+            hosts.store(for: selection?.worktree.host)
             dismissAttentionOnScreen()
         }
-        .onChange(of: agents.attention) { dismissAttentionOnScreen() }
+        .onChange(of: hosts.attention) { dismissAttentionOnScreen() }
+        // The hosts are known a moment after launch, and what they hold later still: a worktree
+        // of one that was open is restored then.
+        .onChange(of: hosts.account.hosts, initial: true) {
+            store.refreshHostWorktrees()
+            restoreSelection()
+        }
+        .onChange(of: store.hostWorktrees) { restoreSelection() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             dismissAttentionOnScreen()
         }
         #if BENCH
         .task { await runBenchScenario() }
         #endif
+        .sheet(isPresented: Binding(get: { hosts.account.isSigningIn }, set: { if !$0 { hosts.account.cancelSignIn() } })) {
+            SignInDialog(account: hosts.account)
+        }
+        .sheet(isPresented: Binding(get: { hosts.syncQuestion != nil }, set: { if !$0 { hosts.answerSync(false) } })) {
+            if let host = hosts.syncQuestion { SyncQuestionDialog(hosts: hosts, host: host) }
+        }
         .sheet(item: $addProjectStep) { step in
             AddProjectDialog(store: store, initialStep: step, onAdded: select)
         }
@@ -118,7 +141,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             // Always in the tree and slid off-screen when hidden: removing it from the ZStack drops
             // it behind the board while it leaves, so the slide never shows.
-            Sidebar(store: store, agents: agents, browsers: browsers, selection: $selection, renaming: $renaming)
+            Sidebar(store: store, hosts: hosts, browsers: browsers, selection: $selection, renaming: $renaming)
                 // Past its width, so the shadow leaves with it.
                 // The Needs you screen takes the whole window: the sidebar steps aside for it.
                 .offset(x: showsSidebar && !isNeedsYouOpen ? 0 : -(Sidebar.width + 32))
@@ -137,7 +160,10 @@ struct ContentView: View {
                     .keyboardShortcut("s", modifiers: [.command, .control])
                 Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
                     .help(L("Clone, create, or open a project."))
-                Button(action: store.reload) { Label(L("Refresh"), systemImage: "arrow.clockwise") }
+                Button {
+                    store.reload()
+                    store.refreshHostWorktrees(probing: true)
+                } label: { Label(L("Refresh"), systemImage: "arrow.clockwise") }
                     .help(L("Reloads the projects and their worktrees."))
             } }
             // A build of the checkout (`./run`) says so, to tell it apart from the installed app.
@@ -166,8 +192,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let selection {
+        if let selection, let agents = hosts[selection.worktree.host] {
             WorktreeCanvas(agents: agents, browsers: browsers, fileTrees: fileTrees, worktree: selection.worktree, board: boardController)
+                // Another host's cards are another store's: the board is built again for it.
+                .id(selection.worktree.host)
+        } else if selection != nil {
+            SkyCanvas()
         } else {
             SkyBlobEmptyState(title: L("Select a worktree"),
                               message: L("Pick a worktree in the sidebar to open it on the canvas."))
@@ -206,7 +236,8 @@ struct ContentView: View {
 
     /// An agent in the worktree the developer is looking at doesn't need to call them: they see it.
     private func dismissAttentionOnScreen() {
-        guard NSApp.isActive, !isNeedsYouOpen, let path = selection?.worktree.path else { return }
+        guard NSApp.isActive, !isNeedsYouOpen, let worktree = selection?.worktree, let agents = hosts[worktree.host] else { return }
+        let path = worktree.path
         for request in agents.attention where agents.record(request.id)?.worktree == path {
             agents.dismissAttention(request.id)
         }

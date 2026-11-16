@@ -39,8 +39,9 @@ public final class CoreLink {
 
     /// Connects; false if it couldn't, in which case nothing retries. When no core answers,
     /// `fallback` may start one and give its socket (a core inside this process). A core of
-    /// another build is reported, and retried.
-    public func start(fallback: (() -> String?)? = nil) async -> Bool {
+    /// another build is reported, and retried. `retrying` keeps trying when none answers either
+    /// (another host's core, which may come online later).
+    public func start(retrying: Bool = false, fallback: (() -> String?)? = nil) async -> Bool {
         let connect = self.connect
         switch await Task.detached(priority: .userInitiated, operation: { connect() }).value {
         case .success(let client):
@@ -52,7 +53,11 @@ public final class CoreLink {
             reconnect()
             return true
         case .failure(.noCore):
-            break
+            guard !retrying else {
+                lostSince = Date()
+                reconnect()
+                return true
+            }
         }
         guard let path = fallback?() else { return false }
         guard let client = await Task.detached(priority: .userInitiated, operation: { CoreClient.connect(socketPath: path) }).value else {
@@ -60,6 +65,15 @@ public final class CoreLink {
         }
         adopt(client)
         return true
+    }
+
+    /// Hangs up and connects again right away: for when `connect` now has a better way there.
+    public func reconnectNow() {
+        guard let old = client, !closed else { return }
+        client = nil
+        lostSince = Date()
+        old.disconnect()
+        reconnect()
     }
 
     /// Hangs up for good, as a board that quits.

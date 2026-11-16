@@ -130,6 +130,7 @@ struct Board: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: BoardView, coordinator: ()) {
+        view.closeStaleForwards(leaving: true)
         view.releaseTerminals()
     }
 }
@@ -238,6 +239,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     var worktree = "" {
         didSet {
             guard worktree != oldValue else { return }
+            closeStaleForwards()
             endAddressEditing()
             endPostItEditing()
             focusedID = nil
@@ -343,8 +345,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         wantsLayer = true
         store.onSessionChange = { [weak self] id in self?.sessionChanged(id) }
         store.onMessage = { [weak self] message in self?.showMessage(message) }
-        store.onRunnersChange = { [weak self] in self?.syncLayers() }
+        store.onRunnersChange = { [weak self] in
+            self?.syncLayers()
+            self?.closeStaleForwards()
+        }
         browsers.onPageChange = { [weak self] _ in self?.syncLayers() }
+        store.onMediaChange = { [weak self] file in self?.mediaChanged(file) }
         registerForDraggedTypes([.fileURL])
     }
 
@@ -484,7 +490,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     func addBrowser(_ device: BrowserDevice) {
         let scale = BrowserStore.initialScale(for: device)
         let size = BrowserStore.frame(for: device, at: .zero, scale: scale).size
-        let record = browsers.add(device, to: worktree, at: newCardOrigin(for: size))
+        let record = browsers.add(device, to: worktree, on: store.host?.id, at: newCardOrigin(for: size))
         appearing.insert(record.id)
         bringIntoView(record.frame)
         focusedID = record.id
@@ -544,7 +550,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 case .notAnImage: L("\(name) isn't a picture the board can show.")
                 case .notPlayable: L("\(name) isn't a video the board can play. Use MP4, MOV or M4V.")
                 case .notAFile: L("\(name) isn't a file.")
-                default: L("\(name) couldn't be read.")
+                default:
+                    switch error as? HostMediaFailure {
+                    case .tooLarge: L("\(name) is larger than \(HostMediaFailure.maximumBytes / 1024 / 1024) MB, the most that can be sent to another host.")
+                    case .unreachable: L("\(name) couldn't be sent to \(store.host?.name ?? L("the host")).")
+                    case nil: L("\(name) couldn't be read.")
+                    }
                 }
                 refused.append(reason)
             }
@@ -565,7 +576,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     func addFileTree() {
-        let record = fileTrees.add(to: worktree, at: newCardOrigin(for: FileTreeRecord.size))
+        let record = fileTrees.add(to: worktree, on: store.host?.id, at: newCardOrigin(for: FileTreeRecord.size))
         appearing.insert(record.id)
         bringIntoView(record.frame)
         focusedID = record.id
@@ -593,6 +604,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// layer properties; terminals that need pixels are queued for the next display refresh.
     func syncLayers() {
         guard let glyphs = prepareGlyphs(), let presenter else { return }
+        // A worktree on another host never shown here (its cards were placed from another
+        // computer) opens on its cards, clear of the sidebar, instead of wherever they fall.
+        if store.host != nil, cameras[worktree] == nil, bounds.width > 0 {
+            let cards = store.agents(in: worktree).reduce(CGRect.null) { $0.union($1.frame) }
+            if !cards.isNull {
+                cameras[worktree] = Camera(zoom: 1, pan: .zero)
+                frame(cards)
+            }
+        }
         let scale = scale
         let renderScale = scale * renderZoom
         let base = cellAtZoom1
@@ -707,7 +727,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// Browser cards sit above the agents, in their own stacking order.
     private func syncBrowsers(onScreen: Bool, scale: CGFloat) {
-        let records = browsers.browsers(in: worktree)
+        let records = browsers.browsers(in: worktree, on: store.host?.id)
         let ids = Set(records.map(\.id))
         for (id, card) in browserCards where !ids.contains(id) {
             card.removeFromSuperlayer()
@@ -744,12 +764,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var itemFrames: [(id: UUID, frame: CGRect)] {
         store.agents(in: worktree).map { ($0.id, $0.frame) } + store.postIts(in: worktree).map { ($0.id, $0.frame) }
             + store.images(in: worktree).map { ($0.id, $0.frame) }
-            + browsers.browsers(in: worktree).map { ($0.id, $0.frame) } + fileTrees.trees(in: worktree).map { ($0.id, $0.frame) }
+            + browsers.browsers(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) } + fileTrees.trees(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) }
     }
 
     /// The lines of this worktree, between any of its cards.
     private var worktreeConnections: [Connection] {
-        store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree).map(\.id)).union(fileTrees.trees(in: worktree).map(\.id)))
+        store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree, on: store.host?.id).map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)))
     }
 
     /// Ties each line of this worktree to its cards' handles, and the one being drawn to the
@@ -1169,12 +1189,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// The topmost browser card under a world point.
     private func browser(at point: CGPoint) -> BrowserRecord? {
         guard fileTree(at: point) == nil else { return nil }
-        return browsers.browsers(in: worktree).last { $0.frame.contains(point) }
+        return browsers.browsers(in: worktree, on: store.host?.id).last { $0.frame.contains(point) }
     }
 
     /// The topmost file tree card under a world point; their files float above every other card.
     fileprivate func fileTree(at point: CGPoint) -> FileTreeRecord? {
-        fileTrees.trees(in: worktree).last { $0.frame.contains(point) }
+        fileTrees.trees(in: worktree, on: store.host?.id).last { $0.frame.contains(point) }
     }
 
     /// The topmost post-it under a world point, unless a browser card covers it.
@@ -1898,6 +1918,14 @@ extension BoardView {
         return runnerLayout(record, state: state).0.control(at: local)
     }
 
+    /// A port opened here for a runner's link (see `HostProxy.forward`) stays only while a
+    /// runner of the worktree shown serves it there.
+    func closeStaleForwards(leaving: Bool = false) {
+        guard let host = store.host?.id else { return }
+        let served = leaving ? [] : store.agents(in: worktree).flatMap { store.runnerStats[$0.id]?.ports ?? [] }.map { UInt16(clamping: $0.port) }
+        browsers.proxy?.keepForwards(Set(served), on: host)
+    }
+
     fileprivate func perform(_ control: RunnerControl, on record: AgentRecord) {
         switch control {
         case .toggle:
@@ -1906,7 +1934,12 @@ extension BoardView {
         case .restart:
             store.restartRunner(record.id)
         case .link(let address):
-            if let url = URL(string: address) { NSWorkspace.shared.open(url) }
+            // Another host's localhost isn't this Mac's: it opens on a port here that leads there.
+            if let host = store.host?.id, let forwarded = browsers.proxy?.forwarded(address, on: host) {
+                NSWorkspace.shared.open(forwarded)
+            } else if let url = URL(string: address) {
+                NSWorkspace.shared.open(url)
+            }
         }
     }
 }
@@ -2886,7 +2919,7 @@ private final class LinkLayer: CALayer {
 extension BoardView {
     /// File tree cards sit above every other card: their files are views over the board.
     fileprivate func syncFileTrees(scale: CGFloat) {
-        let records = fileTrees.trees(in: worktree)
+        let records = fileTrees.trees(in: worktree, on: store.host?.id)
         let ids = Set(records.map(\.id))
         for (id, card) in fileTreeCards where !ids.contains(id) {
             card.removeFromSuperlayer()
@@ -2898,7 +2931,7 @@ extension BoardView {
             fileTreeViews[id] = nil
         }
         let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count + store.images(in: worktree).count
-            + browsers.browsers(in: worktree).count)
+            + browsers.browsers(in: worktree, on: store.host?.id).count)
         for (index, record) in records.enumerated() {
             let card = fileTreeCards[record.id] ?? {
                 let card = FileTreeCardLayer()
@@ -2968,6 +3001,16 @@ extension BoardView {
 // MARK: Images
 
 extension BoardView {
+    /// A host's picture arrived, or couldn't: its cards are made again, to load it from the start.
+    fileprivate func mediaChanged(_ file: String) {
+        for record in store.images where record.file == file {
+            imageCards[record.id]?.forget()
+            imageCards[record.id]?.removeFromSuperlayer()
+            imageCards[record.id] = nil
+        }
+        syncLayers()
+    }
+
     /// Images sit above the post-its and below the browsers, in their own stacking order.
     fileprivate func syncImages(scale: CGFloat) {
         let records = store.images(in: worktree)
@@ -2988,9 +3031,12 @@ extension BoardView {
                 return card
             }()
             card.zPosition = below + CGFloat(index)
+            let visible = screen(record.frame).intersects(bounds)
+            // A picture kept on another host is brought here the first time its card shows.
+            if visible { store.fetchMedia(record) }
             card.update(frame: record.frame, record: record, dataFolder: store.dataFolder, focused: highlighted(record.id),
                         closeHovered: hoveredClose == record.id, renaming: renamingCard == record.id, scale: scale,
-                        visible: screen(record.frame).intersects(bounds))
+                        visible: visible, note: store.mediaNotes[record.file])
             let showsHandles = linkDrag != nil || record.id == hoveredCard
             let lit: Int? = if let linkDrag {
                 linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
@@ -3074,7 +3120,7 @@ extension BoardView {
                 self?.perform(.restart, on: record)
             })
         }
-        for record in browsers.browsers(in: worktree) {
+        for record in browsers.browsers(in: worktree, on: store.host?.id) {
             let id = record.id
             let layout = BrowserCardLayout(frame: record.frame, record: record)
             elements.append(button(L("Back"), layout.back) { [weak self] in self?.browsers.go("back", on: id) })

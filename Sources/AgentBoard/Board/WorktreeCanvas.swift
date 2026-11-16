@@ -32,8 +32,9 @@ struct WorktreeCanvas: View {
                 // Narrow windows drop the usage first, then scroll the tools: nothing overlaps.
                 ViewThatFits(in: .horizontal) {
                     if !board.isZen {
-                        ClaudeUsageToolbar(organization: agents.organizationID)
-                            .transition(.opacity)
+                        usage(compact: false)
+                        // Narrower, the labels become glyphs before the host's name goes.
+                        usage(compact: true)
                     }
                     Color.clear.frame(width: 0, height: 0)
                 }
@@ -67,6 +68,7 @@ struct WorktreeCanvas: View {
         .animation(.smooth(duration: 0.3), value: isEmpty)
         .animation(.snappy(duration: 0.32), value: board.isZen)
         .animation(.smooth(duration: 0.3), value: notice)
+        .animation(.smooth(duration: 0.3), value: agents.hostStats == nil)
         // Content centers on the canvas the sidebar leaves uncovered, following it as it slides.
         .animation(.snappy(duration: 0.32), value: board.leadingInset)
         .clipped()
@@ -77,7 +79,7 @@ struct WorktreeCanvas: View {
             }
         }
         .sheet(isPresented: Binding(get: { board.addingRunner }, set: { board.addingRunner = $0 })) {
-            RunnerDialog(worktree: worktree.path) { command, name, directory in
+            RunnerDialog(worktree: worktree.path, files: agents.files) { command, name, directory in
                 board.addRunner(command: command, name: name, directory: directory)
             }
         }
@@ -88,6 +90,18 @@ struct WorktreeCanvas: View {
     }
 
     /// Shown where the cards would be, when there are none to show.
+    /// The host's stats above the agent's usage; `compact` names each number with a glyph.
+    private func usage(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let host = agents.host, let stats = agents.hostStats {
+                HostUsage(name: host.name, stats: stats, path: agents.hostPath, compact: compact)
+                    .transition(.opacity)
+            }
+            ClaudeUsageToolbar(organization: agents.organizationID)
+        }
+        .transition(.opacity)
+    }
+
     private var notice: String? {
         agents.agents(in: worktree.path).isEmpty ? agents.notice : nil
     }
@@ -95,8 +109,8 @@ struct WorktreeCanvas: View {
     private var isEmpty: Bool {
         agents.isLoaded && agents.agents(in: worktree.path).isEmpty && agents.postIts(in: worktree.path).isEmpty
             && agents.images(in: worktree.path).isEmpty
-            && browsers.browsers(in: worktree.path).isEmpty
-            && fileTrees.trees(in: worktree.path).isEmpty
+            && browsers.browsers(in: worktree.path, on: worktree.host).isEmpty
+            && fileTrees.trees(in: worktree.path, on: worktree.host).isEmpty
     }
 }
 
@@ -241,7 +255,7 @@ private struct NavigationToolbar: View {
             .accessibilityLabel(L("Caffeinate"))
             .accessibilityValue(caffeinate.isOn ? L("On") : L("Off"))
         }
-        .font(.callout.weight(.medium))
+        .font(Theme.Font.label)
         .padding(4)
         .modifier(GlassCapsule())
     }
@@ -353,6 +367,57 @@ private struct AppUsage: View {
     }
 }
 
+/// What the worktree's host is using (CPU, memory, disk), above the agent usage, as its core
+/// reports it every couple of seconds.
+private struct HostUsage: View {
+    let name: String
+    let stats: HostStats
+    var path: HostChannel.Path?
+    var compact = false
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Label(name, systemImage: "server.rack")
+                .foregroundStyle(Theme.ink)
+                .lineLimit(1)
+                .padding(.leading, 8)
+                .padding(.trailing, 4)
+                .help(path.map(\.note) ?? "")
+            item(L("CPU"), "cpu", stats.cpu.formatted(.percent.precision(.fractionLength(0))), isHigh: stats.cpu > 0.9,
+                 help: L("Of every processor on \(name) together."))
+            item(L("Memory"), "memorychip", Self.used(stats.memoryUsed, of: stats.memoryTotal), isHigh: stats.memoryUsed > stats.memoryTotal / 10 * 9,
+                 help: L("Memory in use on \(name), of what it has."))
+            item(L("Disk"), "internaldrive", Self.used(stats.diskUsed, of: stats.diskTotal), isHigh: stats.diskUsed > stats.diskTotal / 10 * 9,
+                 help: L("Disk in use on \(name), of the volume its home folder is on."))
+        }
+        .font(Theme.Font.label)
+        .padding(4)
+        .modifier(GlassCapsule())
+        .accessibilityElement(children: .combine)
+    }
+
+    private func item(_ title: String, _ symbol: String, _ value: String, isHigh: Bool, help: String) -> some View {
+        HStack(spacing: 6) {
+            // Narrower, a glyph still tells memory from disk.
+            if compact { Image(systemName: symbol).foregroundStyle(Theme.inkMuted).accessibilityHidden(true) } else { Text(title).foregroundStyle(Theme.inkMuted) }
+            Text(value)
+                .monospacedDigit()
+                .foregroundStyle(isHigh ? Theme.danger : Theme.ink)
+                .accessibilityLabel("\(title) \(value)")
+                .contentTransition(.numericText())
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .help(help)
+    }
+
+    /// "3.1 / 8 GB".
+    private static func used(_ used: UInt64, of total: UInt64) -> String {
+        let gigabytes = { (bytes: UInt64, digits: Int) in (Double(bytes) / 1_073_741_824).formatted(.number.precision(.fractionLength(digits))) }
+        return "\(gigabytes(used, 1)) / \(gigabytes(total, 0)) GB"
+    }
+}
+
 /// What is left of the Claude plan's 5-hour session and week, and when each resets, floating
 /// at the bottom-left corner. Refreshed every minute.
 private struct ClaudeUsageToolbar: View {
@@ -375,7 +440,7 @@ private struct ClaudeUsageToolbar: View {
                     }
                     item(L("Week"), usage.week, help: L("Left of this week's limit across every model."), relative: false)
                 }
-                .font(.callout.weight(.medium))
+                .font(Theme.Font.label)
                 .padding(4)
                 .modifier(GlassCapsule())
                 .transition(.opacity)
@@ -399,15 +464,15 @@ private struct ClaudeUsageToolbar: View {
     private func item(_ title: String, _ window: ClaudeUsage.Window?, help: String, relative: Bool) -> some View {
         let remaining = window?.remaining ?? 100
         return HStack(spacing: 6) {
-            Text(title).foregroundStyle(.black.opacity(0.5))
+            Text(title).foregroundStyle(Theme.inkMuted)
             Text(remaining / 100, format: .percent.precision(.fractionLength(0)))
                 .monospacedDigit()
-                .foregroundStyle(remaining < 20 ? Theme.danger : .black.opacity(0.85))
+                .foregroundStyle(remaining < 20 ? Theme.danger : Theme.ink)
                 .contentTransition(.numericText())
             if let reset = window?.resetsAt {
                 Text(resetText(reset, relative: relative))
                     .monospacedDigit()
-                    .foregroundStyle(.black.opacity(0.5))
+                    .foregroundStyle(Theme.inkMuted)
             }
         }
         .padding(.horizontal, 8)

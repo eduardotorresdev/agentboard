@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agentboard-account",
+  "main": "src/index.ts",
+  // The host installer and binaries (`core/release` fills the folder).
+  "assets": { "directory": "public" },
+  "compatibility_date": "2026-08-01",
+  "vars": { "GITHUB_CLIENT_ID": "Ov23li5h6hjIu97YVJxT" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "agentboard-account",
+      "database_id": "e7d2bb6b-fe89-4890-b77d-6bf05f00c530",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "HostRelay" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HostRelay"] }]
+}

@@ -1,0 +1,10 @@
+[package]
+name = "agentboard"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+runtime = { path = "../runtime" }
+orchestration = { path = "../orchestration" }
+host = { path = "../host" }
+libc.workspace = true

@@ -1,10 +1,13 @@
+import CryptoKit
 import Foundation
 
 struct Worktree: Identifiable, Hashable {
-    var id: String { path }
+    var id: String { host.map { "\($0.uuidString):\(path)" } ?? path }
     let path: String
     /// Short branch name, or nil when the worktree is on a detached HEAD.
     let branch: String?
+    /// The host it lives on (see docs/hosts.md), where `path` is; nil is this Mac.
+    var host: UUID?
 
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
 }
@@ -14,7 +17,124 @@ struct GitError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+/// Another host git runs on, through its core (see `Git.host` and docs/hosts.md).
+struct GitHost: Sendable {
+    let name: String
+    /// The home folder of the host's user.
+    let home: String
+    /// Runs a program on the host and waits for it; nil when the host can't be reached. It
+    /// blocks: never call it on the main thread.
+    let run: @Sendable (_ executable: String, _ arguments: [String]) -> (status: Int32, output: Data, error: Data)?
+
+    /// The clones `clone(of:)` found, by repository.
+    private let clones = Clones()
+
+    private final class Clones: @unchecked Sendable {
+        let lock = NSLock()
+        var found: [String: String] = [:]
+    }
+
+    init(name: String, home: String, run: @escaping @Sendable (_ executable: String, _ arguments: [String]) -> (status: Int32, output: Data, error: Data)?) {
+        self.name = name
+        self.home = home
+        self.run = run
+    }
+
+    /// Where the host keeps its clone of the project that is at `repository` on this Mac: a
+    /// folder named as the project's. When that folder holds something else (a project of the
+    /// same name from another origin), one with a short hash of this origin after the name.
+    /// It asks the host, once: never call it on the main thread.
+    func clone(of repository: String) -> String {
+        if let found = clones.lock.withLock({ clones.found[repository] }) { return found }
+        let usual = usualClone(of: repository)
+        // Read here, whatever host git is routed to.
+        guard let origin = Git.$host.withValue(nil, operation: { Git.originURL(of: repository) }) else { return usual }
+        let other = usual + "-" + Git.shortHash(of: Git.normalized(origin))
+        // Per folder: "missing", or its origin (nothing when it isn't a clone).
+        let script = #"for c in "$1" "$2"; do if [ -e "$c" ]; then git -C "$c" remote get-url origin 2>/dev/null || echo; else echo missing; fi; done"#
+        guard let ran = run("sh", ["-c", script, "sh", usual, other]) else { return usual }
+        let origins = String(decoding: ran.output, as: UTF8.self).components(separatedBy: "\n")
+        guard origins.count >= 2 else { return usual }
+        let same = { (index: Int) in origins[index] != "missing" && Git.normalized(origins[index]) == Git.normalized(origin) }
+        let clone = same(0) ? usual : same(1) ? other : origins[0] == "missing" ? usual : other
+        clones.lock.withLock { clones.found[repository] = clone }
+        return clone
+    }
+
+    /// `clone(of:)` without asking the host: what it last found, else the usual folder.
+    func knownClone(of repository: String) -> String {
+        clones.lock.withLock { clones.found[repository] } ?? usualClone(of: repository)
+    }
+
+    private func usualClone(of repository: String) -> String {
+        home + "/agentboard/projects/" + URL(fileURLWithPath: repository).lastPathComponent
+    }
+
+    /// What the program printed; throws what it said when it failed.
+    @discardableResult
+    func output(_ executable: String, _ arguments: [String]) throws -> String {
+        guard let ran = run(executable, arguments) else { throw GitError(message: L("Couldn't reach \(name). It may be offline.")) }
+        guard ran.status == 0 else {
+            let message = String(decoding: ran.error, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            // What git says when the host has no way to sign in to the repository's server.
+            if ["Permission denied (publickey", "could not read Username", "Host key verification failed"].contains(where: message.contains) {
+                throw GitError(message: L("\(name) can't sign in to this repository's server. Set up git credentials on that host (an SSH key or a credential helper), then try again.") + "\n" + message)
+            }
+            throw GitError(message: message.isEmpty ? "\((executable as NSString).lastPathComponent) \(arguments.joined(separator: " ")) failed." : message)
+        }
+        return String(decoding: ran.output, as: UTF8.self)
+    }
+}
+
 enum Git {
+    /// Set for the task that is to run git on another host instead of this Mac: every call
+    /// below then goes there, with paths that are the host's.
+    @TaskLocal static var host: GitHost?
+
+    /// Whether `path` exists where git runs.
+    static func exists(_ path: String) -> Bool {
+        guard let host else { return FileManager.default.fileExists(atPath: path) }
+        return (try? host.output("sh", ["-c", "test -e \"$1\"", "sh", path])) != nil
+    }
+
+    /// Brings the worktree's branch up to its upstream, when that only moves it forward; throws
+    /// what git said otherwise.
+    static func pull(at path: String) throws {
+        try run(["-C", path, "pull", "--ff-only"])
+    }
+
+    /// A repository URL as one text for every way of writing it: `git@host:path`, `ssh://` and
+    /// `https://` forms of the same host and path, with or without `.git` or a last slash.
+    static func normalized(_ url: String) -> String {
+        var text = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let scheme = text.range(of: "://") {
+            text = String(text[scheme.upperBound...])
+        } else if let colon = text.firstIndex(of: ":"), !text[..<colon].contains("/") {
+            // scp-style: host:path.
+            text.replaceSubrange(colon...colon, with: "/")
+        } else {
+            // A folder: only the same path is the same repository.
+            return text.hasSuffix("/") ? String(text.dropLast()) : text
+        }
+        var parts = text.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard !parts.isEmpty else { return text }
+        // The host without who signs in or the port, in one case.
+        parts[0] = (parts[0].split(separator: "@").last.map(String.init) ?? parts[0]).split(separator: ":").first.map { $0.lowercased() } ?? parts[0]
+        let joined = parts.joined(separator: "/")
+        return joined.hasSuffix(".git") ? String(joined.dropLast(4)) : joined
+    }
+
+    /// Eight hex digits that stay the same for the same text.
+    static func shortHash(of text: String) -> String {
+        SHA256.hash(data: Data(text.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// The repository's `origin` URL; nil when it has none.
+    static func originURL(of repository: String) -> String? {
+        let url = (try? run(["-C", repository, "remote", "get-url", "origin"]))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return url?.isEmpty == false ? url : nil
+    }
+
     /// Worktrees of the repository at `path`, or nil if it isn't a git repository.
     static func worktrees(at path: String, cancellable: Bool = true) -> [Worktree]? {
         guard let output = try? run(["-C", path, "worktree", "list", "--porcelain"], cancellable: cancellable) else { return nil }
@@ -40,7 +160,7 @@ enum Git {
 
     /// Work in a worktree that removing it would lose: changed or untracked files, and commits
     /// no remote branch has.
-    struct PendingWork {
+    struct PendingWork: Sendable {
         let changedFiles: Int
         let unpushedCommits: Int
         var isEmpty: Bool { changedFiles == 0 && unpushedCommits == 0 }
@@ -66,7 +186,7 @@ enum Git {
     /// Removes the worktree at `path` from the repository at `repository`, deleting its folder.
     /// `force` discards its changed and untracked files.
     static func removeWorktree(at path: String, from repository: String, force: Bool) throws {
-        try run(["-C", repository, "worktree", "remove"] + (force ? ["--force"] : []) + [path])
+        try run(["-C", repository, "worktree", "remove"] + (force ? ["--force"] : []) + ["--", path])
     }
 
     /// Whether git accepts `name` as a branch name.
@@ -102,8 +222,11 @@ enum Git {
     }
 
     /// The commit HEAD is on; nil in a repository without commits (or when git can't say).
-    static func headCommit(in repository: String) -> String? {
-        (try? run(["-C", repository, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"]))?
+    static func headCommit(in repository: String) -> String? { commit("HEAD", in: repository) }
+
+    /// The commit `ref` points at; nil when there is none.
+    static func commit(_ ref: String, in repository: String) -> String? {
+        (try? run(["-C", repository, "rev-parse", "--verify", "--quiet", "\(ref)^{commit}"]))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -145,7 +268,11 @@ enum Git {
         defer { lock.unlock() }
 
         let location = worktreeLocation(for: branch, in: repository)
-        try FileManager.default.createDirectory(at: location.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let host {
+            try host.output("sh", ["-c", "mkdir -p \"$1\"", "sh", location.deletingLastPathComponent().path])
+        } else {
+            try FileManager.default.createDirectory(at: location.deletingLastPathComponent(), withIntermediateDirectories: true)
+        }
         let start = given ?? worktreeStart(for: branch, in: repository)
         let resolved = location.resolvingSymlinksInPath().path
         func isRegistered() -> Bool? {
@@ -170,27 +297,37 @@ enum Git {
                 try makeBranch(at: try run(["-C", repository, "rev-parse", "--verify", "refs/remotes/\(remote)^{commit}"])
                     .trimmingCharacters(in: .whitespacesAndNewlines))
                 _ = try? run(["-C", repository, "branch", "--set-upstream-to=\(remote)", branch])
-            case .newBranch:
-                guard let head = headCommit(in: repository) else {
-                    throw GitError(message: L("The repository has no commits yet. Make a first commit, then add worktrees."))
+            case .newBranch(let base):
+                guard host != nil else {
+                    guard let head = headCommit(in: repository) else {
+                        throw GitError(message: L("The repository has no commits yet. Make a first commit, then add worktrees."))
+                    }
+                    try makeBranch(at: head)
+                    break
                 }
-                try makeBranch(at: head)
+                // The host's clone is never pulled: the branch starts from what origin has.
+                guard let start = base.flatMap({ commit("refs/remotes/origin/\($0)", in: repository) })
+                    ?? commit("refs/remotes/origin/HEAD", in: repository) else {
+                    throw GitError(message: L("origin has no branch to start \(branch) from. Push one, then try again."))
+                }
+                try makeBranch(at: start)
             }
-            try run(["-C", repository, "worktree", "add", location.path, branch])
+            try run(["-C", repository, "worktree", "add", "--", location.path, branch])
             return CreatedWorktree(path: location.path, warning: nil)
         } catch {
             let message = (error as? GitError)?.message ?? error.localizedDescription
             let cancelled = error is CancellationError
             let madeHere = !registeredBefore && isRegistered() == true
-            if madeHere && !cancelled && FileManager.default.fileExists(atPath: location.appendingPathComponent(".git").path) {
+            if madeHere && !cancelled && exists(location.appendingPathComponent(".git").path) {
                 return CreatedWorktree(path: location.path, warning: message)
             }
             var leftovers: [String] = []
             if madeHere, (try? run(["-C", repository, "worktree", "remove", location.path], cancellable: false)) == nil {
                 leftovers.append(location.path)
-            } else if !madeHere, !registeredBefore, FileManager.default.fileExists(atPath: location.path) {
+            } else if !madeHere, !registeredBefore, exists(location.path) {
                 // rmdir only removes an empty folder: anyone's files in it stay.
-                if rmdir(location.path) != 0 { leftovers.append(location.path) }
+                let removed = host.map { (try? $0.output("sh", ["-c", "rmdir \"$1\"", "sh", location.path])) != nil } ?? (rmdir(location.path) == 0)
+                if !removed { leftovers.append(location.path) }
             }
             // Only a branch this call created, and only if nothing has moved it since.
             if let madeBranch {
@@ -201,6 +338,34 @@ enum Git {
             }
             guard !leftovers.isEmpty, !cancelled else { throw error }
             throw GitError(message: message + "\n" + L("Left in place: \(leftovers.joined(separator: ", ")).") )
+        }
+    }
+
+    /// `createWorktree` on another host: in its clone of the repository, made from `origin` on
+    /// first use and fetched after that. The branch is the one the host has (its own, or
+    /// origin's); a new one starts where it would here, as origin has it. Call it without
+    /// `Git.host` set: the repository is read on this Mac.
+    static func createWorktree(branch: String, in repository: String, on host: GitHost) throws -> CreatedWorktree {
+        guard let origin = originURL(of: repository) else {
+            throw GitError(message: L("This project has no origin remote, so its worktrees can only be on this Mac."))
+        }
+        let local = worktreeStart(for: branch, in: repository)
+        return try $host.withValue(host) {
+            let clone = host.clone(of: repository)
+            if exists(clone + "/.git") {
+                try run(["-C", clone, "fetch", "origin"])
+            } else {
+                try host.output("sh", ["-c", "mkdir -p \"$1\"", "sh", (clone as NSString).deletingLastPathComponent])
+                try run(["clone", "--", origin, clone])
+            }
+            var start = worktreeStart(for: branch, in: clone)
+            if case .newBranch = start {
+                guard case .newBranch(let base) = local else {
+                    throw GitError(message: L("The branch \(branch) isn't on origin. Push it, then try again."))
+                }
+                start = .newBranch(from: base)
+            }
+            return try createWorktree(branch: branch, in: clone, start: start)
         }
     }
 
@@ -250,7 +415,7 @@ enum Git {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.environment = environment
-        process.arguments = ["clone", "--progress", url, directory.path]
+        process.arguments = ["clone", "--progress", "--", url, directory.path]
         let errors = Pipe()
         process.standardError = errors
         process.standardOutput = Pipe()
@@ -314,6 +479,8 @@ enum Git {
     @discardableResult
     private static func run(_ arguments: [String], cancellable: Bool = true, timeout: TimeInterval = 600) throws -> String {
         if cancellable && Task.isCancelled { throw CancellationError() }
+        // By name: a host's git may be anywhere in its PATH (~/.local/bin).
+        if let host { return try host.output("git", arguments) }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.environment = environment

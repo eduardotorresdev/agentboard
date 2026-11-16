@@ -1,0 +1,21 @@
+{
+  "toolResult" : {
+    "call" : "00000009-ABCD-4EF0-8A1B-000000000009",
+    "result" : {
+      "isError" : false,
+      "items" : [
+        {
+          "text" : {
+            "_0" : "Opened “page”"
+          }
+        },
+        {
+          "image" : {
+            "_0" : "AAEC+v8=",
+            "mimeType" : "image\/png"
+          }
+        }
+      ]
+    }
+  }
+}
