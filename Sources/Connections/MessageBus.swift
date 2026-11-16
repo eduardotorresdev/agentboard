@@ -11,6 +11,7 @@ public struct ElementKind: RawRepresentable, Hashable, Sendable {
     public static let postIt = ElementKind(rawValue: "postit")
     public static let fileTree = ElementKind(rawValue: "filetree")
     public static let image = ElementKind(rawValue: "image")
+    public static let video = ElementKind(rawValue: "video")
 }
 
 /// Anything on the board a line can reach: an agent's terminal, a browser, a post-it and more.
@@ -22,10 +23,14 @@ public protocol BoardElement: AnyObject {
     var kind: ElementKind { get }
     /// One short line peers see next to the name (a browser's device, …), or nil.
     var detail: String? { get }
+    /// The board (canvas) it sits on, so `elements(onBoardOf:)` lists only its neighbours; nil
+    /// when the element doesn't say, which puts it on every board.
+    var board: String? { get }
 }
 
 public extension BoardElement {
     var detail: String? { nil }
+    var board: String? { nil }
 }
 
 /// An element that takes messages, such as an agent typing them in as a prompt.
@@ -129,6 +134,15 @@ public final class MessageBus {
     /// The registered elements connected to `id`, in connection order.
     public func peers(of id: UUID) -> [any BoardElement] {
         graph.peers(of: id).compactMap { elements[$0] }
+    }
+
+    /// Every registered element on the same board as `id`, connected or not, itself included,
+    /// ordered by kind then name.
+    public func elements(onBoardOf id: UUID) -> [any BoardElement] {
+        let board = elements[id]?.board
+        return elements.values
+            .filter { board == nil || $0.board == nil || $0.board == board }
+            .sorted { ($0.kind.rawValue, $0.name.lowercased()) < ($1.kind.rawValue, $1.name.lowercased()) }
     }
 
     /// The connected elements of `kind`, e.g. the browsers a caller may drive.

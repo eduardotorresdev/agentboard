@@ -14,8 +14,10 @@ public final class MessagingTools: ToolProvider {
         let name = bus.element(caller)?.name ?? "an agent"
         return """
             You are \(name), one of several coding agents on the user's board. The user connects agents (and other \
-            elements) by drawing lines between them; you can message the agents connected to you. Use list_peers to see \
-            who they are and send_message to write to one. Messages from them arrive in your prompt starting with \
+            elements) by drawing lines between them; you can message the agents connected to you. list_peers lists \
+            everything on the board with its type, id and whether it is connected to you; send_message writes to a \
+            connected agent. The user may mention board elements as @[Name](type:id); that id is the one list_peers \
+            shows and the board tools accept in place of a name. Messages from them arrive in your prompt starting with \
             “Message from <name>”. Reply with send_message when the sender needs an answer or the result of a task they \
             gave you; don't reply only to acknowledge or thank, so conversations end on their own.
             """
@@ -25,14 +27,14 @@ public final class MessagingTools: ToolProvider {
         [
             ToolDefinition(
                 name: "list_peers",
-                description: "Lists the elements connected to you on the board (agents and others). Only connected agents can receive your messages."),
+                description: "Lists every element on your board (agents, runners, post-its, images, browsers, file trees…) with its type, id and whether it is connected to you. Only connected agents can receive your messages, and the element tools only reach connected elements."),
             ToolDefinition(
                 name: "send_message",
                 description: "Sends a message to a connected agent. It arrives in their terminal as a prompt from you; their reply, if any, arrives in yours the same way.",
                 inputSchema: [
                     "type": "object",
                     "properties": [
-                        "to": ["type": "string", "description": "Name of the connected agent, as list_peers shows it."],
+                        "to": ["type": "string", "description": "Name or id of the connected agent, as list_peers shows it."],
                         "message": ["type": "string", "description": "What to tell them. Self-contained: they don't see your conversation."],
                     ],
                     "required": ["to", "message"],
@@ -58,17 +60,23 @@ public final class MessagingTools: ToolProvider {
     }
 
     private func peerList(for caller: UUID) -> String {
-        let me = bus.element(caller)?.name ?? "an agent"
-        let peers = bus.peers(of: caller)
-        guard !peers.isEmpty else {
-            return "You are \(me). Nothing is connected to you yet; the user connects elements by drawing lines between them on the board."
+        Self.listing(of: bus.elements(onBoardOf: caller), connected: Set(bus.peers(of: caller).map(\.id)), caller: caller)
+    }
+
+    /// One line per element: name, then type, id, whether it is connected to `caller`, and detail.
+    static func listing(of elements: [any BoardElement], connected: Set<UUID>, caller: UUID) -> String {
+        let me = elements.first { $0.id == caller }?.name ?? "an agent"
+        let others = elements.filter { $0.id != caller }
+        guard !others.isEmpty else { return "You are \(me). Nothing else is on the board yet." }
+        let lines = others.map { element in
+            var notes = [element.kind.rawValue, "id: \(element.id.uuidString)", "connected: \(connected.contains(element.id))"]
+            if let detail = element.detail { notes.append(detail) }
+            if let reason = (element as? any MessageEndpoint)?.unavailableReason { notes.append("unavailable: \(reason)") }
+            return "- \(element.name) (\(notes.joined(separator: ", ")))"
         }
-        let lines = peers.map { peer in
-            var notes = [peer.kind.rawValue]
-            if let detail = peer.detail { notes.append(detail) }
-            if let reason = (peer as? any MessageEndpoint)?.unavailableReason { notes.append("unavailable: \(reason)") }
-            return "- \(peer.name) (\(notes.joined(separator: ", ")))"
-        }
-        return "You are \(me). Connected:\n" + lines.joined(separator: "\n")
+        let header = connected.isEmpty
+            ? "You are \(me). Nothing is connected to you yet; the user connects elements by drawing lines between them on the board."
+            : "You are \(me)."
+        return header + " On the board:\n" + lines.joined(separator: "\n")
     }
 }

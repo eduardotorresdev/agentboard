@@ -373,3 +373,29 @@ struct RopeTests {
         #expect(rope.points.contains { $0.y > 140 })
     }
 }
+
+@MainActor
+struct BoardListingTests {
+    /// list_peers shows the whole board, flagged by connection, and leaves other boards out.
+    @Test func listsEveryElementOnTheBoardWithConnectedFlag() async {
+        final class Note: BoardElement {
+            let id = UUID()
+            let name: String
+            let kind = ElementKind.postIt
+            let board: String?
+            init(_ name: String, board: String) { self.name = name; self.board = board }
+        }
+        let bus = MessageBus()
+        let (me, near, far, elsewhere) = (Note("Me", board: "w1"), Note("Near", board: "w1"), Note("Far", board: "w1"),
+                                          Note("Elsewhere", board: "w2"))
+        [me, near, far, elsewhere].forEach(bus.register)
+        bus.connect(me.id, near.id)
+        #expect(bus.elements(onBoardOf: me.id).map(\.name) == ["Far", "Me", "Near"])
+
+        let result = await MessagingTools(bus: bus).call("list_peers", arguments: [:], caller: me.id)
+        guard case .text(let text) = result.content.first else { Issue.record("no text"); return }
+        #expect(text.contains("- Near (postit, id: \(near.id.uuidString), connected: true"))
+        #expect(text.contains("- Far (postit, id: \(far.id.uuidString), connected: false"))
+        #expect(!text.contains("Elsewhere") && !text.contains("- Me "))
+    }
+}
