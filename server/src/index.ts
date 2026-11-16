@@ -17,6 +17,9 @@ const MAX_MANIFEST = 1_500_000;
 const MAX_VAULT = 512 * 1024 * 1024;
 const MAX_MANIFEST_CHUNKS = 20_000;
 const MAX_HAVE = 5000;
+const MAX_BATCH = 8 * 1024 * 1024; // bytes of framed chunks in one request or reply
+const MAX_BATCH_GET = 200;
+const FRAME_HEAD = 68; // id (64 ASCII hex) then the length (u32 big-endian)
 const BINDS = 99; // D1 takes at most 100 bound values a statement; one goes to the account
 
 interface Account {
@@ -84,7 +87,7 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   // Any session of the account reads the vault, a host's included; only a board's writes it.
   if (path === "/v1/vault" || path.startsWith("/v1/vault/")) {
-    if (request.method === "PUT" && hostSession) return fail(403, "wrong_session");
+    if ((request.method === "PUT" || call === "POST /v1/vault/chunks") && hostSession) return fail(403, "wrong_session");
     return vault(request, env, account.id, path);
   }
 
@@ -178,6 +181,9 @@ async function vault(request: Request, env: Env, account: number, path: string):
     return json({ missing: unique.filter((id) => !have.has(id)) });
   }
 
+  if (call === "POST /v1/vault/chunks") return putChunks(request, env, account);
+  if (call === "POST /v1/vault/chunks/get") return getChunks(request, env, account);
+
   const id = VAULT_CHUNK_PATH.exec(path)?.[1];
   if (id === undefined) return fail(404, "not_found");
   if (!CHUNK_ID.test(id)) return fail(400, "invalid_id");
@@ -201,6 +207,78 @@ async function vault(request: Request, env: Env, account: number, path: string):
     .bind(account, id, data.length, data)
     .run();
   return json({});
+}
+
+/** Many chunks in one request: `id ‖ length ‖ sealed bytes`, repeated, stored in one batch. */
+async function putChunks(request: Request, env: Env, account: number): Promise<Response> {
+  if (Number(request.headers.get("Content-Length") ?? 0) > MAX_BATCH) return fail(413, "too_large");
+  const body = new Uint8Array(await request.arrayBuffer());
+  if (body.length > MAX_BATCH) return fail(413, "too_large");
+  const chunks = new Map<string, Uint8Array>();
+  for (let at = 0; at < body.length; ) {
+    if (body.length - at < FRAME_HEAD) return fail(400, "invalid_chunks");
+    const id = new TextDecoder().decode(body.subarray(at, at + 64));
+    if (!CHUNK_ID.test(id)) return fail(400, "invalid_id");
+    const length = new DataView(body.buffer, body.byteOffset + at + 64, 4).getUint32(0);
+    if (length > MAX_CHUNK) return fail(413, "too_large");
+    if (!length || body.length - at - FRAME_HEAD < length) return fail(400, "invalid_chunks");
+    chunks.set(id, body.subarray(at + FRAME_HEAD, at + FRAME_HEAD + length));
+    at += FRAME_HEAD + length;
+  }
+  if (!chunks.size) return fail(400, "invalid_chunks");
+  // Ids sent again replace themselves, so they don't count against the room they need.
+  const ids = JSON.stringify([...chunks.keys()]);
+  const used = await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM vault_chunks WHERE account_id = ? AND id NOT IN (SELECT value FROM json_each(?))")
+    .bind(account, ids)
+    .first<{ n: number }>();
+  const adding = [...chunks.values()].reduce((sum, data) => sum + data.length, 0);
+  if (used!.n + adding > MAX_VAULT) return fail(413, "vault_full");
+  await env.DB.batch(
+    [...chunks].map(([id, data]) =>
+      env.DB.prepare(
+        "INSERT INTO vault_chunks (account_id, id, size, data) VALUES (?, ?, ?, ?) ON CONFLICT(account_id, id) DO UPDATE SET size = excluded.size, data = excluded.data",
+      ).bind(account, id, data.length, data),
+    ),
+  );
+  return json({});
+}
+
+/** The chunks asked for that the account holds, framed as `putChunks` takes them, in the order
+ * asked, stopping before 8 MiB: the caller asks again for the rest. */
+async function getChunks(request: Request, env: Env, account: number): Promise<Response> {
+  const ids = (await readJSON(request))?.ids;
+  if (!Array.isArray(ids) || ids.length > MAX_BATCH_GET || !ids.every((id) => typeof id === "string" && CHUNK_ID.test(id))) return fail(400, "invalid_ids");
+  const wanted = [...new Set(ids as string[])];
+  // Sizes first: only what fits is read.
+  const { results: sizes } = await env.DB.prepare("SELECT id, size FROM vault_chunks WHERE account_id = ? AND id IN (SELECT value FROM json_each(?))")
+    .bind(account, JSON.stringify(wanted))
+    .all<{ id: string; size: number }>();
+  const sizeOf = new Map(sizes.map((row) => [row.id, row.size]));
+  const taken: string[] = [];
+  let total = 0;
+  for (const id of wanted) {
+    const size = sizeOf.get(id);
+    if (size === undefined) continue;
+    if (total + FRAME_HEAD + size > MAX_BATCH) break;
+    taken.push(id);
+    total += FRAME_HEAD + size;
+  }
+  const { results } = taken.length
+    ? await env.DB.prepare("SELECT id, data FROM vault_chunks WHERE account_id = ? AND id IN (SELECT value FROM json_each(?))")
+        .bind(account, JSON.stringify(taken))
+        .all<{ id: string; data: ArrayBuffer | number[] }>()
+    : { results: [] };
+  const dataOf = new Map(results.map((row) => [row.id, new Uint8Array(row.data)]));
+  const reply = new Uint8Array(total);
+  let at = 0;
+  for (const id of taken) {
+    const data = dataOf.get(id)!;
+    reply.set(new TextEncoder().encode(id), at);
+    new DataView(reply.buffer).setUint32(at + 64, data.length);
+    reply.set(data, at + FRAME_HEAD);
+    at += FRAME_HEAD + data.length;
+  }
+  return new Response(reply.subarray(0, at), { headers: { "Content-Type": "application/octet-stream" } });
 }
 
 const inBatches = (ids: string[]) => Array.from({ length: Math.ceil(ids.length / BINDS) }, (_, i) => ids.slice(i * BINDS, (i + 1) * BINDS));

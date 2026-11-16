@@ -280,6 +280,20 @@ copying from a Mac to each host.
   HMAC-SHA256 keyed with the vault key itself (not the derived one) over `agentboard vault blob v1` ‖ its plain bytes: the same bytes always have
   the same id, and the id says nothing without the key. `core/fixtures/vault.json` pins this
   down with fixed keys and nonces.
+- **Small on the wire.** A chunk is compressed before it is sealed (sealed bytes can't be):
+  what is sealed is one byte saying how — `0` as it is, `1` zlib (RFC 1950) — then the bytes;
+  a writer keeps `0` when compressing doesn't make it smaller. The id is still of the plain
+  bytes. The manifest is sealed the same way. Chunks travel many per request:
+  `POST /v1/vault/chunks` with a body of `id (64 hex bytes) ‖ length (4 bytes, big-endian) ‖
+  sealed bytes`, repeated, 8 MiB at most → `{}`; `POST /v1/vault/chunks/get` `{ids:[…]}` (200
+  at most) → the same framing back, in the order asked (an id asked twice comes once),
+  leaving out ids it lacks and stopping before 8 MiB (ask again for the rest). The id is the
+  chunk's 64 lowercase hex characters as ASCII; the length is of the sealed bytes, each at most
+  1,100,000 (413 `too_large`, as is a body over 8 MiB; a cut frame is 400 `invalid_chunks`, a bad
+  id 400 `invalid_id`). One request's chunks are stored together or not at all, within the 512
+  MiB; a host's session gets 403 `wrong_session` on the `POST /v1/vault/chunks`. A host opens a
+  chunk to at most 1,000,000 bytes and a manifest to at most 16 MiB: anything that inflates
+  further, or another first byte, doesn't open.
 - **The manifest** (sealed JSON): `{"files":[{"path", "mode", "size", "chunks":[id…]}],
   "mcp":{name: entry}, "pins":{tool: text}, "github":{"user","token"}?, "git":{"name",
   "email"}?, "updated": <Unix seconds>, "by": "<board fingerprint>"}`. `path` is relative to

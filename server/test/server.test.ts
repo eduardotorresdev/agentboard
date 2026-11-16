@@ -694,3 +694,67 @@ it("deletes nothing for a write that loses the race, even at the version the win
   expect(await putVault(token, 0, btoa("late"), [kept])).toEqual([409, { error: "stale" }]);
   expect(await have(token, [kept, extra])).toEqual({ missing: [] });
 });
+
+const framed = (chunks: [string, Uint8Array][]) => {
+  const parts = chunks.flatMap(([id, data]) => {
+    const length = new Uint8Array(4);
+    new DataView(length.buffer).setUint32(0, data.length);
+    return [new TextEncoder().encode(id), length, data];
+  });
+  const body = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  parts.reduce((at, part) => (body.set(part, at), at + part.length), 0);
+  return body;
+};
+const unframed = (body: Uint8Array) => {
+  const chunks: [string, number[]][] = [];
+  for (let at = 0; at < body.length; ) {
+    const length = new DataView(body.buffer, body.byteOffset + at + 64, 4).getUint32(0);
+    chunks.push([new TextDecoder().decode(body.subarray(at, at + 64)), [...body.subarray(at + 68, at + 68 + length)]]);
+    at += 68 + length;
+  }
+  return chunks;
+};
+const putChunks = (token: string, body: Uint8Array) =>
+  exports.default.fetch(new Request(`${ORIGIN}/v1/vault/chunks`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body }));
+const getChunks = async (token: string, ids: string[]) => {
+  const response = await call("POST", "/v1/vault/chunks/get", { token, body: { ids } });
+  return unframed(new Uint8Array(await response.arrayBuffer()));
+};
+
+it("stores and hands out many chunks per request, in the order asked", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const { hostToken } = await register(account, "owner");
+  const [a, b, c] = [chunkId(1), chunkId(2), chunkId(3)];
+  expect((await putChunks(token, framed([[a, new Uint8Array([1, 2])], [b, new Uint8Array([3])]]))).status).toBe(200);
+  expect(await have(token, [a, b, c])).toEqual({ missing: [c] });
+  // A host reads the batch, unknown ids left out, but can't write one.
+  expect(await getChunks(hostToken, [b, c, a])).toEqual([[b, [3]], [a, [1, 2]]]);
+  expect(await refusal(await putChunks(hostToken, framed([[c, new Uint8Array([4])]])))).toEqual(WRONG_SESSION);
+  expect(await have(token, [c])).toEqual({ missing: [c] });
+  // Another account gets none of them.
+  expect(await getChunks(await signIn(account + 1, "other"), [a, b])).toEqual([]);
+});
+
+it("holds batches of chunks to their limits", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  expect(await refusal(await putChunks(token, new Uint8Array(8 * 1024 * 1024 + 1)))).toEqual([413, { error: "too_large" }, null]);
+  expect(await refusal(await putChunks(token, framed([[chunkId(1), new Uint8Array(1_100_001)]])))).toEqual([413, { error: "too_large" }, null]);
+  const cut = framed([[chunkId(1), new Uint8Array(10)]]).subarray(0, 70);
+  expect((await putChunks(token, cut)).status).toBe(400);
+  expect((await putChunks(token, framed([["x".repeat(64), new Uint8Array(1)]]))).status).toBe(400);
+  expect((await call("POST", "/v1/vault/chunks/get", { token, body: { ids: Array(201).fill(chunkId(1)) } })).status).toBe(400);
+  expect(await have(token, [chunkId(1)])).toEqual({ missing: [chunkId(1)] });
+
+  // A reply stops before 8 MiB: eight chunks of 1,100,000 bytes come back seven, then the rest.
+  const ids = Array.from({ length: 8 }, (_, i) => chunkId(i + 10));
+  for (const id of ids) expect((await putChunk(token, id, new Uint8Array(1_100_000).fill(1))).status).toBe(200);
+  const first = await getChunks(token, ids);
+  expect(first.map(([id]) => id)).toEqual(ids.slice(0, 7));
+  expect((await getChunks(token, ids.slice(7))).map(([id]) => id)).toEqual(ids.slice(7));
+
+  // 512 MiB in all applies to a batch too.
+  await env.DB.prepare("UPDATE vault_chunks SET size = ? WHERE account_id = ? AND id = ?").bind(512 * 1024 * 1024 - 7 * 1_100_000, account, ids[0]).run();
+  expect(await refusal(await putChunks(token, framed([[chunkId(99), new Uint8Array(1)]])))).toEqual([413, { error: "vault_full" }, null]);
+});

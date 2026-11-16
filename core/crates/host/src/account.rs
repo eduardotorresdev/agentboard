@@ -57,9 +57,9 @@ impl Api {
         reply.map(|reply| reply.into_json().unwrap_or(Value::Null)).map_err(failed)
     }
 
-    /// A GET whose reply is bytes, at most `limit` of them.
-    pub fn bytes(&self, path: &str, token: &str, limit: u64) -> Result<Vec<u8>, Failed> {
-        let reply = self.agent.get(&format!("{}{path}", self.server)).set("Authorization", &format!("Bearer {token}")).call().map_err(failed)?;
+    /// A POST of `body` whose reply is bytes, at most `limit` of them.
+    pub fn post_bytes(&self, path: &str, token: &str, body: Value, limit: u64) -> Result<Vec<u8>, Failed> {
+        let reply = self.agent.post(&format!("{}{path}", self.server)).set("Authorization", &format!("Bearer {token}")).send_json(body).map_err(failed)?;
         crate::vault::read_limited(reply.into_reader(), limit).map_err(|error| Failed { status: 0, code: error.kind().to_string() })
     }
 

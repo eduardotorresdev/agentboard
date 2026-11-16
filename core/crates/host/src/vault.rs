@@ -1,7 +1,7 @@
 //! "The vault" in docs/hosts.md: what every host of the account should have, sealed so the
 //! server can't read it, applied to this host's home by `agentboard vault pull`.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -26,7 +26,11 @@ const BLOB: &[u8] = b"agentboard vault blob v1";
 /// The most plain bytes in one chunk.
 const CHUNK: usize = 1_000_000;
 /// The most sealed bytes the server keeps for one chunk.
-const SEALED_CHUNK: u64 = 1_100_000;
+/// The most one manifest may inflate to.
+const MANIFEST: usize = 16 * 1024 * 1024;
+/// How many chunks one `chunks/get` asks for, and the most bytes its reply may hold.
+const BATCH: usize = 200;
+const BATCH_REPLY: u64 = 8 * 1024 * 1024;
 const NONCE: usize = 12;
 pub const NO_KEY: &str = "No vault key here yet: a board this host trusts hands it over when it connects.";
 
@@ -45,10 +49,22 @@ fn seal_with(key: &[u8; 32], nonce: &[u8; NONCE], plain: &[u8]) -> Vec<u8> {
     [&nonce[..], &sealed].concat()
 }
 
-/// Its plain bytes, or None when it wasn't sealed under `key` or was altered.
-fn open(key: &[u8; 32], sealed: &[u8]) -> Option<Vec<u8>> {
+/// Its plain bytes, at most `limit` of them, or None when it wasn't sealed under `key`, was
+/// altered, or inflates past `limit` (a zlib bomb). What is sealed is one byte saying how the
+/// rest is packed: `0` as it is, `1` zlib.
+fn open(key: &[u8; 32], sealed: &[u8], limit: usize) -> Option<Vec<u8>> {
     let (nonce, rest) = sealed.split_at_checked(NONCE)?;
-    cipher(key).decrypt(nonce.into(), rest).ok()
+    let packed = Zeroizing::new(cipher(key).decrypt(nonce.into(), rest).ok()?);
+    let plain = match packed.split_first()? {
+        (0, plain) => plain.to_vec(),
+        (1, deflated) => {
+            let mut plain = Vec::new();
+            flate2::read::ZlibDecoder::new(deflated).take(limit as u64 + 1).read_to_end(&mut plain).ok()?;
+            plain
+        }
+        _ => return None,
+    };
+    (plain.len() <= limit).then_some(plain)
 }
 
 /// A chunk's id: lowercase hex HMAC-SHA256 under the vault key, so it says nothing without it.
@@ -248,14 +264,10 @@ fn write_file(home: &Path, entry: &Entry, key: &[u8; 32], api: &Api, token: &str
             return Ok(false);
         }
     }
+    let chunks = fetch_chunks(&entry.chunks, key, api, token).map_err(|error| format!("{}: {error}", entry.path))?;
     let mut plain = Zeroizing::new(Vec::new());
     for id in &entry.chunks {
-        let sealed = api.bytes(&format!("/v1/vault/chunks/{id}"), token, SEALED_CHUNK).map_err(|failed| format!("chunk of {}: {failed}", entry.path))?;
-        let chunk = Zeroizing::new(open(key, &sealed).ok_or_else(|| format!("a chunk of {} doesn't open with this host's key", entry.path))?);
-        if chunk_id(key, &chunk) != *id {
-            return Err(format!("a chunk of {} isn't the one it was named for", entry.path));
-        }
-        plain.extend_from_slice(&chunk);
+        plain.extend_from_slice(&chunks[id]);
     }
     if plain.len() as u64 != entry.size {
         return Err(format!("{} came out the wrong size", entry.path));
@@ -265,6 +277,39 @@ fn write_file(home: &Path, entry: &Entry, key: &[u8; 32], api: &Api, token: &str
     target(home, &entry.path)?;
     write_atomically(&path, &plain, mode)?;
     Ok(true)
+}
+
+/// The chunks named, opened and checked, many per request: a reply holds what fits in 8 MiB,
+/// so what didn't come is asked for again.
+fn fetch_chunks(ids: &[String], key: &[u8; 32], api: &Api, token: &str) -> Result<HashMap<String, Zeroizing<Vec<u8>>>, String> {
+    let mut chunks = HashMap::new();
+    loop {
+        let wanted: Vec<&String> = ids.iter().filter(|id| !chunks.contains_key(*id)).collect::<HashSet<_>>().into_iter().take(BATCH).collect();
+        if wanted.is_empty() {
+            return Ok(chunks);
+        }
+        let reply = api.post_bytes("/v1/vault/chunks/get", token, json!({ "ids": wanted }), BATCH_REPLY).map_err(|failed| failed.to_string())?;
+        let mut rest = &reply[..];
+        let before = chunks.len();
+        // Each one: id (64 ASCII hex) ‖ length (u32 big-endian) ‖ sealed bytes.
+        while !rest.is_empty() {
+            let (id, length, after) = rest.split_at_checked(68).map(|(head, after)| (&head[..64], u32::from_be_bytes(head[64..].try_into().unwrap()) as usize, after)).ok_or("the account server's chunks made no sense")?;
+            let (sealed, after) = after.split_at_checked(length).ok_or("the account server's chunks made no sense")?;
+            let id = String::from_utf8_lossy(id).into_owned();
+            if !wanted.contains(&&id) {
+                return Err("the account server sent a chunk that wasn't asked for".into());
+            }
+            let chunk = Zeroizing::new(open(key, sealed, CHUNK).ok_or("a chunk doesn't open with this host's key")?);
+            if chunk_id(key, &chunk) != id {
+                return Err("a chunk isn't the one it was named for".into());
+            }
+            chunks.insert(id, chunk);
+            rest = after;
+        }
+        if chunks.len() == before {
+            return Err("the account server lacks a chunk the vault names".into());
+        }
+    }
 }
 
 /// Removes a file an earlier version wrote, and the folders that leaves empty up to `.claude`.
@@ -376,7 +421,7 @@ pub fn pull(folder: &Path, home: &Path, host: &str, api: &Api, token: &str) -> R
     let nonsense = "the account server's vault made no sense";
     let version = vault["version"].as_u64().ok_or(nonsense)?;
     let sealed = STANDARD.decode(vault["manifest"].as_str().ok_or(nonsense)?).map_err(|_| nonsense)?;
-    let plain = Zeroizing::new(open(&key, &sealed).ok_or("the vault doesn't open with this host's key")?);
+    let plain = Zeroizing::new(open(&key, &sealed, MANIFEST).ok_or("the vault doesn't open with this host's key")?);
     let manifest: Manifest = serde_json::from_slice(&plain).map_err(|error| format!("the vault's manifest is not valid: {error}"))?;
 
     let path = search_path(home);
@@ -477,7 +522,6 @@ pub(crate) fn read_limited(reader: impl Read, limit: u64) -> std::io::Result<Vec
 mod tests {
     use super::*;
     use crate::test_support::{read_request, temporary};
-    use std::collections::HashMap;
     use std::net::TcpListener;
     use std::os::unix::fs::symlink;
     use std::sync::{Arc, Mutex};
@@ -489,12 +533,29 @@ mod tests {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
-    /// The account server's vault calls: answers by path, as often as asked; counts chunk fetches.
+    /// The sealed form of `plain`: zlib (level 6, flate2's default) or as it is.
+    fn pack(key: &[u8; 32], nonce: &[u8; NONCE], plain: &[u8], zlib: bool) -> Vec<u8> {
+        let packed = if zlib {
+            let mut encoder = flate2::write::ZlibEncoder::new(vec![1u8], flate2::Compression::default());
+            encoder.write_all(plain).unwrap();
+            encoder.finish().unwrap()
+        } else {
+            [&[0u8][..], plain].concat()
+        };
+        seal_with(key, nonce, &packed)
+    }
+
+    /// The account server's vault calls: the vault, and chunks many per request with replies
+    /// cut at `REPLY` bytes; counts the chunks handed out.
     struct Server {
         url: String,
         routes: Arc<Mutex<HashMap<String, (u16, Vec<u8>)>>>,
+        chunks: Arc<Mutex<HashMap<String, Vec<u8>>>>,
         fetched: Arc<Mutex<usize>>,
     }
+
+    /// Small, so one file of two chunks needs two replies.
+    const REPLY: usize = 1_000_000;
 
     impl Server {
         fn new() -> Server {
@@ -502,22 +563,34 @@ mod tests {
             let url = format!("http://{}", listener.local_addr().unwrap());
             let routes: Arc<Mutex<HashMap<String, (u16, Vec<u8>)>>> = Arc::default();
             let fetched = Arc::new(Mutex::new(0));
-            let (served, counted) = (routes.clone(), fetched.clone());
+            let chunks: Arc<Mutex<HashMap<String, Vec<u8>>>> = Arc::default();
+            let (served, counted, held) = (routes.clone(), fetched.clone(), chunks.clone());
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
                     let mut stream = stream.unwrap();
                     let request = read_request(&mut stream);
                     assert!(request.contains("Authorization: Bearer tok") || request.contains("authorization: Bearer tok"));
                     let path = request.split(' ').nth(1).unwrap().to_string();
-                    if path.contains("/chunks/") {
-                        *counted.lock().unwrap() += 1;
-                    }
-                    let (status, body) = served.lock().unwrap().get(&path).cloned().unwrap_or((404, br#"{"error":"not_found"}"#.to_vec()));
+                    let (status, body) = if path == "/v1/vault/chunks/get" {
+                        let asked: Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+                        let mut body = Vec::new();
+                        for id in asked["ids"].as_array().unwrap().iter().map(|id| id.as_str().unwrap()) {
+                            let Some(sealed) = held.lock().unwrap().get(id).cloned() else { continue };
+                            if !body.is_empty() && body.len() + 68 + sealed.len() > REPLY {
+                                break;
+                            }
+                            body.extend([id.as_bytes(), &(sealed.len() as u32).to_be_bytes(), &sealed].concat());
+                            *counted.lock().unwrap() += 1;
+                        }
+                        (200, body)
+                    } else {
+                        served.lock().unwrap().get(&path).cloned().unwrap_or((404, br#"{"error":"not_found"}"#.to_vec()))
+                    };
                     let head = format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
                     let _ = stream.write_all(&[head.as_bytes(), &body].concat());
                 }
             });
-            Server { url, routes, fetched }
+            Server { url, routes, chunks, fetched }
         }
 
         /// Puts `files` (path, mode, bytes) and the rest of a manifest in the vault at `version`.
@@ -525,16 +598,17 @@ mod tests {
             let mut routes = self.routes.lock().unwrap();
             let mut entries = Vec::new();
             for (path, mode, bytes) in files {
-                let chunks: Vec<String> = bytes.chunks(CHUNK).map(|chunk| {
+                // Compressed and not, by turns: a host takes both.
+                let chunks: Vec<String> = bytes.chunks(CHUNK).enumerate().map(|(at, chunk)| {
                     let id = chunk_id(key, chunk);
-                    routes.insert(format!("/v1/vault/chunks/{id}"), (200, seal_with(key, &[1; 12], chunk)));
+                    self.chunks.lock().unwrap().insert(id.clone(), pack(key, &[1; 12], chunk, at % 2 == 0));
                     id
                 }).collect();
                 entries.push(json!({ "path": path, "mode": mode, "size": bytes.len(), "chunks": chunks }));
             }
             let mut manifest = json!({ "files": entries, "updated": 1, "by": "test" });
             manifest.as_object_mut().unwrap().extend(rest.as_object().unwrap().clone());
-            let sealed = seal_with(key, &[2; 12], manifest.to_string().as_bytes());
+            let sealed = pack(key, &[2; 12], manifest.to_string().as_bytes(), true);
             routes.insert("/v1/vault".into(), (200, json!({ "version": version, "manifest": STANDARD.encode(sealed) }).to_string().into_bytes()));
         }
 
@@ -569,8 +643,12 @@ mod tests {
         );
         let mut sealing = [0u8; 32];
         Hkdf::<Sha256>::new(None, &key).expand(INFO, &mut sealing).unwrap();
-        let sealed_chunk = seal_with(&key, &chunk_nonce, chunk);
-        let sealed_manifest = seal_with(&key, &manifest_nonce, manifest.as_bytes());
+        let sealed_chunk = pack(&key, &chunk_nonce, chunk, false);
+        let sealed_manifest = pack(&key, &manifest_nonce, manifest.as_bytes(), false);
+        // Compressed (zlib level 6): the board needs only to open these, not to make the same bytes.
+        let repeated = chunk.repeat(8);
+        let zlib_chunk = pack(&key, &chunk_nonce, &repeated, true);
+        let zlib_manifest = pack(&key, &manifest_nonce, manifest.as_bytes(), true);
         let fixture = json!({
             "key": hex(&key),
             "sealing_key": hex(&sealing),
@@ -581,6 +659,10 @@ mod tests {
             "manifest": manifest,
             "manifest_nonce": hex(&manifest_nonce),
             "sealed_manifest": STANDARD.encode(&sealed_manifest),
+            "zlib_chunk": hex(&repeated),
+            "zlib_chunk_id": chunk_id(&key, &repeated),
+            "sealed_zlib_chunk": hex(&zlib_chunk),
+            "sealed_zlib_manifest": STANDARD.encode(&zlib_manifest),
         });
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/vault.json");
         if std::env::var_os("AGENTBOARD_WRITE_FIXTURES").is_some() {
@@ -588,12 +670,19 @@ mod tests {
         }
         let stored: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(stored, fixture, "run with AGENTBOARD_WRITE_FIXTURES=1 to rewrite it");
-        assert_eq!(open(&key, &sealed_chunk).unwrap(), chunk);
-        assert_eq!(open(&key, &sealed_manifest).unwrap(), manifest.as_bytes());
-        assert_eq!(open(&[9; 32], &sealed_chunk), None);
+        assert_eq!(open(&key, &sealed_chunk, CHUNK).unwrap(), chunk);
+        assert_eq!(open(&key, &sealed_manifest, MANIFEST).unwrap(), manifest.as_bytes());
+        assert_eq!(open(&key, &zlib_chunk, CHUNK).unwrap(), repeated);
+        assert_eq!(open(&key, &zlib_manifest, MANIFEST).unwrap(), manifest.as_bytes());
+        assert!(zlib_chunk.len() < repeated.len());
+        assert_eq!(open(&[9; 32], &sealed_chunk, CHUNK), None);
         let mut altered = sealed_chunk.clone();
         altered[20] ^= 1;
-        assert_eq!(open(&key, &altered), None);
+        assert_eq!(open(&key, &altered, CHUNK), None);
+        // An unknown packing, or one that inflates past the limit, opens to nothing.
+        assert_eq!(open(&key, &seal_with(&key, &chunk_nonce, b"\x02abc"), CHUNK), None);
+        assert_eq!(open(&key, &pack(&key, &chunk_nonce, &[0; CHUNK + 1], true), CHUNK), None);
+        assert_eq!(open(&key, &pack(&key, &chunk_nonce, &[0; CHUNK], true), CHUNK).map(|plain| plain.len()), Some(CHUNK));
         assert_ne!(chunk_id(&[9; 32], chunk), id);
     }
 
@@ -687,6 +776,19 @@ mod tests {
         let (folder, home) = place();
         server.pull(&folder, &home).unwrap();
         assert!(fs::read_to_string(home.join(".claude.json")).unwrap().contains("npx"));
+    }
+
+    #[test]
+    fn refuses_a_chunk_that_inflates_past_its_size() {
+        let (folder, home) = place();
+        let server = Server::new();
+        server.publish(&KEY, 1, &[(".claude/CLAUDE.md", 0o644, b"x")], json!({}));
+        // The id names one byte; what is sent inflates to 50 MB of zeros.
+        let id = chunk_id(&KEY, b"x");
+        server.chunks.lock().unwrap().insert(id, pack(&KEY, &[1; 12], &vec![0; 50_000_000], true));
+        let error = server.pull(&folder, &home).unwrap_err();
+        assert!(error.contains("doesn't open"), "{error}");
+        assert!(!home.join(".claude").exists() && !folder.join("vault.applied").exists());
     }
 
     #[test]
