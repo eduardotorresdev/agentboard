@@ -37,9 +37,6 @@ struct Sidebar: View {
                 .padding(.vertical, 16)
             }
             .scrollIndicators(.never)
-            // Fixed below the projects: it doesn't scroll with them.
-            SidebarFooter(organization: store.organizationID,
-                          project: selection.flatMap { s in store.projects.first { $0.id == s.projectID }?.path })
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
@@ -327,60 +324,6 @@ private struct WorktreeRow: View {
         } else {
             shape.fill(Theme.ink.opacity(isHovered ? 0.04 : 0))
         }
-    }
-}
-
-/// Fixed at the bottom of the sidebar: what the agents can use, each opening its inventory.
-private struct SidebarFooter: View {
-    let organization: UUID
-    let project: String?
-    @State private var open: InventoryPanel.Kind?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            item(.skills, symbol: "sparkles")
-            item(.mcps, symbol: "server.rack")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-    }
-
-    private func item(_ kind: InventoryPanel.Kind, symbol: String) -> some View {
-        SidebarFooterItem(title: kind.title, symbol: symbol, isOpen: open == kind) { open = kind }
-            .help(kind.help)
-            .popover(isPresented: Binding(get: { open == kind }, set: { if !$0 { open = nil } }), arrowEdge: .trailing) {
-                InventoryPanel(kind: kind, organization: organization, project: project)
-            }
-    }
-}
-
-private struct SidebarFooterItem: View {
-    let title: String
-    let symbol: String
-    let isOpen: Bool
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.inkMuted)
-                    .frame(width: 14)
-                Text(title)
-                    .font(Theme.Font.body)
-                    .foregroundStyle(Theme.ink.opacity(0.82))
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 32)
-            .background(Theme.ink.opacity(isOpen ? 0.08 : isHovered ? 0.04 : 0), in: .rect(cornerRadius: Theme.Radius.control))
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .animation(.snappy(duration: 0.2), value: isHovered)
     }
 }
 
