@@ -10,6 +10,14 @@ const ADDRESS = /^(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-fA-F:]{2,39}\]):\d{1,5}$/;
 const SHORT = /^[\x20-\x7e]{1,64}$/;
 const PUBLIC_KEY = /^[A-Za-z0-9+/]{43}=$/; // base64 of exactly 32 bytes
 const HOST_COLUMNS = "id, name, platform, version, public_key, online, last_seen, addresses";
+const CHUNK_ID = /^[0-9a-f]{64}$/;
+const VAULT_CHUNK_PATH = /^\/v1\/vault\/chunks\/([^/]+)$/;
+const MAX_CHUNK = 1_100_000;
+const MAX_MANIFEST = 1_500_000;
+const MAX_VAULT = 512 * 1024 * 1024;
+const MAX_MANIFEST_CHUNKS = 20_000;
+const MAX_HAVE = 5000;
+const BINDS = 99; // D1 takes at most 100 bound values a statement; one goes to the account
 
 interface Account {
   id: number;
@@ -74,6 +82,12 @@ async function route(request: Request, env: Env): Promise<Response> {
     return json(results.map(hostJSON));
   }
 
+  // Any session of the account reads the vault, a host's included; only a board's writes it.
+  if (path === "/v1/vault" || path.startsWith("/v1/vault/")) {
+    if (request.method === "PUT" && hostSession) return fail(403, "wrong_session");
+    return vault(request, env, account.id, path);
+  }
+
   const match = HOST_PATH.exec(path);
   if (!match) return fail(404, "not_found");
   const id = match[1].toLowerCase();
@@ -110,6 +124,102 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (!owned) return fail(404, "not_found");
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return fail(426, "upgrade_required");
   return relay(env, id, request).fetch(`https://relay/${id}/${action}`, request);
+}
+
+async function vault(request: Request, env: Env, account: number, path: string): Promise<Response> {
+  const call = `${request.method} ${path}`;
+  if (call === "GET /v1/vault") {
+    const row = await env.DB.prepare("SELECT version, manifest FROM vault WHERE account_id = ?").bind(account).first<{ version: number; manifest: ArrayBuffer | number[] }>();
+    return row ? json({ version: row.version, manifest: base64(new Uint8Array(row.manifest)) }) : fail(404, "no_vault");
+  }
+  if (call === "PUT /v1/vault") {
+    const body = await readJSON(request);
+    const { version, manifest, chunks } = body ?? {};
+    if (!Number.isSafeInteger(version) || (version as number) < 0) return fail(400, "invalid_version");
+    if (!Array.isArray(chunks) || chunks.length > MAX_MANIFEST_CHUNKS || !chunks.every((id) => typeof id === "string" && CHUNK_ID.test(id))) {
+      return fail(400, "invalid_chunks");
+    }
+    const sealed = typeof manifest === "string" ? unbase64(manifest) : null;
+    if (!sealed || !sealed.length) return fail(400, "invalid_manifest");
+    if (sealed.length > MAX_MANIFEST) return fail(413, "too_large");
+    // One transaction: the compare and set, refused too when a named chunk isn't held, then the
+    // deletion of what it no longer names, which runs only if this very manifest went in (its
+    // sealed bytes carry a random nonce, so no other write leaves the same ones). The ids go
+    // in as one JSON array: 20000 of them are far more than a statement can bind.
+    const named = JSON.stringify(chunks);
+    const held = "NOT EXISTS (SELECT 1 FROM json_each(?) AS n WHERE n.value NOT IN (SELECT id FROM vault_chunks WHERE account_id = ?))";
+    const [written] = await env.DB.batch([
+      version === 0
+        ? env.DB.prepare(`INSERT INTO vault (account_id, version, manifest) SELECT ?, 1, ? WHERE ${held} ON CONFLICT(account_id) DO NOTHING`).bind(account, sealed, named, account)
+        : env.DB.prepare(`UPDATE vault SET version = version + 1, manifest = ? WHERE account_id = ? AND version = ? AND ${held}`).bind(sealed, account, version, named, account),
+      env.DB.prepare(
+        "DELETE FROM vault_chunks WHERE account_id = ? AND id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM vault WHERE account_id = ? AND version = ? AND manifest = ?)",
+      ).bind(account, named, account, (version as number) + 1, sealed),
+    ]);
+    if (!written.meta.changes) {
+      // Stale first: a writer behind has to read again before anything else it sends matters.
+      const current = await env.DB.prepare("SELECT version FROM vault WHERE account_id = ?").bind(account).first<{ version: number }>();
+      if ((current?.version ?? 0) !== version) return fail(409, "stale");
+      const { results } = await env.DB.prepare("SELECT DISTINCT n.value AS id FROM json_each(?) AS n WHERE n.value NOT IN (SELECT id FROM vault_chunks WHERE account_id = ?)")
+        .bind(named, account)
+        .all<{ id: string }>();
+      return json({ error: "missing_chunks", missing: results.map((row) => row.id) }, 409);
+    }
+    return json({ version: (version as number) + 1 });
+  }
+  if (call === "POST /v1/vault/have") {
+    const ids = (await readJSON(request))?.ids;
+    if (!Array.isArray(ids) || ids.length > MAX_HAVE || !ids.every((id) => typeof id === "string" && CHUNK_ID.test(id))) return fail(400, "invalid_ids");
+    const unique = [...new Set(ids as string[])];
+    const found = unique.length
+      ? await env.DB.batch<{ id: string }>(inBatches(unique).map((batch) => env.DB.prepare(`SELECT id FROM vault_chunks WHERE account_id = ? AND id IN (${marks(batch)})`).bind(account, ...batch)))
+      : [];
+    const have = new Set(found.flatMap((result) => result.results.map((row) => row.id)));
+    return json({ missing: unique.filter((id) => !have.has(id)) });
+  }
+
+  const id = VAULT_CHUNK_PATH.exec(path)?.[1];
+  if (id === undefined) return fail(404, "not_found");
+  if (!CHUNK_ID.test(id)) return fail(400, "invalid_id");
+  if (request.method === "GET") {
+    const row = await env.DB.prepare("SELECT data FROM vault_chunks WHERE account_id = ? AND id = ?").bind(account, id).first<{ data: ArrayBuffer | number[] }>();
+    // D1 hands a BLOB back as an array of numbers.
+    return row ? new Response(new Uint8Array(row.data), { headers: { "Content-Type": "application/octet-stream" } }) : fail(404, "not_found");
+  }
+  if (request.method !== "PUT") return fail(404, "not_found");
+  const length = Number(request.headers.get("Content-Length") ?? 0);
+  if (length > MAX_CHUNK) return fail(413, "too_large");
+  const data = new Uint8Array(await request.arrayBuffer());
+  if (data.length > MAX_CHUNK) return fail(413, "too_large");
+  if (!data.length) return fail(400, "invalid_chunk");
+  // The same id again replaces itself, so it doesn't count against the room it needs.
+  const used = await env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM vault_chunks WHERE account_id = ? AND id != ?").bind(account, id).first<{ n: number }>();
+  if (used!.n + data.length > MAX_VAULT) return fail(413, "vault_full");
+  await env.DB.prepare(
+    "INSERT INTO vault_chunks (account_id, id, size, data) VALUES (?, ?, ?, ?) ON CONFLICT(account_id, id) DO UPDATE SET size = excluded.size, data = excluded.data",
+  )
+    .bind(account, id, data.length, data)
+    .run();
+  return json({});
+}
+
+const inBatches = (ids: string[]) => Array.from({ length: Math.ceil(ids.length / BINDS) }, (_, i) => ids.slice(i * BINDS, (i + 1) * BINDS));
+const marks = (ids: string[]) => ids.map(() => "?").join(", ");
+
+function base64(bytes: Uint8Array): string {
+  let text = "";
+  // In slices: spreading a whole manifest into one call overflows the stack.
+  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(text);
+}
+
+function unbase64(text: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4) return null;
+  try {
+    return Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
 }
 
 const REGIONS: Record<string, DurableObjectLocationHint> = { SA: "sam", NA: "enam", EU: "weur", AS: "apac", OC: "oc", AF: "afr" };

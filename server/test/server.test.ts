@@ -549,3 +549,148 @@ it("signs every board of the account out at once, and leaves its hosts", async (
   expect((await call("GET", "/v1/account", { token: other })).status).toBe(200);
   expect((await call("PUT", `/v1/hosts/${id}`, { token: hostToken, body: HOST })).status).toBe(200);
 });
+
+const chunkId = (n: number) => n.toString(16).padStart(64, "0");
+const putChunk = (token: string, id: string, data: Uint8Array) =>
+  exports.default.fetch(new Request(`${ORIGIN}/v1/vault/chunks/${id}`, { method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: data }));
+const getVault = async (token: string) => {
+  const response = await call("GET", "/v1/vault", { token });
+  return [response.status, await response.json()];
+};
+const have = async (token: string, ids: string[]) => (await (await call("POST", "/v1/vault/have", { token, body: { ids } })).json()) as { missing: string[] };
+const putVault = async (token: string, version: number, manifest: string, chunks: string[]) => {
+  const response = await call("PUT", "/v1/vault", { token, body: { version, manifest, chunks } });
+  return [response.status, await response.json()];
+};
+
+it("keeps a vault: chunks, which are missing, a manifest, and both read back", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  expect(await getVault(token)).toEqual([404, { error: "no_vault" }]);
+  const [a, b] = [chunkId(1), chunkId(2)];
+  expect(await have(token, [a, b, a])).toEqual({ missing: [a, b] });
+  expect((await putChunk(token, a, new Uint8Array([1, 2, 3]))).status).toBe(200);
+  expect(await have(token, [a, b])).toEqual({ missing: [b] });
+  expect((await putChunk(token, b, new Uint8Array([4]))).status).toBe(200);
+  expect(await putVault(token, 0, btoa("sealed one"), [a, b])).toEqual([200, { version: 1 }]);
+  expect(await getVault(token)).toEqual([200, { version: 1, manifest: btoa("sealed one") }]);
+  const chunk = await call("GET", `/v1/vault/chunks/${a}`, { token });
+  expect([...new Uint8Array(await chunk.arrayBuffer())]).toEqual([1, 2, 3]);
+  expect((await call("GET", `/v1/vault/chunks/${chunkId(3)}`, { token })).status).toBe(404);
+
+  // Compare and set: a writer that didn't see version 1 changes nothing.
+  expect(await putVault(token, 0, btoa("late"), [a, b])).toEqual([409, { error: "stale" }]);
+  expect(await putVault(token, 2, btoa("late"), [a, b])).toEqual([409, { error: "stale" }]);
+  expect(await getVault(token)).toEqual([200, { version: 1, manifest: btoa("sealed one") }]);
+
+  // A new manifest drops the chunks it doesn't name.
+  expect(await putVault(token, 1, btoa("sealed two"), [b])).toEqual([200, { version: 2 }]);
+  expect(await have(token, [a, b])).toEqual({ missing: [a] });
+  expect((await call("GET", `/v1/vault/chunks/${a}`, { token })).status).toBe(404);
+});
+
+it("deletes more unreferenced chunks than one statement can bind", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const ids = Array.from({ length: 250 }, (_, i) => chunkId(i + 1));
+  await env.DB.batch(ids.map((id) => env.DB.prepare("INSERT INTO vault_chunks (account_id, id, size, data) VALUES (?, ?, 1, ?)").bind(account, id, new Uint8Array([0]))));
+  expect(await putVault(token, 0, btoa("m"), [ids[7], ids[7]])).toEqual([200, { version: 1 }]);
+  expect((await have(token, ids)).missing).toHaveLength(249);
+});
+
+it("lets a host's session read the vault but not write it", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const { hostToken } = await register(account, "owner");
+  const id = chunkId(9);
+  expect((await putChunk(token, id, new Uint8Array([9]))).status).toBe(200);
+  expect(await putVault(token, 0, btoa("m"), [id])).toEqual([200, { version: 1 }]);
+
+  expect(await getVault(hostToken)).toEqual([200, { version: 1, manifest: btoa("m") }]);
+  expect(await have(hostToken, [id])).toEqual({ missing: [] });
+  expect((await call("GET", `/v1/vault/chunks/${id}`, { token: hostToken })).status).toBe(200);
+  expect(await refusal(await putChunk(hostToken, chunkId(10), new Uint8Array([1])))).toEqual(WRONG_SESSION);
+  expect(await refusal(await call("PUT", "/v1/vault", { token: hostToken, body: { version: 1, manifest: btoa("x"), chunks: [] } }))).toEqual(WRONG_SESSION);
+  expect(await getVault(token)).toEqual([200, { version: 1, manifest: btoa("m") }]);
+});
+
+it("shows one account's vault to no other", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const other = await signIn(account + 1, "other");
+  const id = chunkId(5);
+  expect((await putChunk(token, id, new Uint8Array([5]))).status).toBe(200);
+  expect(await putVault(token, 0, btoa("m"), [id])).toEqual([200, { version: 1 }]);
+  expect(await getVault(other)).toEqual([404, { error: "no_vault" }]);
+  expect(await have(other, [id])).toEqual({ missing: [id] });
+  expect((await call("GET", `/v1/vault/chunks/${id}`, { token: other })).status).toBe(404);
+  // Its own vault starts at 0 and leaves the first one's chunks alone.
+  expect(await putVault(other, 0, btoa("n"), [])).toEqual([200, { version: 1 }]);
+  expect(await have(token, [id])).toEqual({ missing: [] });
+});
+
+it("holds the vault to its limits", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  for (const bad of ["ab", chunkId(0xab).toUpperCase(), `${chunkId(1)}0`]) {
+    expect((await putChunk(token, bad, new Uint8Array([1]))).status).toBe(400);
+  }
+  expect(await refusal(await putChunk(token, chunkId(1), new Uint8Array(1_100_001)))).toEqual([413, { error: "too_large" }, null]);
+  expect((await putChunk(token, chunkId(1), new Uint8Array(1_100_000))).status).toBe(200);
+  expect((await call("POST", "/v1/vault/have", { token, body: { ids: Array(5001).fill(chunkId(1)) } })).status).toBe(400);
+  expect((await call("POST", "/v1/vault/have", { token, body: { ids: ["nope"] } })).status).toBe(400);
+  expect((await call("PUT", "/v1/vault", { token, body: { version: 0, manifest: btoa("m"), chunks: Array(20_001).fill(chunkId(1)) } })).status).toBe(400);
+  expect((await call("PUT", "/v1/vault", { token, body: { version: 0, manifest: "not base64!", chunks: [] } })).status).toBe(400);
+  const big = "A".repeat(2_000_004); // 1,500,003 bytes decoded
+  expect(await putVault(token, 0, big, [])).toEqual([413, { error: "too_large" }]);
+
+  // 512 MiB in all, counted from what is stored; replacing a chunk needs no extra room.
+  await env.DB.prepare("UPDATE vault_chunks SET size = ? WHERE account_id = ?").bind(512 * 1024 * 1024 - 10, account).run();
+  expect((await putChunk(token, chunkId(1), new Uint8Array(100))).status).toBe(200);
+  await env.DB.prepare("UPDATE vault_chunks SET size = ? WHERE account_id = ?").bind(512 * 1024 * 1024 - 10, account).run();
+  expect(await refusal(await putChunk(token, chunkId(2), new Uint8Array(11)))).toEqual([413, { error: "vault_full" }, null]);
+  expect((await putChunk(token, chunkId(2), new Uint8Array(10))).status).toBe(200);
+});
+
+it("refuses a manifest naming a chunk it doesn't hold, and keeps the old one", async () => {
+  const token = await signIn(nextIP + 1000, "owner");
+  const [a, b] = [chunkId(1), chunkId(2)];
+  expect((await putChunk(token, a, new Uint8Array([1]))).status).toBe(200);
+  expect(await putVault(token, 0, btoa("first"), [b])).toEqual([409, { error: "missing_chunks", missing: [b] }]);
+  expect(await getVault(token)).toEqual([404, { error: "no_vault" }]);
+  expect(await putVault(token, 0, btoa("first"), [a])).toEqual([200, { version: 1 }]);
+  expect(await putVault(token, 1, btoa("second"), [a, b])).toEqual([409, { error: "missing_chunks", missing: [b] }]);
+  expect(await getVault(token)).toEqual([200, { version: 1, manifest: btoa("first") }]);
+  expect(await have(token, [a])).toEqual({ missing: [] });
+});
+
+it("lets no writer undo another's: the second from the same base is stale and deletes nothing", async () => {
+  const account = nextIP + 1000;
+  const [one, two] = [await signIn(account, "owner"), await signIn(account, "owner")];
+  const [base, mine, theirs] = [chunkId(1), chunkId(2), chunkId(3)];
+  for (const id of [base, mine, theirs]) expect((await putChunk(one, id, new Uint8Array([1]))).status).toBe(200);
+  expect(await putVault(one, 0, btoa("base"), [base])).toEqual([200, { version: 1 }]);
+  for (const id of [mine, theirs]) expect((await putChunk(one, id, new Uint8Array([1]))).status).toBe(200);
+
+  // Both start from version 1; the first wins with its chunk, the second names only its own.
+  expect(await putVault(one, 1, btoa("one"), [base, mine])).toEqual([200, { version: 2 }]);
+  expect(await putVault(two, 1, btoa("two"), [base, theirs])).toEqual([409, { error: "stale" }]);
+  expect(await getVault(two)).toEqual([200, { version: 2, manifest: btoa("one") }]);
+  // Its loss deleted nothing: every chunk the winner names is there. (Its own one the winner
+  // didn't name went with the winner's write: it uploads it again.)
+  expect(await have(one, [base, mine])).toEqual({ missing: [] });
+  // Reading again and repeating on version 2 works.
+  expect((await putChunk(two, theirs, new Uint8Array([1]))).status).toBe(200);
+  expect(await putVault(two, 2, btoa("two"), [base, mine, theirs])).toEqual([200, { version: 3 }]);
+});
+
+it("deletes nothing for a write that loses the race, even at the version the winner reached", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const [kept, extra] = [chunkId(1), chunkId(2)];
+  for (const id of [kept, extra]) expect((await putChunk(token, id, new Uint8Array([1]))).status).toBe(200);
+  expect(await putVault(token, 0, btoa("v1"), [kept, extra])).toEqual([200, { version: 1 }]);
+  // At version 1 already: a writer still on 0 would land at 1 too, and must not delete.
+  expect(await putVault(token, 0, btoa("late"), [kept])).toEqual([409, { error: "stale" }]);
+  expect(await have(token, [kept, extra])).toEqual({ missing: [] });
+});

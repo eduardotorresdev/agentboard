@@ -331,7 +331,7 @@ copying from a Mac to each host.
 - **More than one writer.** Several boards (and other kinds of them, later) write the same
   vault, so no write may undo another's. The server refuses a manifest whose `version` isn't
   the current one (409 `stale`) and one that names a chunk it doesn't hold (409
-  `missing_chunks`, with `{"missing":[id…]}`): replacing the manifest and deleting the chunks
+  `missing_chunks`, with `{"missing":[id…]}`; `stale` when both hold): replacing the manifest and deleting the chunks
   it no longer names is one transaction. A board never sends "what I have": it sends the
   server's current manifest with its own changes applied — it remembers the manifest it last
   wrote or merged (its base), and what differs between its base and its home is what it
