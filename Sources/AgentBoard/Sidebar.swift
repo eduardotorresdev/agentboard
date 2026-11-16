@@ -373,12 +373,12 @@ private struct WorktreeRow: View {
     }
 }
 
-/// A light translucent layer over the canvas: the sky and its squares blurred, under a white
-/// tint and a faint slate one, so the sidebar reads as its own layer even over an empty, near-white
-/// sky. No border, no shadow. Text stays AA over the darkest sky (see ThemeContrastTests).
+/// A light translucent layer over the canvas: the sky blurred, under a white tint and a faint
+/// slate one, so the sidebar reads as its own layer even over a white cloud. No border, no
+/// shadow. Text stays AA over the darkest sky (see ThemeContrastTests).
 struct SidebarBackdrop: View {
-    /// How much white covers the blurred sky.
-    static let tint = 0.55
+    /// How much white covers the blurred sky: enough for muted text over the sky's deepest blue.
+    static let tint = 0.85
     /// The slate (ink) tint over that, which sets the sidebar apart.
     static let shade = 0.05
 

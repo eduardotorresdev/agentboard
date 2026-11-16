@@ -3,9 +3,8 @@ import Metal
 import QuartzCore
 import SwiftUI
 
-/// The board's backdrop: a painted sky on canvas, generated in Metal. Two layers: the sky with
-/// its drifting clouds, drawn at a fraction of the screen's resolution a few times a second, and
-/// the canvas weave over it, a still image drawn at full resolution only when the size changes.
+/// The board's backdrop: a painted sky with drifting clouds, generated in Metal at a fraction of
+/// the screen's resolution a few times a second.
 /// It stays fixed while the board pans and zooms, like a painting hung behind the cards.
 struct SkyCanvas: NSViewRepresentable {
     func makeNSView(context: Context) -> SkyView {
@@ -32,19 +31,12 @@ final class SkyView: NSView {
     private let device: MTLDevice?
     private let queue: MTLCommandQueue?
     private let skyPipeline: MTLRenderPipelineState?
-    private let squaresPipeline: MTLRenderPipelineState?
-    private let weavePipeline: MTLRenderPipelineState?
     /// The animated cloud layer, `skyScale` pixels per point.
     let sky = CAMetalLayer()
     /// Called with each new sky frame (drawn at a few frames a second) before it is presented,
     /// on the main thread: encode into `commands` to read `texture`, e.g. to blur it behind a card.
     var onSkyFrame: ((_ texture: MTLTexture, _ commands: MTLCommandBuffer) -> Void)?
-    /// A plain image, not a Metal layer: it never changes, so it needs no spare drawables.
-    private let weave = CALayer()
-    /// Twinkling squares over the sky, at one pixel per two points; kept out of `sky` so blurs of it stay clean.
-    private let squares = CAMetalLayer()
     private var timer: Timer?
-    private var weaveSize: CGSize = .zero
     /// Seconds of sky time, advanced more slowly under Reduce Motion.
     private var skyTime: Double = 0
     private var lastTick = CACurrentMediaTime()
@@ -69,28 +61,19 @@ final class SkyView: NSView {
             return try? device.makeRenderPipelineState(descriptor: descriptor)
         }
         skyPipeline = pipeline("sky_fragment")
-        squaresPipeline = pipeline("squares_fragment")
-        weavePipeline = pipeline("weave_fragment")
         super.init(frame: .zero)
         wantsLayer = true
         layer = CALayer()
         layer?.backgroundColor = BoardPalette.rgb(Theme.Hex.accentSoft)
-        weave.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull()]
-        for metal in [sky, squares] {
-            // Two buffers are enough at a few frames a second, and a full-screen buffer costs megabytes.
-            metal.maximumDrawableCount = 2
-            metal.device = device
-            metal.pixelFormat = .bgra8Unorm
-            metal.framebufferOnly = metal !== sky
-            metal.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull()]
-            layer?.addSublayer(metal)
-        }
-        // The weave sits over the sky, under the squares.
-        layer?.insertSublayer(weave, above: sky)
+        // Two buffers are enough at a few frames a second, and a full-screen buffer costs megabytes.
+        sky.maximumDrawableCount = 2
+        sky.device = device
+        sky.pixelFormat = .bgra8Unorm
+        sky.framebufferOnly = false
+        sky.actions = ["bounds": NSNull(), "position": NSNull(), "contents": NSNull()]
+        layer?.addSublayer(sky)
         sky.isOpaque = true
         sky.magnificationFilter = .linear
-        squares.isOpaque = false
-        squares.magnificationFilter = .nearest
         NotificationCenter.default.addObserver(self, selector: #selector(tick), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
     }
 
@@ -117,8 +100,6 @@ final class SkyView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         sky.frame = bounds
-        weave.frame = bounds
-        squares.frame = bounds
         CATransaction.commit()
         tick()
     }
@@ -131,7 +112,6 @@ final class SkyView: NSView {
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        weaveSize = .zero
         tick()
     }
 
@@ -152,41 +132,9 @@ final class SkyView: NSView {
         skyTime += reduced ? elapsed / Self.reducedMotionSlowdown : elapsed
         lastTick = now
         guard isShown, bounds.width > 0, bounds.height > 0 else { return }
-        if weaveSize != bounds.size, !inLiveResize {
-            weaveSize = bounds.size
-            weave.contents = drawWeave(pixels: bounds.size)
-        }
         // A fixed epoch keeps the first frame of every launch different, never a still picture.
         draw(sky, pipeline: skyPipeline, pixels: bounds.size.applying(.init(scaleX: Self.skyScale, y: Self.skyScale)),
              pointsPerPixel: 1 / Self.skyScale, time: Float(skyTime + 40))
-        // Under Reduce Motion the squares hold still.
-        // One pixel per 2 points: each 6-point cell is three pixels, two lit and one gap.
-        draw(squares, pipeline: squaresPipeline, pixels: bounds.size.applying(.init(scaleX: 0.5, y: 0.5)), pointsPerPixel: 2, time: reduced ? 40 : Float(skyTime + 40))
-    }
-
-    /// The weave drawn once straight into an IOSurface the layer shows: one full-screen buffer,
-    /// with no image copy beside it.
-    private func drawWeave(pixels: CGSize) -> IOSurface? {
-        let width = max(1, Int(pixels.width.rounded())), height = max(1, Int(pixels.height.rounded()))
-        guard let device, let queue, let weavePipeline,
-              let surface = IOSurface(properties: [.width: width, .height: height, .bytesPerElement: 4, .pixelFormat: kCVPixelFormatType_32BGRA]) else { return nil }
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
-        descriptor.usage = .renderTarget
-        guard let texture = device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0),
-              let commands = queue.makeCommandBuffer() else { return nil }
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = texture
-        pass.colorAttachments[0].loadAction = .dontCare
-        pass.colorAttachments[0].storeAction = .store
-        guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return nil }
-        var uniforms = Uniforms(frame: SIMD4(Float(bounds.width), Float(bounds.height), 0, Float(bounds.width) / Float(width)))
-        encoder.setRenderPipelineState(weavePipeline)
-        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-        encoder.endEncoding()
-        commands.commit()
-        commands.waitUntilCompleted()
-        return surface
     }
 
     private func draw(_ target: CAMetalLayer, pipeline: MTLRenderPipelineState?, pixels: CGSize, pointsPerPixel: CGFloat, time: Float = 0) {
@@ -212,7 +160,7 @@ final class SkyView: NSView {
     /// `ImageRenderer`) can't see Metal layers and show only the plain fill. `size` is in points;
     /// draw it under the captured window.
     static func snapshot(size: CGSize, scale: CGFloat = 2, time: Float = 40) -> CGImage? {
-        image(["sky_fragment", "weave_fragment", "squares_fragment"], size: size, scale: scale, time: time)
+        image(["sky_fragment"], size: size, scale: scale, time: time)
     }
 
     /// `fragments` drawn in order into one image, each over the last with premultiplied alpha.
@@ -298,15 +246,6 @@ final class SkyView: NSView {
         return sum;
     }
 
-    // Short dabs along a gently turning direction: the marks of a brush.
-    static float strokes(float2 p, float seed) {
-        float angle = 0.6 + (noise(float3(p * 0.35, seed)) - 0.5) * 3.5;
-        float2 d = float2(cos(angle), sin(angle));
-        float2 q = float2(dot(p, d), dot(p, float2(-d.y, d.x)));
-        return (noise(float3(q * float2(7, 26), seed + 3)) - 0.5)
-             + 0.6 * (noise(float3(q * float2(14, 55), seed + 7)) - 0.5);
-    }
-
     // Rounded, piled-up noise: the puffs of a cumulus.
     static float billow(float3 p, int octaves) {
         float sum = 0, amplitude = 0.5;
@@ -318,79 +257,89 @@ final class SkyView: NSView {
         return sum;
     }
 
-    // How much cloud there is at p: big masses built of puffs, warped so they swirl as they drift.
-    static float cloud(float2 p, float t) {
-        float2 w = p + float2(t * 0.0045, t * 0.0012);
-        float3 c = float3(w * 0.8, t * 0.006);
-        float2 warp = float2(fbm(c + float3(1.7, 9.2, 0), 3), fbm(c + float3(8.3, 2.8, 0), 3)) - 0.5;
-        float masses = fbm(float3(w * 0.45 + warp * 0.3, t * 0.004 + 4), 3);
-        float puffs = billow(float3(w * 1.05 + warp * 0.6, t * 0.01), 4);
-        return masses * 1.6 + puffs * 0.9 - 0.93;
+    // Tone laid in a few flat washes with soft seams, as watercolour dries in layers.
+    static float washes(float x) {
+        float f = saturate(x) * 3, i = floor(f);
+        return (i + smoothstep(0.3, 0.7, f - i)) / 3;
+    }
+
+    // One bank of clouds painted over `color`: a firm edge where the bank faces the light (up),
+    // a soft fade on its underside, white tops going blue toward the hollows. `marks` are the
+    // brush's own tone changes, so no wash inside the bank is flat; pigment pools at its edge.
+    static float3 cloud(float3 color, float2 p, float t, float seed, float scale, float threshold, float3 shade, float3 top, float marks) {
+        float3 q = float3(p * scale + seed * float2(7.3, 3.1) + float2(t * 0.008, t * 0.002) * scale, t * 0.012 + seed);
+        float n = fbm(q, 3) + (0.3 - billow(q * 2.2, 3)) * 0.3;
+        float3 above = q - float3(0.03, 0.09, 0) * scale;
+        float lit = n - fbm(above, 3) - (0.3 - billow(above * 2.2, 3)) * 0.3;
+        float edge = mix(0.16, 0.045, smoothstep(-0.02, 0.04, lit));
+        float tone = 0.55 + lit * 16 - (n - threshold) * 1.4 + marks;
+        float3 body = mix(shade, top, washes(smoothstep(0.15, 0.85, tone)));
+        float cover = smoothstep(threshold, threshold + edge, n);
+        // A wet edge: a thin rim of the shade where the bank meets what's behind it.
+        float rim = cover * (1 - smoothstep(threshold + edge, threshold + edge * 2.5, n)) * 0.35;
+        return mix(color, mix(body, shade, rim), cover);
+    }
+
+    // A brush stroke's direction at p: mostly rising to the right, turning slowly across the canvas.
+    static float2 strokeDirection(float2 p, float t) {
+        float angle = -0.55 + (noise(float3(p * 0.6, t * 0.01 + 2)) - 0.5) * 1.6;
+        return float2(cos(angle), sin(angle));
+    }
+
+    // Streaky noise along the stroke: long along it, thin across it, like bristle marks.
+    static float bristles(float2 p, float2 d, float seed) {
+        float2 q = float2(dot(p, d), dot(p, float2(-d.y, d.x)));
+        return noise(float3(q * float2(3, 70), seed)) - 0.5;
     }
 
     fragment float4 sky_fragment(SkyVertex in [[stage_in]], constant SkyUniforms &u [[buffer(0)]]) {
-        float2 p = in.uv * u.frame.xy / 520.0;
+        float2 uv = in.uv;
+        float2 p = uv * u.frame.xy / 760.0;
         float t = u.frame.z;
 
-        // Blue ground, painted: patches of deeper and paler blue, brush marks across them.
-        float tone = fbm(float3(p * 1.1, 1), 4);
-        float3 deep = float3(0.15, 0.40, 0.68), mid = float3(0.25, 0.53, 0.79), pale = float3(0.50, 0.69, 0.86);
-        float3 sky = mix(deep, mid, smoothstep(0.30, 0.62, tone));
-        sky = mix(sky, pale, smoothstep(0.55, 0.85, fbm(float3(p * 1.8 + 5, 2), 4)) * 0.5);
-        sky += strokes(p, 11) * 0.03;
+        // Every sample is dragged along the brush (fine bristles plus broad dabs), so edges
+        // feather into strokes instead of fuzz.
+        float2 dir = strokeDirection(p, t);
+        float2 bp = p + dir * (bristles(p, dir, 11) * 0.028 + bristles(p * 0.3, dir, 3) * 0.035);
 
-        // Clouds: white where the light falls (from the upper left), cool gray in their hollows.
-        float d = cloud(p, t);
-        float lit = d - cloud(p + float2(0.06, 0.09), t);
-        float cover = smoothstep(-0.03, 0.12, d);
-        float3 shadow = float3(0.66, 0.69, 0.74), white = float3(0.99, 0.99, 1.0);
-        float3 body = mix(shadow, white, saturate(0.5 + lit * 4 + d * 1.2 - 0.1));
-        body += strokes(p * 0.8 + 2, 23) * 0.045;
-        // Thin edges let the blue through, as a dry brush does.
-        float3 color = mix(sky, body, cover * (0.7 + 0.3 * saturate(d * 6)));
-        // Thinned to a pale wash: a backdrop that never competes with the cards.
-        color = mix(float3(0.955, 0.97, 0.99), color, 0.16);
+        // Composition, with wandering borders: open sky in the upper left, a bluer band at the bottom.
+        float wander = noise(float3(p * 0.9, t * 0.007 + 3)) - 0.5;
+        float open = smoothstep(0.6, 0.1, length(uv * float2(1.0, 1.5)) + wander * 0.5);
+        float low = smoothstep(0.5, 0.85, uv.y + wander * 0.3);
+
+        // Paint, not a gradient: a clear sky blue, a darker greener blue that pools low on the
+        // canvas, a soft middle blue, pale and white, mixed unevenly as a painter would.
+        float3 deep = float3(0.45, 0.74, 0.91), green = float3(0.44, 0.70, 0.79);
+        float3 shade = float3(0.70, 0.86, 0.94), pale = float3(0.86, 0.94, 0.97), white = float3(0.97, 0.985, 1.0);
+        float mixing = smoothstep(0.35, 0.65, fbm(float3(p * 0.8 + 11, t * 0.009), 3) + (uv.y - 0.5) * 0.4);
+        float3 pigment = mix(deep, green, mixing);
+        float3 shadow = mix(mix(shade, pale, 0.45), pigment, 0.1 + open * 0.5);
+        // Brush marks: broad dabs plus streaks along the stroke, used to vary every wash.
+        float dabs = (fbm(float3(bp * 4.5, t * 0.02 + 9), 3) - 0.5) * 1.1 + bristles(bp * 1.4, dir, 17) * 0.18;
+
+        // Behind the clouds: pale washes everywhere, the clear blue only in the opening.
+        float haze = fbm(float3(bp * 1.1 + float2(t * 0.006, 0), t * 0.01 + 7), 3) + dabs * 0.15;
+        float3 color = mix(mix(mix(shade, pale, 0.5), white, washes(smoothstep(0.3, 0.6, haze))), mix(deep, shade, washes(smoothstep(0.45, 0.8, haze)) * 0.4), open);
+        // Back to front: hazy far banks, then the big white masses.
+        color = cloud(color, bp, t, 1, 1.1, 0.325 + open * 0.2, shadow, pale, dabs);
+        color = cloud(color, bp, t, 2, 1.5, 0.375 + open * 0.2, shadow, white, dabs);
+        color = cloud(color, bp, t, 3, 1.0, 0.385 + open * 0.2, mix(shade, pale, 0.7), white, dabs * 0.8);
+        // Along the bottom: a greener blue haze and two ridges of low cloud, the nearer one darker.
+        float2 flat = bp * float2(0.7, 1.5);
+        float lowest = smoothstep(0.7, 0.95, uv.y + wander * 0.3);
+        color = mix(color, mix(shade, green, 0.7), low * 0.8);
+        color = cloud(color, flat, t, 4, 1.4, 0.76 - low * 0.36, mix(shade, green, 0.5), mix(pale, white, 0.4), dabs);
+        color = cloud(color, flat, t, 5, 1.9, 0.86 - lowest * 0.42, green * float3(0.92, 0.96, 0.98), mix(shade, green, 0.3), dabs);
+        // Uneven pigment over everything blue: patches where it pools deeper, patches left paler.
+        float pool = fbm(float3(bp * 1.7 + 23, t * 0.012), 3) - 0.44 + dabs * 0.12;
+        // The deepest tones stay where the painting keeps them: the opening and the bottom.
+        float depth = 0.3 + 0.7 * max(open, low);
+        float blue = saturate(1 - (color.r - 0.6) * 2.8);
+        color = mix(color, pigment, smoothstep(0.03, 0.12, pool) * 0.6 * blue * depth);
+        // Here and there a second, darker layer of the same pigment.
+        color = mix(color, pigment * float3(0.84, 0.91, 0.95), smoothstep(0.13, 0.19, pool) * 0.5 * blue * depth);
+        color = mix(color, pale, smoothstep(0.05, 0.14, -pool) * 0.3 * blue);
         return float4(saturate(color), 1);
-    }
-
-    // What stays put on the canvas, at full resolution: an over-and-under weave of slightly uneven
-    // threads, and the fine marks the brush left in the paint.
-    static float4 weave(float2 pt) {
-        float2 g = pt / 2.4;
-        float2 cell = floor(g), f = fract(g);
-        float warp = sin(f.x * 3.14159) * (0.8 + 0.4 * hash(float3(cell.x, 0, 1)));
-        float weft = sin(f.y * 3.14159) * (0.8 + 0.4 * hash(float3(0, cell.y, 2)));
-        bool warpOnTop = fmod(cell.x + cell.y, 2.0) < 1.0;
-        float yarn = warpOnTop ? warp : weft;
-        float light = (yarn - 0.55) * 0.5 + (hash(float3(cell, 3)) - 0.5) * 0.12;
-        float2 p = pt / 520.0;
-        light += strokes(p * 1.6, 31) * 0.55 + strokes(p * 4.0, 47) * 0.25;
-        float highlight = saturate(light) * 0.09, shade = saturate(-light) * 0.07;
-        // Premultiplied: white light on the ridges, a blue-gray shade in the furrows.
-        return float4(float3(1.0, 1.0, 1.0) * highlight + float3(0.20, 0.26, 0.38) * shade, highlight + shade);
-    }
-
-    // Drawn at one pixel per point, each pixel the average of four samples: as fine as a 2x
-    // drawing, without its aliasing or its memory.
-    fragment float4 weave_fragment(SkyVertex in [[stage_in]], constant SkyUniforms &u [[buffer(0)]]) {
-        float2 pt = in.uv * u.frame.xy;
-        return (weave(pt + float2(-0.25, -0.25)) + weave(pt + float2(0.25, -0.25))
-              + weave(pt + float2(-0.25, 0.25)) + weave(pt + float2(0.25, 0.25))) * 0.25;
-    }
-
-    // Small squares on a fixed 6-point grid, lit in clusters that swell, fade and drift with the
-    // clouds' wind; inside a cluster each square twinkles on its own slow clock.
-    fragment float4 squares_fragment(SkyVertex in [[stage_in]], constant SkyUniforms &u [[buffer(0)]]) {
-        float2 pt = in.uv * u.frame.xy;
-        float2 cell = floor(pt / 6.0), f = fract(pt / 6.0);
-        if (f.x > 0.67 || f.y > 0.67) return float4(0);
-        float t = u.frame.z;
-        float2 p = cell * 6.0 / 520.0 + float2(t * 0.0045, t * 0.0012);
-        float cluster = smoothstep(0.56, 0.70, fbm(float3(p * 2.2, t * 0.02), 3));
-        float phase = t * 0.35 + hash(float3(cell, 5)) * 9.0, k = floor(phase);
-        float twinkle = mix(hash(float3(cell, k)), hash(float3(cell, k + 1)), smoothstep(0.0, 1.0, phase - k));
-        float alpha = cluster * smoothstep(0.35, 0.85, twinkle) * 0.11;
-        return float4(float3(0.42, 0.58, 0.82) * alpha, alpha);
     }
     """
 }
