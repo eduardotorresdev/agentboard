@@ -46,8 +46,10 @@ public struct TerminalEvents: Sendable {
     public var titleChanged = false
     /// OSC 9 and OSC 777 desktop notifications, in order.
     public var notifications: [String] = []
+    /// The text the program last copied with OSC 52.
+    public var clipboard: String?
 
-    public var isEmpty: Bool { bells == 0 && !titleChanged && notifications.isEmpty }
+    public var isEmpty: Bool { bells == 0 && !titleChanged && notifications.isEmpty && clipboard == nil }
 }
 
 /// A terminal emulator: feed it what a program writes, read back its screen for rendering and
@@ -531,6 +533,7 @@ public final class Terminal: VTHandler {
     func setWorkingDirectory(_ path: String) { workingDirectory = path }
     func bell() { events.bells += 1 }
     func notify(_ text: String) { events.notifications.append(text) }
+    func copy(_ text: String) { events.clipboard = text }
 
     /// DEC Special Graphics for 0x5F–0x7E (line drawing in `ESC ( 0`).
     private static let decSpecialGraphics: [UInt32] = [

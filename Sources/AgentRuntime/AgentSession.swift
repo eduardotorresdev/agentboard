@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import TerminalCore
 
 /// What to run for a session; built by `AgentStore` from an `AgentProvider`.
@@ -365,11 +365,13 @@ public final class AgentSession {
 
     private func received(_ bytes: UnsafeRawBufferPointer) {
         var notifications: [String] = []
+        var clipboard: String?
         let (reply, notify, started) = lock.withLock { () -> ([UInt8]?, Bool, Bool) in
             terminal.feed(bytes)
             onOutput?(bytes)
             // Drained on every feed, so they never pile up where nobody listens.
-            notifications = terminal.takeEvents().notifications
+            let events = terminal.takeEvents()
+            (notifications, clipboard) = (events.notifications, events.clipboard)
             let started = _state == .starting
             if started { _state = .running }
             if terminal.isSynchronizing {
@@ -386,6 +388,12 @@ public final class AgentSession {
         if started { reportStatus() }
         if notify { scheduleChange() }
         if !notifications.isEmpty { onNotify?(notifications) }
+        if let clipboard {
+            DispatchQueue.main.async {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(clipboard, forType: .string)
+            }
+        }
     }
 
     private func exited(_ status: Int32?) {

@@ -1,4 +1,5 @@
 // Control functions: C0 controls, ESC, CSI, OSC and DCS sequences.
+import Foundation
 
 private let esc = "\u{1b}"
 
@@ -407,8 +408,13 @@ extension Terminal {
         case 777:
             let parts = text.split(separator: ";", maxSplits: 2, omittingEmptySubsequences: false)
             if parts.first == "notify" { notify(parts.dropFirst().joined(separator: ": ")) }
+        case 52:
+            // "52;<targets>;<base64>": a program copying (Claude over SSH has no pbcopy). Reads ("?") are refused.
+            if let data = text.split(separator: ";", maxSplits: 1).last.flatMap({ Data(base64Encoded: String($0)) }) {
+                copy(String(decoding: data, as: UTF8.self))
+            }
         default:
-            // 8 (hyperlinks), 52 (clipboard), 133 (shell marks) and the rest are ignored.
+            // 8 (hyperlinks), 133 (shell marks) and the rest are ignored.
             break
         }
     }

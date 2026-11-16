@@ -272,6 +272,11 @@ struct ReplyTests {
         #expect(t.takeOutput() == nil)
     }
 
+    @Test func osc52CopiesAndRefusesReads() {
+        #expect(terminal(10, 2, "\u{1b}]52;c;aMOpIGNvcGlh\u{07}").takeEvents().clipboard == "hé copia")
+        #expect(terminal(10, 2, "\u{1b}]52;c;?\u{07}").takeEvents().clipboard == nil)
+    }
+
     @Test func titleBellAndNotifications() {
         let t = terminal(10, 2, "\u{1b}]0;✳ Claude Code\u{07}\u{07}\u{1b}]9;Claude needs input\u{1b}\\\u{1b}]9;4;1;50\u{07}")
         let events = t.takeEvents()
