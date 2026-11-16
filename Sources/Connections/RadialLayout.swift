@@ -14,6 +14,13 @@ import Foundation
 public enum RadialLayout {
     /// The least room between two cards.
     public static let gap: CGFloat = 48
+    /// Below an agent card: room for its composer (8 pt gap, 34 pt tall), shown when focused or drafting.
+    public static let composerRoom: CGFloat = 42
+
+    /// The room a card takes: an agent's includes its composer below it.
+    static func footprint(_ item: BoardLayout.Item) -> CGSize {
+        CGSize(width: item.frame.width, height: item.frame.height + (item.isHub ? composerRoom : 0))
+    }
 
     public static func organize(_ items: [BoardLayout.Item], connections: [Connection]) -> [UUID: CGRect] {
         guard !items.isEmpty else { return [:] }
@@ -52,7 +59,7 @@ public enum RadialLayout {
 
         // Each cluster as a disc: its center card in the middle, its cards on a ring around it.
         func radius(_ id: UUID) -> CGFloat {
-            let size = byID[id]!.frame.size
+            let size = footprint(byID[id]!)
             return (size.width * size.width + size.height * size.height).squareRoot() / 2 + gap / 2
         }
         var offsets: [UUID: CGPoint] = [:]  // Card centers relative to their cluster's center.
@@ -128,14 +135,14 @@ public enum RadialLayout {
         }
 
         // Anchored on the center card's current center.
-        let anchor = CGPoint(x: byID[core]!.frame.midX, y: byID[core]!.frame.midY)
+        let anchor = CGPoint(x: byID[core]!.frame.midX, y: byID[core]!.frame.minY + footprint(byID[core]!).height / 2)
         var result: [UUID: CGRect] = [:]
         for item in items {
             let cluster = clusterCenters[owner[item.id]!]!, offset = offsets[item.id]!
-            let size = item.frame.size
+            let size = footprint(item)
             let x = (anchor.x + cluster.x + offset.x - size.width / 2).rounded()
             let y = (anchor.y + cluster.y + offset.y - size.height / 2).rounded()
-            result[item.id] = CGRect(origin: CGPoint(x: x, y: y), size: size)
+            result[item.id] = CGRect(origin: CGPoint(x: x, y: y), size: item.frame.size)
         }
         return result
     }
