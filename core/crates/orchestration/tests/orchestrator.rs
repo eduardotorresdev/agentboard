@@ -325,8 +325,8 @@ fn tools_work_with_no_board() {
     assert!(next.sessions[&rt(runner.id)].process_id.is_some());
 }
 
-/// Messages to one agent are typed into its terminal one at a time, in the order they were sent,
-/// and the answers travel back the same way.
+/// Messages reaching one agent within half a second go into its terminal as one prompt naming
+/// each sender, in the order they were sent, and the answers travel back the same way.
 #[test]
 fn messages_between_agents_arrive_in_order() {
     let core = Core::new();
@@ -338,12 +338,11 @@ fn messages_between_agents_arrive_in_order() {
     }
     let (back, _) = core.call("send_message", json!({"to": "“Ada”", "message": "answer"}), b.id);
     assert!(back.starts_with("Delivered to “Ada”") || back.starts_with("Queued for “Ada”"), "{back}");
-    wait_until("three prompts read", || core.screen(b.id).matches("got Message from “Ada”").count() == 3);
+    wait_until("one prompt read", || core.unwrapped(b.id).contains("got 3 messages") && core.unwrapped(b.id).matches("third").count() == 2);
     core.shows(a.id, "answer");
-    let screen = core.screen(b.id);
-    let places: Vec<usize> = ["first", "second", "third"].iter().map(|text| screen.find(&format!("to “Ada”): {text}")).unwrap_or_else(|| panic!("{text} isn't a prompt of its own:\n{screen}"))).collect();
-    assert!(places[0] < places[1] && places[1] < places[2], "{screen}");
-    assert_eq!(screen.matches("got Message from “Ada”").count(), 3, "{screen}");
+    let screen = core.unwrapped(b.id);
+    assert!(screen.contains("got 3 messages arrived together (reply with send_message to each sender that needs an answer). Message from “Ada”: first Message from “Ada”: second Message from “Ada”: third"), "{screen}");
+    assert_eq!(screen.matches("got ").count(), 1, "{screen}");
     // The board saw each travel along the line.
     board.wait("four messages", |events| events.iter().filter(|event| matches!(event, BoardEvent::Message(_))).count() == 4);
 
@@ -450,6 +449,8 @@ fn keys_pressed_while_a_message_goes_in_follow_it() {
     let board = Board::open(&core);
     let (a, b) = pair(&core, &board);
     core.call("send_message", json!({"to": "Bob", "message": "ping"}), a.id);
+    // Pasted after the moment messages are gathered for; its Enter follows.
+    core.shows(b.id, "ping");
     board.types(b.id, "typed meanwhile\r");
     core.shows(b.id, "got typed meanwhile");
     let screen = core.screen(b.id);
@@ -1167,7 +1168,6 @@ fn agents_add_post_its() {
     wait_until("one post-it and its line", || core.post_its().len() == 1 && core.lines().len() == 1);
 }
 
-// MARK: Images
 /// Agents add agents and plain terminals next to them, and close what is connected to them.
 #[test]
 fn agents_add_and_close_cards() {
@@ -1199,6 +1199,7 @@ fn agents_add_and_close_cards() {
     core.call("runner_close", json!({}), a.id);
 }
 
+// MARK: Images
 
 /// A PNG of `width`×`height`, one colour.
 fn png(width: u32, height: u32) -> Vec<u8> {

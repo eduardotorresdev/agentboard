@@ -53,6 +53,14 @@ struct ContentView: View {
                                 onCreate: { addProjectStep = .create },
                                 onOpen: openFolder)
                 }
+                // No sidebar group to sit beside yet: the hosts are still reached from here.
+                .toolbar {
+                    if #available(macOS 26, *) {
+                        ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }.sharedBackgroundVisibility(.hidden)
+                    } else {
+                        ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }
+                    }
+                }
             } else {
                 board
             }
@@ -75,7 +83,8 @@ struct ContentView: View {
                 ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, isOpen: $isNeedsYouOpen) }
             }
             if !boardController.isZen {
-                ToolbarItem(placement: .primaryAction) { AccountControl(hosts: hosts) }
+                // With projects, the account is at the foot of the sidebar.
+                if store.projects.isEmpty { ToolbarItem(placement: .primaryAction) { AccountControl(hosts: hosts) } }
                 ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store, agents: agents) }
             }
         }
@@ -123,8 +132,8 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { hosts.vaultQuestion }, set: { if !$0 { hosts.answerVault(false) } })) {
             VaultQuestionDialog(hosts: hosts)
         }
-        .sheet(isPresented: Binding(get: { hosts.editingServers != nil }, set: { if !$0 { hosts.editingServers = nil } })) {
-            if let host = hosts.editingServers { HostServersSheet(hosts: hosts, host: host) }
+        .sheet(isPresented: Binding(get: { hosts.editingHost != nil }, set: { if !$0 { hosts.editingHost = nil } })) {
+            if let editing = hosts.editingHost { HostDialog(hosts: hosts, editing: editing) }
         }
         .sheet(item: $addProjectStep) { step in
             AddProjectDialog(store: store, initialStep: step, onAdded: select)
@@ -174,6 +183,14 @@ struct ContentView: View {
                 } label: { Label(L("Refresh"), systemImage: "arrow.clockwise") }
                     .help(L("Reloads the projects and their worktrees."))
             } }
+            // The hosts, a button of their own beside the project actions: its own capsule, out of their group.
+            if !boardController.isZen {
+                if #available(macOS 26, *) {
+                    ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }.sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }
+                }
+            }
             // A build of the checkout (`./run`) says so, to tell it apart from the installed app.
             if Bundle.main.bundleURL.pathExtension != "app" {
                 if #available(macOS 26, *) {

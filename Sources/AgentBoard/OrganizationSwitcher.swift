@@ -1,16 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// The active organization's avatar in the top bar. A dot in its corner tells that another
-/// organization has an agent waiting for the user (deep blue) or crashed (red). Clicking it opens
-/// the organization menu, which lists them all with their status, switches, edits and adds.
+/// Every organization's avatar in the top bar, the active one on a tinted disc. A dot in an
+/// avatar's corner tells that organization has an agent waiting for the user (deep blue) or
+/// crashed (red). Clicking another organization switches to it; clicking the active one opens the
+/// organization menu, which edits and adds.
 struct OrganizationSwitcher: View {
     let store: ProjectStore
     let agents: AgentStore
     @State private var menu = OrganizationMenuPanel()
-    @State private var isHovered = false
-
-    private var active: Organization? { store.organizations.first { $0.id == store.organizationID } }
+    @State private var hovered: UUID?
 
     private var attention: [UUID: OrganizationAttention] {
         OrganizationAttention.byOrganization(cards: agents.agents, status: agents.cardStatus, active: store.organizationID)
@@ -18,39 +17,57 @@ struct OrganizationSwitcher: View {
 
     var body: some View {
         let others = attention
-        let barStatus = OrganizationAttention.barStatus(others)
-        Button { menu.toggle(store: store, attention: { attention }) } label: {
-            if let active {
-                OrganizationBarAvatar(organization: active, status: barStatus, isHovered: isHovered)
+        HStack(spacing: 2) {
+            ForEach(store.organizations) { organization in
+                let isActive = organization.id == store.organizationID
+                let name = OrganizationAvatar.displayName(organization)
+                Button {
+                    if isActive {
+                        menu.toggle(store: store, attention: { attention })
+                    } else {
+                        withAnimation(.snappy(duration: 0.3)) { store.selectOrganization(organization.id) }
+                    }
+                } label: {
+                    OrganizationBarAvatar(organization: organization, status: others[organization.id]?.status,
+                                          isActive: isActive, isHovered: hovered == organization.id)
+                }
+                .buttonStyle(.plain)
+                .onHover { inside in
+                    withAnimation(.snappy(duration: 0.2)) {
+                        if inside { hovered = organization.id } else if hovered == organization.id { hovered = nil }
+                    }
+                }
+                .help(isActive ? L("Organizations: switch, edit or add") : name)
+                .accessibilityLabel(L("Organization: \(name)"))
+                .accessibilityValue(others[organization.id]?.summary ?? "")
+                .accessibilityHint(isActive ? L("Opens the list of organizations") : "")
+                .accessibilityAddTraits(isActive ? .isSelected : [])
             }
         }
-        .buttonStyle(.plain)
         .background(OrganizationMenuAnchor(panel: menu))
-        .onHover { hovering in withAnimation(.snappy(duration: 0.2)) { isHovered = hovering } }
-        .help(L("Organizations: switch, edit or add"))
-        .accessibilityLabel(L("Organization: \(active.map(OrganizationAvatar.displayName) ?? "")"))
-        .accessibilityValue(others.values.compactMap(\.summary).joined(separator: "; "))
-        .accessibilityHint(L("Opens the list of organizations"))
     }
 }
 
-/// The bar's avatar, with the most pressing status of the other organizations in its corner.
+/// One of the bar's avatars, with what waits on the user in its organization in its corner.
 struct OrganizationBarAvatar: View {
     let organization: Organization
     let status: CardStatus?
+    var isActive = true
     var isHovered = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             OrganizationAvatar(organization: organization, size: 22)
                 .scaleEffect(isHovered ? 1.06 : 1)
+                .opacity(isActive || isHovered ? 1 : 0.55)
+                .frame(width: 30, height: 30)
+                .background(isActive ? Theme.accentTint : .clear, in: .circle)
             if let status {
                 // A 2pt knockout ring in the bar's own white keeps the dot apart from the avatar.
                 Circle().fill(status.color)
                     .frame(width: 8, height: 8)
                     .padding(2)
                     .background(Theme.surface, in: .circle)
-                    .offset(x: 4, y: -4)
                     .transition(.scale.combined(with: .opacity))
             }
         }
@@ -82,6 +99,17 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
     private let state = OrganizationMenuState()
     /// When it last closed: the click on the avatar that closes it must not reopen it.
     private var closedAt = Date.distantPast
+    /// Hangs from the anchor's leading edge instead of its trailing one.
+    private let leading: Bool
+    /// Opens over the anchor instead of under it, growing upward.
+    private let above: Bool
+    /// Where an `above` panel's bottom edge stays as its content grows.
+    private var bottom: CGFloat = 0
+
+    init(leading: Bool = false, above: Bool = false) {
+        self.leading = leading
+        self.above = above
+    }
 
     func toggle(store: ProjectStore, attention: @escaping () -> [UUID: OrganizationAttention]) {
         toggle { state, close in OrganizationMenu(store: store, attention: attention, state: state, close: close) }
@@ -94,7 +122,8 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
         let host = NSHostingView(rootView: content(state, { [weak self] in self?.close() }))
         let size = host.fittingSize
         let below = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
-        let panel = NSPanel(contentRect: CGRect(x: below.maxX - size.width + 8, y: below.minY - size.height - 6,
+        let panel = NSPanel(contentRect: CGRect(x: leading ? below.minX + (above ? 8 : -8) : below.maxX - size.width + 8,
+                                                y: above ? below.maxY + 6 : below.minY - size.height - 6,
                                                 width: size.width, height: size.height),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -104,6 +133,7 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
         panel.contentView = host
         panel.delegate = self
         panel.becomesKeyOnlyIfNeeded = false
+        bottom = panel.frame.minY
         self.panel = panel
         state.editing = nil
         state.isShown = false
@@ -117,6 +147,12 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
         closedAt = Date()
         withAnimation(.snappy(duration: 0.2)) { state.isShown = false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { panel.orderOut(nil) }
+    }
+
+    /// The system resizes the panel keeping its top; one that opened upward keeps its bottom.
+    func windowDidResize(_ notification: Notification) {
+        guard above, let panel, panel.frame.minY != bottom else { return }
+        panel.setFrameOrigin(CGPoint(x: panel.frame.minX, y: bottom))
     }
 
     /// A click outside makes another window key.
@@ -309,12 +345,14 @@ private struct OrganizationMenu: View {
 /// A top bar menu's panel: its width and glass, growing from the corner it hangs from.
 struct MenuChrome: ViewModifier {
     let state: OrganizationMenuState
+    var width: CGFloat = 280
+    var anchor: UnitPoint = .topTrailing
 
     func body(content: Content) -> some View {
         content
-            .frame(width: 280)
+            .frame(width: width)
             .modifier(MenuGlass(corner: 14))
-            .scaleEffect(state.isShown ? 1 : 0.94, anchor: .topTrailing)
+            .scaleEffect(state.isShown ? 1 : 0.94, anchor: anchor)
             .opacity(state.isShown ? 1 : 0)
             .padding(1)
     }

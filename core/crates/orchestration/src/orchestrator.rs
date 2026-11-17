@@ -498,11 +498,20 @@ impl Elements for BoardView<'_> {
 
     fn receive(&mut self, message: &Message, sender: &Element) {
         let name = BoardName::quoted(&sender.name);
-        let text = format!("Message from {name} (if it needs an answer, reply with send_message to {name}):\n\n{}", message.text);
-        if let Some(endpoint) = self.agent_endpoints.get_mut(&message.to) {
-            endpoint.outbox.push_back(Queued { text, from_user: false, sender: Some(sender.id) });
-            self.deliver_next(message.to);
+        let id = message.to;
+        let Some(endpoint) = self.store.agent_endpoints.get_mut(&id) else { return };
+        endpoint.outbox.push_back(Queued { text: message.text.clone(), from_user: false, sender: Some(sender.id), from: Some(name) });
+        // Agents answering at once (a broadcast's replies) reach it as one prompt, not a row of them.
+        if !std::mem::replace(&mut endpoint.gathering, true) {
+            self.store.handle.post_after(AgentEndpoint::GATHER, move |orchestrator: &mut Orchestrator, server| {
+                let mut turn = orchestrator.turn(server);
+                if let Some(endpoint) = turn.agent_endpoints.get_mut(&id) {
+                    endpoint.gathering = false;
+                    turn.board.deliver_next(id);
+                }
+            });
         }
+        self.report_held(id);
     }
 
     /// Why the last message given to it waits instead of going in, or none when nothing waits.
@@ -514,7 +523,8 @@ impl Elements for BoardView<'_> {
         if endpoint.line.has_draft() && !endpoint.forced {
             return Some(format!("their user is typing in their terminal; it goes in once they submit, or after {} seconds without typing", AgentEndpoint::IDLE_LIMIT.as_secs()));
         }
-        Some("it goes in after the messages before it".into())
+        // Only the moment messages are gathered for: as good as delivered.
+        (endpoint.delivering || !endpoint.gathering || endpoint.outbox.iter().any(|queued| queued.from.is_none())).then(|| "it goes in after the messages before it".into())
     }
 }
 
@@ -532,9 +542,12 @@ pub(crate) fn is_inline_space(scalar: char) -> bool {
 #[derive(Default)]
 struct AgentEndpoint {
     /// Prompts waiting their turn: each is pasted and submitted before the next, so two
-    /// messages arriving together don't merge into one prompt.
+    /// arriving together don't run into one line. Agents' messages waiting in a row go in as
+    /// one prompt that names each sender.
     outbox: VecDeque<Queued>,
     delivering: bool,
+    /// An agent's message just came: more may follow within `GATHER`, to go in with it.
+    gathering: bool,
     /// What the user types in the terminal meanwhile: held between a paste and its Enter, and
     /// whether the line holds their unsent text, which a paste would join.
     line: TerminalLine,
@@ -552,9 +565,24 @@ struct Queued {
     from_user: bool,
     /// The agent that sent it, told when it can't be delivered.
     sender: Option<Uuid>,
+    /// The sending agent's name, quoted; `text` is then what it said, without a header.
+    from: Option<String>,
+}
+
+impl Queued {
+    /// The prompt for agents' messages delivered together, in the order they came.
+    fn prompt(messages: &[(String, String)]) -> String {
+        if let [(name, text)] = messages {
+            return format!("Message from {name} (if it needs an answer, reply with send_message to {name}):\n\n{text}");
+        }
+        let said: Vec<String> = messages.iter().map(|(name, text)| format!("Message from {name}:\n\n{text}")).collect();
+        format!("{} messages arrived together (reply with send_message to each sender that needs an answer).\n\n{}", messages.len(), said.join("\n\n"))
+    }
 }
 
 impl AgentEndpoint {
+    /// How long an agent's message waits for others to go in with it.
+    const GATHER: Duration = Duration::from_millis(500);
     /// Between the paste and the Enter that submits it: sent together, the agent may read the
     /// Enter as part of the pasted text.
     const SUBMIT_DELAY: Duration = Duration::from_millis(250);
@@ -611,7 +639,7 @@ impl BoardView<'_> {
         if let Some(reason) = reason {
             return self.give_back(id, text, &reason);
         }
-        self.enqueue(id, Queued { text: text.to_string(), from_user: true, sender: None });
+        self.enqueue(id, Queued { text: text.to_string(), from_user: true, sender: None, from: None });
     }
 
     fn enqueue(&mut self, id: Uuid, queued: Queued) {
@@ -624,7 +652,7 @@ impl BoardView<'_> {
     /// A note from the board itself (a message of theirs that couldn't be delivered).
     fn notice(&mut self, id: Uuid, text: String) {
         if self.program_reason(id).is_none() {
-            self.enqueue(id, Queued { text, from_user: false, sender: None });
+            self.enqueue(id, Queued { text, from_user: false, sender: None, from: None });
         }
     }
 
@@ -707,7 +735,7 @@ impl BoardView<'_> {
             endpoint.forced = false;
             return;
         }
-        if endpoint.delivering || self.is_awaiting_developer(id) || self.program_reason(id).is_some() {
+        if endpoint.delivering || endpoint.gathering && endpoint.outbox.front().is_some_and(|next| next.from.is_some()) || self.is_awaiting_developer(id) || self.program_reason(id).is_some() {
             return;
         }
         let Some(session) = self.session(id) else { return };
@@ -716,7 +744,14 @@ impl BoardView<'_> {
         if !(endpoint.forced || idle || !endpoint.line.has_draft()) {
             return self.schedule_idle_check(id);
         }
-        let Some(next) = endpoint.outbox.pop_front() else { return };
+        let Some(mut next) = endpoint.outbox.pop_front() else { return };
+        if let Some(name) = next.from.take() {
+            let mut messages = vec![(name, std::mem::take(&mut next.text))];
+            while let Some(more) = endpoint.outbox.pop_front_if(|more| more.from.is_some()) {
+                messages.push((more.from.unwrap_or_default(), more.text));
+            }
+            next.text = Queued::prompt(&messages);
+        }
         // Whatever was on the line goes in with this prompt.
         endpoint.line = TerminalLine::default();
         endpoint.delivering = true;
@@ -922,6 +957,7 @@ impl Turn<'_> {
         catalog.add(BrowserRelay);
         catalog.add(ProjectRelay);
         catalog.add(WorktreeTools);
+        catalog.add(CardTools);
         if let Some(request) = catalog.serve(self, request) {
             match request.kind {
                 RequestKind::Question => self.ask(request),
@@ -957,7 +993,6 @@ impl Turn<'_> {
         self.bus.connect(x, y, (None, None));
         self.flush_bus();
     }
-        catalog.add(CardTools);
 
     /// Takes an element's lines off the board.
     fn disconnect_element(&mut self, id: Uuid) {

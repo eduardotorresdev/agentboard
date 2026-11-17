@@ -445,7 +445,7 @@ final class AccountStore {
     }
 
     static var identityChangedNote: String {
-        L("This host's identity changed. If you reinstalled it, trust the new identity in the account menu; otherwise something else is answering in its place.")
+        L("This host's identity changed. If you reinstalled it, trust the new identity in its dialog, under Compute; otherwise something else is answering in its place.")
     }
 
     /// Holds `host` to the key the server gives now. What was allowed for the old key isn't

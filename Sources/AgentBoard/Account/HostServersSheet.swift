@@ -66,7 +66,8 @@ struct HostServersSheet: View {
                 Button(L("Add a server only for this host")) { draft = Draft(name: "", isNew: true) }
                     .buttonStyle(DialogButtonStyle())
                     .help(L("A server agents get on this host and nowhere else."))
-                Button(L("Done")) { hosts.editingServers = nil }
+                // A page of the host's dialog: back to its options.
+                Button(L("Back")) { withAnimation(.snappy(duration: 0.25)) { hosts.editingHost?.servers = false } }
                     .buttonStyle(DialogButtonStyle(prominent: true))
                     .keyboardShortcut(.defaultAction)
             }

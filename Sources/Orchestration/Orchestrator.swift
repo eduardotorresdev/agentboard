@@ -585,16 +585,32 @@ final class AgentEndpoint: MessageEndpoint {
     let id: UUID
     private weak var store: Orchestrator?
     /// Prompts waiting their turn: each is pasted and submitted before the next, so two
-    /// messages arriving together don't merge into one prompt.
+    /// arriving together don't run into one line. Agents' messages waiting in a row go in as
+    /// one prompt that names each sender.
     private var outbox: [Queued] = []
     private struct Queued {
-        let text: String
+        var text: String
         /// Typed in the card's composer: given back to the board, never dropped silently.
         let fromUser: Bool
         /// The agent that sent it, told when it can't be delivered.
         let sender: UUID?
+        /// The sending agent's name, quoted; `text` is then what it said, without a header.
+        var from: String? = nil
+
+        /// The prompt for agents' messages delivered together, in the order they came.
+        static func prompt(_ messages: [(name: String, text: String)]) -> String {
+            if messages.count == 1, let only = messages.first {
+                return "Message from \(only.name) (if it needs an answer, reply with send_message to \(only.name)):\n\n\(only.text)"
+            }
+            let said = messages.map { "Message from \($0.name):\n\n\($0.text)" }
+            return "\(messages.count) messages arrived together (reply with send_message to each sender that needs an answer).\n\n\(said.joined(separator: "\n\n"))"
+        }
     }
     private var delivering = false
+    /// An agent's message just came: more may follow within `gather`, to go in with it.
+    private var gathering = false
+    /// How long an agent's message waits for others to go in with it.
+    private static let gather = 0.5
     /// What the user types in the terminal meanwhile: held between a paste and its Enter, and
     /// whether the line holds their unsent text, which a paste would join.
     var line = TerminalLine()
@@ -644,6 +660,8 @@ final class AgentEndpoint: MessageEndpoint {
         if line.hasDraft && !forced {
             return "their user is typing in their terminal; it goes in once they submit, or after \(Int(Self.idleLimit)) seconds without typing"
         }
+        // Only the moment messages are gathered for: as good as delivered.
+        if gathering, !delivering, outbox.allSatisfy({ $0.from != nil }) { return nil }
         return "it goes in after the messages before it"
     }
 
@@ -662,9 +680,16 @@ final class AgentEndpoint: MessageEndpoint {
 
     func receive(_ message: Message, from sender: any BoardElement) {
         let name = BoardName.quoted(sender.name)
-        outbox.append(Queued(text: "Message from \(name) (if it needs an answer, reply with send_message to \(name)):\n\n\(message.text)",
-                             fromUser: false, sender: sender.id))
-        deliverNext()
+        outbox.append(Queued(text: message.text, fromUser: false, sender: sender.id, from: name))
+        // Agents answering at once (a broadcast's replies) reach it as one prompt, not a row of them.
+        if !gathering {
+            gathering = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.gather) { [weak self] in
+                self?.gathering = false
+                self?.deliverNext()
+            }
+        }
+        reportHeld()
     }
 
     /// A note from the board itself (a message of theirs that couldn't be delivered).
@@ -731,12 +756,20 @@ final class AgentEndpoint: MessageEndpoint {
         if outbox.isEmpty { forced = false }
         let idle = Date().timeIntervalSince(lastKey) >= Self.idleLimit
         guard !delivering, !outbox.isEmpty, let store, !store.isAwaitingDeveloper(id), let session = store.session(id),
-              programReason == nil else { return }
+              programReason == nil, !(gathering && outbox[0].from != nil) else { return }
         guard forced || idle || !line.hasDraft else { return scheduleIdleCheck() }
         // Whatever was on the line goes in with this prompt.
         line = TerminalLine()
         delivering = true
-        let next = outbox.removeFirst()
+        var next = outbox.removeFirst()
+        if let name = next.from {
+            var messages = [(name: name, text: next.text)]
+            while let more = outbox.first, let name = more.from {
+                messages.append((name, more.text))
+                outbox.removeFirst()
+            }
+            next.text = Queued.prompt(messages)
+        }
         let prompt = TerminalLine.pasteable(next.text, bracketed: session.withTerminal { $0.modes.contains(.bracketedPaste) })
         // A slash command is typed, not pasted, so the program runs it as if keyed in.
         session.send(next.fromUser && TerminalLine.isCommand(prompt) ? Array(prompt.utf8) : session.withTerminal { $0.encodePaste(prompt) })

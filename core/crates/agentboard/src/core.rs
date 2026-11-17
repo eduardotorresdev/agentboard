@@ -45,6 +45,7 @@ fn log(message: &str) {
 /// `agentboard host`: the core as a host's service. It also keeps the line to the account
 /// server, and never exits for being idle: boards come and go over the relay.
 pub fn host() {
+    runtime::isolate_programs();
     let socket_path = core_protocol::socket_path();
     host::pull_vault_at_start();
     std::thread::spawn({

@@ -145,6 +145,16 @@ public struct HostStats: Codable, Equatable, Sendable {
     /// The 1-minute load average.
     public var load: Double
     public var cores: Int
+
+    public init(cpu: Double, memoryUsed: UInt64, memoryTotal: UInt64, diskUsed: UInt64, diskTotal: UInt64, load: Double, cores: Int) {
+        self.cpu = cpu
+        self.memoryUsed = memoryUsed
+        self.memoryTotal = memoryTotal
+        self.diskUsed = diskUsed
+        self.diskTotal = diskTotal
+        self.load = load
+        self.cores = cores
+    }
 }
 
 extension LaunchSpec: Codable {

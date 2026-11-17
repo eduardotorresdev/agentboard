@@ -53,7 +53,7 @@ struct AgentBoardApp: App {
 
 
 /// What a build under test opens at launch, for screenshots: `AGENTBOARD_SHOW`, a list
-/// separated by commas of `account-menu`, `sign-in`, `new-worktree` (of the first project) and
+/// separated by commas of `account-menu`, `hosts-menu`, `sign-in`, `new-worktree` (of the first project) and
 /// the path of a worktree to open (see docs/core.md).
 enum DebugShow {
     static let items = Set((ProcessInfo.processInfo.environment["AGENTBOARD_SHOW"] ?? "").split(separator: ",").map(String.init))

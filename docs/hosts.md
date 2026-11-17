@@ -11,7 +11,8 @@ same gate (`GOAL.md`); the Rust core ships on Linux first.
 
 - **Account**: sign in with GitHub (device flow: a code shown here, confirmed on any device). The
   Mac app and every host sign in to the same account.
-- **Hosts**: the app lists this Mac plus every host of the account, with whether each is online.
+- **Hosts**: the app lists, under Compute, this Mac plus every host of the account, with whether each
+  is online: a monitor showing its system's home screen, which fills with static as it strains.
   A second computer signed in to the account sees the same hosts.
 - **Setting a host up**: over SSH, `curl -fsSL <install url> | sh`, then `agentboard login`.
   `agentboard setup` installs what agents need (git, Node, Docker, Chromium for Playwright, the
@@ -83,6 +84,13 @@ same gate (`GOAL.md`); the Rust core ships on Linux first.
   agent on it. So that nothing inside can make them, the host creates, empty, `~/.gitconfig`,
   `~/.config/git`, `~/.config/autostart` and `~/.local/share/systemd` when it has none.
   `AGENTBOARD_SANDBOX=0` turns the sandbox off.
+- **Out of memory**: the host's service is delegated its cgroup (`Delegate=yes`); the core moves
+  into a `core` child of it and starts each agent and runner in a child of its own
+  (`program-<n>`). The system's OOM daemon ends a whole leaf cgroup, so a host short of memory
+  loses the program using the most, not the core and every agent on it. A host installed
+  before this needs `agentboard service` run once more, for the new unit. `agentboard setup`
+  (with root) also makes that daemon more patient, where there is one: it acts at 90% memory
+  pressure held for a minute, where Ubuntu's default is 50% for 20 seconds.
 - **Signing agents in**: an agent CLI on a host signs in there, once, in its card's terminal;
   this Mac's agent logins are not copied.
 

@@ -39,6 +39,7 @@ struct Sidebar: View {
                 .padding(.vertical, 16)
             }
             .scrollIndicators(.never)
+            AccountBlock(hosts: hosts)
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)

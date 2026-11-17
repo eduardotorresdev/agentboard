@@ -38,7 +38,7 @@ pub use core_protocol::{CoreEvent, CoreRequest, Data, FrameKind, HostStats, Laun
 pub use core_server::{CoreBoard, CoreHandle, CoreServer, CoreService};
 pub use core_socket::{CoreSocket, FrameParser};
 pub use host_stats::HostSampler;
-pub use pseudo_terminal::PseudoTerminal;
+pub use pseudo_terminal::{isolate_programs, PseudoTerminal};
 
 /// An OS error as `strerror` words it, without Rust's "(os error N)".
 pub(crate) fn error_text(error: &std::io::Error) -> String {

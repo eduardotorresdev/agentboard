@@ -17,6 +17,8 @@ const AGENTS: [(&str, &str); 4] = [
     ("copilot", "npm install -g @github/copilot"),
     ("uv", "curl -LsSf https://astral.sh/uv/install.sh | sh"),
 ];
+const OOM_USER: &str = "/etc/systemd/system/user@.service.d";
+const OOM_DAEMON: &str = "/etc/systemd/oomd.conf.d";
 const MICROMAMBA: &str = "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-";
 
 /// What `plan` needs to know about the machine.
@@ -38,6 +40,8 @@ struct Machine {
     docker_group: bool,
     /// `bwrap` can make a sandbox (Ubuntu forbids it until AppArmor is told otherwise).
     sandbox: bool,
+    /// The OOM daemon's limits are already loosened, or there is none.
+    patient_oom: bool,
     browser_libraries: bool,
     chromium: bool,
     micromamba: bool,
@@ -85,6 +89,9 @@ fn plan(machine: &Machine) -> Vec<Step> {
         step("docker group", rooted(machine.docker_group || user == "root", &|sudo| format!("{sudo}usermod -aG docker {user}")));
         // Each worktree's programs run in a bubblewrap sandbox, which needs user namespaces.
         step("worktree sandbox", rooted(machine.sandbox, &|sudo| format!("[ -d /etc/apparmor.d ] || exit 0; printf '%s\\n' 'abi <abi/4.0>,' 'include <tunables/global>' 'profile bwrap /usr/bin/bwrap flags=(unconfined) {{' '  userns,' '  include if exists <local/bwrap>' '}}' | {sudo}tee /etc/apparmor.d/bwrap >/dev/null && {sudo}apparmor_parser -r /etc/apparmor.d/bwrap")));
+        // Ubuntu's OOM daemon ends a user's services at 50% memory pressure for 20 seconds, which
+        // a few agents building at once reach while the machine still copes: wait for 90% over a minute.
+        step("memory pressure", rooted(machine.patient_oom, &|sudo| format!("{sudo}mkdir -p {OOM_USER} {OOM_DAEMON} && printf '[Service]\\nManagedOOMMemoryPressureLimit=90%%\\n' | {sudo}tee {OOM_USER}/90-agentboard.conf >/dev/null && printf '[OOM]\\nDefaultMemoryPressureDurationSec=60s\\n' | {sudo}tee {OOM_DAEMON}/90-agentboard.conf >/dev/null && {sudo}systemctl daemon-reload && {sudo}systemctl try-restart systemd-oomd")));
     } else {
         step("system packages", Action::Skip("no apt-get here: only Debian and Ubuntu are set up automatically".into()));
     }
@@ -166,6 +173,7 @@ fn inspect(home: &str, path: &str, sudo_user: Option<String>) -> Machine {
         missing_packages: PACKAGES.into_iter().filter(|package| !output("dpkg-query", &["-W", "-f=${Status}", package]).is_some_and(|status| status.ends_with("ok installed"))).collect(),
         programs: ["git", "curl", "node", "gh", "docker", "claude", "codex", "copilot", "uv"].into_iter().filter(|program| on_path(program, path)).collect(),
         docker_group: output("id", &["-nG", &group_of]).is_some_and(|groups| groups.split(' ').any(|group| group == "docker")),
+        patient_oom: !std::path::Path::new("/usr/lib/systemd/systemd-oomd").exists() || [OOM_USER, OOM_DAEMON].iter().all(|folder| std::path::Path::new(&format!("{folder}/90-agentboard.conf")).exists()),
         sandbox: output("bwrap", &["--ro-bind", "/", "/", "/bin/true"]).is_some(),
         browser_libraries: ["libnss3.so", "libgbm.so.1", "libatk-bridge-2.0.so.0"].iter().all(|library| libraries.contains(library)),
         chromium: std::fs::read_dir(format!("{home}/.cache/ms-playwright")).is_ok_and(|entries| entries.flatten().any(|entry| entry.file_name().to_string_lossy().starts_with("chromium"))),
@@ -259,10 +267,12 @@ mod tests {
     #[test]
     fn without_root_a_fresh_machine_gets_a_private_toolchain() {
         let steps = plan(&fresh());
-        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "micromamba", "git, curl, nodejs, gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "micromamba", "git, curl, nodejs, gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
         assert_eq!(*action(&steps, "system packages"), Action::NeedsRoot("sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "Docker"), Action::NeedsRoot("curl -fsSL https://get.docker.com | sudo sh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::NeedsRoot("sudo usermod -aG docker dev".into()));
+        let Action::NeedsRoot(patience) = action(&steps, "memory pressure") else { panic!() };
+        assert!(patience.contains("printf '[Service]\\nManagedOOMMemoryPressureLimit=90%%\\n' | sudo tee /etc/systemd/system/user@.service.d/90-agentboard.conf"), "{patience}");
         assert_eq!(
             *action(&steps, "micromamba"),
             Action::Download { url: "https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64".into(), to: "/home/dev/.local/share/agentboard/tools/bin/micromamba".into() }
@@ -293,7 +303,7 @@ mod tests {
     #[test]
     fn with_sudo_the_system_installs_what_it_can_and_node_stays_private() {
         let steps = plan(&Machine { root: true, ..fresh() });
-        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "micromamba", "nodejs", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "micromamba", "nodejs", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
         assert_eq!(*action(&steps, "system packages"), Action::Run("sudo -n apt-get update && sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "Docker"), Action::Run("curl -fsSL https://get.docker.com | sudo -n sh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::Run("sudo -n usermod -aG docker dev".into()));
@@ -305,7 +315,7 @@ mod tests {
     fn through_sudo_only_the_systems_part_runs_for_the_user_who_asked() {
         let asked = Machine { root: true, superuser: true, user: "root".into(), sudo_user: Some("dev".into()), programs: vec!["node"], ..fresh() };
         let steps = plan(&asked);
-        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "browser libraries"]);
+        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "browser libraries"]);
         assert_eq!(*action(&steps, "system packages"), Action::Run("apt-get update && env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::Run("usermod -aG docker dev".into()));
         assert_eq!(*action(&steps, "browser libraries"), Action::Run("npx -y playwright install-deps chromium".into()));
@@ -314,7 +324,7 @@ mod tests {
 
         // Logged in as root itself: everything, and root needs no docker group.
         let root = plan(&Machine { root: true, superuser: true, user: "root".into(), ..fresh() });
-        assert_eq!(names(&root).len(), 13);
+        assert_eq!(names(&root).len(), 14);
         assert_eq!(*action(&root, "docker group"), Action::Ok);
     }
 
@@ -325,6 +335,7 @@ mod tests {
             programs: vec!["git", "curl", "node", "gh", "docker", "claude", "codex", "copilot", "uv"],
             docker_group: true,
             sandbox: true,
+            patient_oom: true,
             browser_libraries: true,
             chromium: true,
             profile_has_path: true,
@@ -333,7 +344,7 @@ mod tests {
         for root in [false, true] {
             let steps = plan(&Machine { root, ..done.clone() });
             assert!(steps.iter().all(|step| step.action == Action::Ok), "{steps:?}");
-            assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "git, Node and gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+            assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "git, Node and gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
         }
     }
 

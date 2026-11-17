@@ -3,7 +3,9 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::core_protocol::LaunchSpec;
@@ -11,6 +13,31 @@ use crate::core_protocol::LaunchSpec;
 /// Held while a descriptor exists that isn't close-on-exec yet (a PTY's master just opened) and
 /// while another program is forked, so none inherits a master: its PTY would never end.
 pub(crate) static FORK_LOCK: Mutex<()> = Mutex::new(());
+
+/// This process's cgroup once `isolate_programs` split it: each program then runs in a child of
+/// its own. The OOM daemon ends a whole leaf cgroup, and with the core and every program in one
+/// leaf, a single program short of memory took all of them along.
+static CGROUP: OnceLock<PathBuf> = OnceLock::new();
+static PROGRAMS: AtomicU64 = AtomicU64::new(0);
+
+/// Moves this process into a `core` cgroup under its own, so that each program can go in a
+/// sibling. Needs a cgroup of its own to split (a systemd unit with `Delegate=yes`); anywhere
+/// else (a terminal, macOS) nothing changes. Call it before anything is started.
+pub fn isolate_programs() {
+    if let Some(base) = std::fs::read_to_string("/proc/self/cgroup").ok().and_then(|own| split_cgroup(&own, Path::new("/sys/fs/cgroup"))) {
+        let _ = CGROUP.set(base);
+    }
+}
+
+/// `own` is `/proc/self/cgroup`: `0::/<path>` on cgroup v2.
+fn split_cgroup(own: &str, root: &Path) -> Option<PathBuf> {
+    let base = root.join(own.lines().find_map(|line| line.strip_prefix("0::/"))?);
+    let _ = std::fs::create_dir(base.join("core"));
+    std::fs::write(base.join("core/cgroup.procs"), "0").ok()?;
+    // Per-program memory figures are what the OOM daemon picks by.
+    std::fs::write(base.join("cgroup.subtree_control"), "+memory").ok()?;
+    Some(base)
+}
 
 /// A child process attached to a pseudo-terminal, run by a thread of its own (the Swift one's
 /// queue): it waits on the PTY, on a pipe that says a command came and on its timers, never
@@ -48,6 +75,7 @@ impl PseudoTerminal {
             disconnected: false,
             master: None,
             pid: 0,
+            cgroup: None,
             reading: false,
             pending_write: Vec::new(),
             read_buffer: vec![0; 64 * 1024],
@@ -159,6 +187,8 @@ struct Worker {
     master: Option<OwnedFd>,
     /// The running program, 0 when none.
     pid: i32,
+    /// The running program's own cgroup (see `CGROUP`).
+    cgroup: Option<PathBuf>,
     /// False once the PTY reported end-of-file: the program's side is closed.
     reading: bool,
     pending_write: Vec<u8>,
@@ -298,6 +328,11 @@ impl Worker {
         // SAFETY: sysconf only reads a limit.
         let open_limit = unsafe { libc::sysconf(libc::_SC_OPEN_MAX) }.clamp(256, 65_536) as i32;
 
+        // Joined by the child before it execs, so everything it starts is born inside.
+        self.cgroup = CGROUP.get().map(|base| base.join(format!("program-{}", PROGRAMS.fetch_add(1, Ordering::Relaxed)))).filter(|path| std::fs::create_dir(path).is_ok());
+        let join = self.cgroup.as_ref().and_then(|path| std::fs::OpenOptions::new().write(true).open(path.join("cgroup.procs")).ok());
+        let join_fd = join.as_ref().map_or(-1, |file| file.as_raw_fd());
+
         let forking = FORK_LOCK.lock().unwrap();
         let mut master: RawFd = -1;
         // SAFETY: forkpty writes the master into `master`; the size outlives the call. The child
@@ -321,6 +356,9 @@ impl Worker {
                 let mut empty_mask: libc::sigset_t = std::mem::zeroed();
                 libc::sigemptyset(&mut empty_mask);
                 libc::sigprocmask(libc::SIG_SETMASK, &empty_mask, std::ptr::null_mut());
+                if join_fd >= 0 {
+                    libc::write(join_fd, b"0".as_ptr().cast(), 1);
+                }
                 // Nor the core's other descriptors: a pipe open elsewhere in the process would
                 // never reach end-of-file while the program holds a copy.
                 for descriptor in 3..open_limit {
@@ -441,8 +479,30 @@ impl Worker {
         self.reading = false;
         self.paused_until = None;
         self.master = None;
+        // Stays while something the program left behind still runs in it; the unit's end clears it.
+        if let Some(cgroup) = self.cgroup.take() {
+            let _ = std::fs::remove_dir(cgroup);
+        }
         self.pending_write.clear();
         self.signals.clear();
         (self.on_exit)(status);
+    }
+}
+
+#[cfg(test)]
+mod cgroup_tests {
+    use super::*;
+
+    #[test]
+    fn the_core_moves_aside_so_programs_get_cgroups_of_their_own() {
+        let root = std::env::temp_dir().join(format!("agentboard-cgroup-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("user/unit.service")).unwrap();
+        assert_eq!(split_cgroup("0::/user/unit.service\n", &root), Some(root.join("user/unit.service")));
+        assert_eq!(std::fs::read_to_string(root.join("user/unit.service/core/cgroup.procs")).unwrap(), "0");
+        assert_eq!(std::fs::read_to_string(root.join("user/unit.service/cgroup.subtree_control")).unwrap(), "+memory");
+        // cgroup v1, or a cgroup that isn't there to split: left alone.
+        assert_eq!(split_cgroup("5:memory:/user\n", &root), None);
+        assert_eq!(split_cgroup("0::/missing\n", &root), None);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

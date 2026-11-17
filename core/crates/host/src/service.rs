@@ -13,9 +13,12 @@ fn unit(executable: &str) -> String {
     // agents' terminals, so they can't outlive it usefully (they get a hangup when it dies and
     // a new core can't adopt them). Stopping the whole group leaves no orphan a board can't see.
     //
+    // Delegate: the core gives each program a cgroup of its own under the unit's, so the OOM
+    // daemon ends the one program short of memory, not the core and every agent with it.
+    //
     // PATH: a user service doesn't read the login shell's profile, and agents are found there.
     format!(
-        "[Unit]\nDescription=AgentBoard host\n\n[Service]\nExecStart=\"{}\" host\nRestart=always\nRestartSec=2\n\
+        "[Unit]\nDescription=AgentBoard host\n\n[Service]\nExecStart=\"{}\" host\nRestart=always\nRestartSec=2\nDelegate=yes\n\
          Environment=PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\n[Install]\nWantedBy=default.target\n",
         executable.replace('%', "%%").replace('\\', "\\\\").replace('"', "\\\"")
     )
@@ -111,7 +114,7 @@ mod tests {
     fn unit_runs_the_core_and_restarts_it() {
         let unit = unit("/home/u/.local/bin/agent board");
         assert!(unit.contains("ExecStart=\"/home/u/.local/bin/agent board\" host\n"));
-        assert!(unit.contains("Restart=always\n") && unit.contains("WantedBy=default.target\n") && !unit.contains("KillMode"));
+        assert!(unit.contains("Restart=always\n") && unit.contains("Delegate=yes\n") && unit.contains("WantedBy=default.target\n") && !unit.contains("KillMode"));
     }
 
     #[test]

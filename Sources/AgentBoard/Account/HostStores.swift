@@ -20,8 +20,11 @@ final class HostStores {
     /// launch (see `HostSync`); nil copies nothing unasked.
     @ObservationIgnored var syncHome: URL?
     @ObservationIgnored private var synced: Set<UUID> = []
-    /// How the sync to each host is going or went, for its row in the account menu.
+    /// How the sync to each host is going or went, for its row in the hosts menu.
     private(set) var syncNotes: [UUID: String] = [:]
+    enum SyncState { case syncing, synced, failed }
+    /// Where each computer's sync stands, for its badge; the nil key is this Mac. None until its first sync.
+    private(set) var syncStates: [UUID?: SyncState] = [:]
     /// The vault waits for the user's word, asked once per account (see `answerVault`).
     private(set) var vaultQuestion = false
     /// How the last write to the account's vault went.
@@ -34,8 +37,12 @@ final class HostStores {
     private(set) var vaultManifest: Vault.Manifest?
     /// This Mac's servers that can't go to a host, and why.
     private(set) var skippedServers: [String: String] = [:]
-    /// The host whose "MCP servers" sheet is open.
-    var editingServers: UUID?
+    /// The host whose dialog is open (`id` nil: this Mac), and whether on its "MCP servers" page.
+    struct Editing: Identifiable, Equatable {
+        var id: UUID?
+        var servers = false
+    }
+    var editingHost: Editing?
     /// The account server's vault (another in tests), where its key is kept, the file holding
     /// what this Mac last wrote, and this Mac's GitHub login.
     @ObservationIgnored var vaultServer: Vault.Server?
@@ -203,11 +210,12 @@ final class HostStores {
             self?.homes = [:]
             self?.synced = []
             self?.syncNotes = [:]
+            self?.syncStates = [:]
             self?.vaultQuestion = false
             self?.vaultNote = nil
             self?.reports = [:]
             self?.vaultManifest = nil
-            self?.editingServers = nil
+            self?.editingHost = nil
         }
         account.onHosts = { [weak self] in
             self?.remote.values.forEach { $0.explainDown() }
@@ -286,7 +294,7 @@ final class HostStores {
                                                                       "without": ["notes"]]]]
             reports[host] = Vault.Report(Data(#"{"version":3,"files":0,"removed":0,"servers":["builds","dokk","gitlab","papers","search"],"lacking":[{"server":"papers","command":"uvx"}],"github":true}"#.utf8))
             skippedServers = ["filmcraft": L("a program built for the Mac")]
-            editingServers = host
+            editingHost = Editing(id: host, servers: true)
         }
         if DebugShow.items.contains("host-waiting") { waiting[host] = 1 }
         if DebugShow.items.contains("host-approval") {
@@ -380,6 +388,7 @@ final class HostStores {
         guard let syncHome, let token = account.token, let board = account.boardPublicKey else { return }
         account.vaultAllowed = true
         vaultNote = L("Syncing…")
+        syncStates[nil] = .syncing
         let trusted = account.hosts.filter { $0.online && !account.identityChanged($0.id) && waiting[$0.id] == nil }.map(\.id)
         do {
             let server = vaultServer ?? .http(server: account.server, token: token)
@@ -406,6 +415,7 @@ final class HostStores {
             vaultSent = written.map { ($0.plainBytes, $0.sentBytes) }
             vaultManifest = written?.manifest ?? Vault.state(at: vaultState, key: key)?.whole
             vaultNote = written.map { L("Kept in your account (version \($0.version)).") } ?? L("Up to date.")
+            syncStates[nil] = .synced
             // Every host this Mac reaches holds the key before it is asked to apply anything.
             let handed = try JSONSerialization.data(withJSONObject: ["set": ["key": key.base64EncodedString()]])
             for host in trusted {
@@ -414,6 +424,7 @@ final class HostStores {
             }
         } catch {
             vaultNote = L("Not synced: \(error.localizedDescription)")
+            syncStates[nil] = .failed
         }
     }
 
@@ -423,16 +434,20 @@ final class HostStores {
         guard let store = remote[host] else { return }
         let name = store.host?.name ?? L("the host")
         syncNotes[host] = L("Syncing skills…")
+        syncStates[host] = .syncing
         // The host fetches and writes for as long as that takes; nothing large travels here.
         guard let ran = await store.run("agentboard", ["vault", "pull"], patience: 600) else {
+            syncStates[host] = .failed
             return syncNotes[host] = L("Not synced: \(L("Couldn't reach \(name). It may be offline."))")
         }
         guard ran.status == 0, let report = Vault.Report(ran.output) else {
             let said = String(decoding: ran.error, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            syncStates[host] = .failed
             return syncNotes[host] = L("Not synced: \(String(said.prefix(300)))")
         }
         reports[host] = report
         syncNotes[host] = report.note(on: name, skipped: skippedServers)
+        syncStates[host] = .synced
     }
 
     /// Removes `host` from the account (see `AccountStore.forgetHost`) and from this board.
@@ -442,8 +457,9 @@ final class HostStores {
         homes[host] = nil
         synced.remove(host)
         syncNotes[host] = nil
+        syncStates[host] = nil
         reports[host] = nil
-        if editingServers == host { editingServers = nil }
+        if editingHost?.id == host { editingHost = nil }
         return true
     }
 
@@ -471,7 +487,7 @@ final class HostStores {
         store.bulkRun = { [weak self] executable, arguments, input in await self?.runApart(on: host, executable, arguments, input) ?? nil }
         store.downReason = { [weak self, weak account] in
             if account?.identityChanged(host) == true { return AccountStore.identityChangedNote }
-            return self?.waiting[host] == nil ? nil : L("\(name) is waiting to approve this Mac. The account menu says how.")
+            return self?.waiting[host] == nil ? nil : L("\(name) is waiting to approve this Mac. Its dialog, under Compute, says how.")
         }
         store.onConnect = { [weak self] in
             guard let self, syncHome != nil, synced.insert(host).inserted else { return }
