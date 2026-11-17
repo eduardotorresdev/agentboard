@@ -36,6 +36,9 @@ Status: built (2026-10-28).
 | `runner_restart` | Stop if running, start again, optionally with a new `command` |
 | `runner_input` | Types text (and Enter) into its terminal |
 | `runner_close` | Stops and removes a runner the caller started; the developer's own runners can only be stopped |
+| `terminal_open` | Adds a plain terminal (the login shell, no command) as a runner card next to the caller, connected to it; the other runner tools work on it |
+| `agent_start` | Adds an agent card (`agent`: a provider id) next to the caller, in its worktree and organization, connected to it, and starts it |
+| `agent_close` | Ends an agent connected to the caller and removes its card |
 
 Agents reach only runners connected to them, like browsers. The tools' instructions ask agents
 to start long-running commands as runners rather than in their own shell.

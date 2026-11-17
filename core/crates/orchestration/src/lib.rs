@@ -20,6 +20,7 @@ mod attention;
 mod board_protocol;
 mod browser_relay;
 mod card_database;
+mod card_tools;
 mod cards;
 mod image_card;
 mod image_tools;

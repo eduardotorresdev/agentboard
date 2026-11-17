@@ -69,7 +69,7 @@ A confirm dialog is waiting: "Discard changes?". Answer it with browser_dialog.
 |---|---|---|
 | `browser_list` | Browsers connected to you: name, device, viewport, address, state | — |
 | `browser_open` | Opens a new browser next to you and connects it: `device` (preset name or phone/tablet/desktop/responsive), or `width`, `height`, `scale`, `mobile`, `touch`; `url`, `name` | `browser.newContext(devices[…])` |
-| `browser_close` | Closes a browser you opened | `context.close()` |
+| `browser_close` | Closes a connected browser and removes its card | `context.close()` |
 | `browser_navigate` | `url`, or `action: back/forward/reload`; `waitUntil` | `goto`, `goBack`, `goForward`, `reload` |
 | `browser_snapshot` | The page as an accessibility tree with refs, iframes included; `target` to scope, `depth`, `boxes` | `ariaSnapshot({ mode: "ai" })` |
 | `browser_screenshot` | Image in the result plus a saved file. `fullPage`, `target` (element), `clip` (region), `mask` (targets), `animations: "disabled"`, `caret: "hide"`, `scale: css/device`, `format`, `quality`, `path`. `compareTo` + `threshold` diff against a saved image | `page/locator.screenshot`, pixel diff in the sidecar |
@@ -331,8 +331,8 @@ descriptions say so.
 - MCP stays on 127.0.0.1 with per-element tokens (the bridge's `ToolServer`). The embed socket
   lives in `~/Library/Application Support/AgentBoard/`, mode 0600, and accepts one connection per embedder
   launch with a token from the environment.
-- Agents can only touch browsers they are connected to. `browser_close` only closes browsers
-  the caller opened. Closing anything else is the developer's call.
+- Agents can only touch browsers they are connected to. `browser_close` closes any
+  browser connected to the caller, as `image_remove` does with images.
 - `browser_evaluate` runs in the page, not in the sidecar. `browser_route` takes data, not
   functions, so no agent code runs in Node.
 - Downloads are saved, never opened.

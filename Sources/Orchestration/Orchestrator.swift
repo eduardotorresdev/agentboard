@@ -13,7 +13,7 @@ import Foundation
 public final class Orchestrator: CoreService {
     let server: CoreServer
     private let database: CardDatabase?
-    private let providers: [any AgentProvider]
+    let providers: [any AgentProvider]
     let dataFolder: URL
     private(set) var cards: [AgentRecord] = []
     /// The post-its (see PostItTools).
@@ -113,6 +113,7 @@ public final class Orchestrator: CoreService {
         catalog.add(BrowserRelay(store: self))
         catalog.add(ProjectRelay(store: self))
         catalog.add(WorktreeTools(store: self))
+        catalog.add(CardTools(store: self))
         bus.onGraphChange = { [weak self] graph in
             if self?.connectionsReadOnly == false { try? self?.database?.saveConnections(graph.connections) }
             self?.broadcast(.connections(graph.connections))

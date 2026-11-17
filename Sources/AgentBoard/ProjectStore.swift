@@ -211,6 +211,20 @@ final class ProjectStore {
         reload()
     }
 
+    /// Removes it off the main thread and throws git's words when it can't (the agents' tool;
+    /// the sidebar's `removeWorktree` shows them in `errorMessage`).
+    func remove(_ worktree: Worktree, from project: Project, force: Bool) async throws {
+        let repository = project.path
+        if let host = worktree.host {
+            try await onHost(host) { try Git.removeWorktree(at: worktree.path, from: $0.clone(of: repository), force: force) }
+            await listHostWorktrees(of: repository, on: host)
+        } else {
+            try await Task.detached { try Git.removeWorktree(at: worktree.path, from: repository, force: force) }.value
+            reload()
+        }
+        try? database?.forgetWorktreeNames(path: worktree.path)
+    }
+
     /// Pulls the worktree's branch where the worktree is, off the main thread; git's own words
     /// show when it can't.
     @discardableResult

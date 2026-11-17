@@ -903,7 +903,7 @@ fn browser_calls_go_to_the_board() {
     assert_eq!(unanswered.join().unwrap(), ("The board closed before the browser answered. Try again once it is open.".to_string(), true));
 
     assert_eq!(core.call("browser_list", json!({}), a.id), ("Browsers run in the board, which isn't open right now. Ask the user to open it, then try again.".to_string(), true));
-    for tool in ["project_list", "host_list", "worktree_create"] {
+    for tool in ["project_list", "host_list", "worktree_create", "worktree_remove"] {
         assert_eq!(core.call(tool, json!({"branch": "x"}), a.id), ("Projects live in the board, which isn't open right now. Ask the user to open it, then try again.".to_string(), true));
     }
     assert_eq!(core.call("nope", json!({}), a.id), ("Unknown tool “nope”.".to_string(), true));
@@ -930,7 +930,7 @@ fn the_tools_are_listed_with_their_instructions() {
     let expected = "list_peers send_message runner_start runner_list runner_logs runner_stop runner_restart runner_input runner_close postit_create postit_read postit_write postit_edit \
                     image_create image_read image_replace image_remove video_create video_read video_replace video_remove browser_open browser_list browser_navigate browser_snapshot \
                     browser_screenshot browser_click browser_type browser_press browser_scroll browser_evaluate browser_console browser_wait project_list project_create \
-                    worktree_set_title host_list worktree_create";
+                    worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove browser_close";
     assert_eq!(names, expected.split_whitespace().collect::<Vec<_>>());
     let start = &tools[2]["inputSchema"];
     assert_eq!(start["required"], json!(["command"]));
@@ -1168,6 +1168,37 @@ fn agents_add_post_its() {
 }
 
 // MARK: Images
+/// Agents add agents and plain terminals next to them, and close what is connected to them.
+#[test]
+fn agents_add_and_close_cards() {
+    let core = Core::new();
+    let board = Board::open(&core);
+    let (a, _b) = pair(&core, &board);
+
+    let (started, failed) = core.call("agent_start", json!({"agent": "echo", "name": "Helper"}), a.id);
+    assert!(!failed && started.starts_with("Started agent “Helper”, connected to you."), "{started}");
+    let helper = core.card("Helper").unwrap();
+    assert!(helper.runner.is_none() && helper.frame.min_x() > a.frame.max_x());
+    core.shows(helper.id, "ready");
+    assert!(core.call("agent_start", json!({"agent": "nope"}), a.id).1);
+
+    let (opened, _) = core.call("terminal_open", json!({}), a.id);
+    assert_eq!(opened, "Opened terminal “terminal”, connected to you.");
+    assert!(core.card("terminal").unwrap().runner.unwrap().command.is_empty());
+
+    let (several, failed) = core.call("agent_close", json!({}), a.id);
+    assert!(failed && several.contains("Bob") && several.contains("Helper"), "{several}");
+    let (closed, _) = core.call("agent_close", json!({"agent": "Helper"}), a.id);
+    assert_eq!(closed, "Ended Helper and removed its card.");
+    assert!(core.card("Helper").is_none() && core.card("Bob").is_some());
+
+    core.call("postit_create", json!({"name": "Plan"}), a.id);
+    let (removed, _) = core.call("postit_remove", json!({}), a.id);
+    assert_eq!(removed, "Removed “Plan” from the board.");
+    assert!(core.post_its().is_empty());
+    core.call("runner_close", json!({}), a.id);
+}
+
 
 /// A PNG of `width`×`height`, one colour.
 fn png(width: u32, height: u32) -> Vec<u8> {

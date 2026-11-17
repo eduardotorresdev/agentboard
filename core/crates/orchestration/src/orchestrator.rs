@@ -25,7 +25,7 @@ use crate::l10n::l;
 use crate::post_it::PostItRecord;
 use crate::process_inspector::{RunnerStats, Sample};
 use crate::video_files::VideoTools;
-use crate::{browser_relay::BrowserRelay, image_tools::ImageTools, post_it_tools::PostItTools, project_relay::ProjectRelay, runner_tools::RunnerTools, worktree_tools::WorktreeTools};
+use crate::{browser_relay::BrowserRelay, card_tools::CardTools, image_tools::ImageTools, post_it_tools::PostItTools, project_relay::ProjectRelay, runner_tools::RunnerTools, worktree_tools::WorktreeTools};
 
 /// The board's cards, the lines between elements and the agents' tools, kept by the core so
 /// they work while no board runs: agents message each other, start runners and read their logs
@@ -47,7 +47,7 @@ pub struct Orchestrator {
 pub struct Store {
     pub(crate) handle: CoreHandle<Orchestrator>,
     database: Option<CardDatabase>,
-    providers: Vec<&'static dyn AgentProvider>,
+    pub(crate) providers: Vec<&'static dyn AgentProvider>,
     pub(crate) data_folder: PathBuf,
     pub(crate) cards: Vec<AgentRecord>,
     /// The post-its (see PostItTools).
@@ -957,6 +957,7 @@ impl Turn<'_> {
         self.bus.connect(x, y, (None, None));
         self.flush_bus();
     }
+        catalog.add(CardTools);
 
     /// Takes an element's lines off the board.
     fn disconnect_element(&mut self, id: Uuid) {

@@ -23,6 +23,11 @@ final class BrowserTools {
         case .success(let found): browser = found
         case .failure(let message): return .error(message.text)
         }
+        if name == "browser_close" {
+            let closed = browser.name
+            store.remove(browser.id)
+            return .text("Closed “\(closed)” and removed its card.")
+        }
         var params = arguments
         params["browser"] = nil
         params["caller"] = caller.uuidString

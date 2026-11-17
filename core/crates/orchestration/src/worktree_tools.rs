@@ -40,6 +40,16 @@ impl<'a> ToolProvider<Turn<'a>> for WorktreeTools {
                     "host": {"type": "string", "description": "Host name or id, as host_list shows it. The host you run on when left out."},
                 }, "required": ["branch"]}),
             ),
+            ToolDefinition::with_schema(
+                "worktree_remove",
+                "Removes a worktree of a project in the user's sidebar: its folder goes, its branch stays. \
+                 Never the one your card is in, nor a project's main checkout. One with uncommitted changes \
+                 or unpushed commits is kept unless `force`; the result says what would be lost. Needs the board open.",
+                json!({"type": "object", "properties": {
+                    "path": {"type": "string", "description": "The worktree's folder, as project_list shows it."},
+                    "force": {"type": "boolean", "description": "Remove it even with uncommitted changes or unpushed commits, which are lost."},
+                }, "required": ["path"]}),
+            ),
         ]
     }
 

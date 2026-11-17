@@ -150,6 +150,39 @@ struct OrchestratorTests {
         next.disconnect()
     }
 
+    /// Agents add agents and plain terminals next to them, and close what is connected to them.
+    @Test func agentsAddAndCloseCards() async throws {
+        let core = try await MainActor.run { try Core() }
+        defer { Task { @MainActor in core.stop() } }
+        let folder = await MainActor.run { core.folder }
+        let a = agent("Ada", in: folder)
+        let client = try await board(core)
+        client.send(.addCard(a))
+        try await waitUntil { core.orchestrator.record(a.id) != nil }
+
+        let started = try await call("agent_start", ["agent": a.providerID, "name": "Helper"], as: a.id, on: core)
+        #expect(!started.isError && started.text.hasPrefix("Started agent “Helper”, connected to you."), "\(started.text)")
+        let helper = try #require(await core.card(named: "Helper"))
+        #expect(helper.runner == nil && helper.frame.minX > a.frame.maxX)
+        try await waitUntil { core.screen(helper.id).contains("ready") }
+        #expect(try await call("agent_start", ["agent": "nope"], as: a.id, on: core).isError)
+
+        let opened = try await call("terminal_open", as: a.id, on: core)
+        #expect(opened.text == "Opened terminal “terminal”, connected to you.")
+        #expect(await core.card(named: "terminal")?.runner?.isShell == true)
+
+        let closed = try await call("agent_close", as: a.id, on: core)
+        #expect(closed.text == "Ended Helper and removed its card.")
+        #expect(await core.card(named: "Helper") == nil)
+
+        _ = try await call("postit_create", ["name": "Plan"], as: a.id, on: core)
+        let removed = try await call("postit_remove", as: a.id, on: core)
+        #expect(removed.text == "Removed “Plan” from the board.")
+        #expect(await core.orchestrator.postIts.isEmpty)
+        _ = try await call("runner_close", as: a.id, on: core)
+        client.disconnect()
+    }
+
     /// A board mirrors what agents change through the core while it runs.
     @Test func boardHearsWhatAgentsDo() async throws {
         let core = try await MainActor.run { try Core() }

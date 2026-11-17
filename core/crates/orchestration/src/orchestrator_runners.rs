@@ -40,6 +40,21 @@ impl Turn<'_> {
         record
     }
 
+    /// Adds an agent card next to `owner`, in its worktree and organization, connected to it, and starts it.
+    pub(crate) fn add_agent(&mut self, provider: &dyn runtime::AgentProvider, name: Option<&str>, owner: &AgentRecord) -> AgentRecord {
+        let size = Size::new(640.0, 420.0);
+        let base = name.filter(|name| !name.is_empty()).unwrap_or(provider.title());
+        let record = AgentRecord {
+            organization: owner.organization,
+            ..AgentRecord::new(Uuid::new(), owner.worktree.clone(), provider.id(), AgentRecord::unique_name(base, self.cards_in(&owner.worktree)), Rect::at(self.origin(owner, size), size))
+        };
+        self.insert(record.clone(), None);
+        self.connect(owner.id, record.id);
+        self.server.open_session(crate::board_protocol::to_runtime(record.id), estimated_columns(record.frame), estimated_rows(record.frame), None);
+        self.launch(record.id);
+        record
+    }
+
     /// Starts a runner that isn't running.
     pub(crate) fn start_runner(&mut self, id: Uuid) {
         let Some(frame) = self.record(id).filter(|record| record.runner.is_some()).map(|record| record.frame) else { return };

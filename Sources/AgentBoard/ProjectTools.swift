@@ -26,6 +26,7 @@ final class ProjectTools {
         case "project_create": return await create(arguments, in: organization)
         case "worktree_set_title": return setTitle(arguments, caller: caller)
         case "worktree_create": return await createWorktree(arguments, caller: caller)
+        case "worktree_remove": return await removeWorktree(arguments, caller: caller)
         case "host_list": return .text(await hostList())
         default: return .error("Unknown tool “\(name)”.")
         }
@@ -113,6 +114,47 @@ final class ProjectTools {
             let created = try await Task.detached { try Git.createWorktree(branch: branch, in: repository, on: git) }.value
             _ = await projects.hostWorktree(at: created.path, branch: branch, on: host, in: project)
             return .text("Created the worktree at \(created.path) on \(git.name), on \(branch)." + (created.warning.map { " git reported: \(WorktreeDraft.cause(of: $0))" } ?? ""))
+        } catch {
+            return .error(WorktreeDraft.cause(of: error.localizedDescription))
+        }
+    }
+
+    private func removeWorktree(_ arguments: [String: Any], caller: UUID) async -> ToolResult {
+        guard let record = agents.record(caller) else { return .error("Your card isn't on the board.") }
+        guard let path = (arguments["path"] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty else {
+            return .error("Give the `path` of the worktree, as project_list shows it.")
+        }
+        // Every worktree of the organization's projects, here and on the account's hosts; a list's first is the checkout itself.
+        var found: (worktree: Worktree, project: Project, isMain: Bool)?
+        for project in projects.projects(in: record.organizationID) where found == nil {
+            let lists = [Git.worktrees(at: project.path) ?? []] + remoteHosts.map { projects.hostWorktrees[$0.id]?[project.path] ?? [] }
+            for list in lists {
+                if let index = list.firstIndex(where: { $0.path == path }) { found = (list[index], project, index == 0) }
+            }
+        }
+        guard let found else { return .error("No worktree at \(path) in your organization's projects. project_list shows them.") }
+        guard !found.isMain else { return .error("\(path) is the project's main checkout, not a worktree that can be removed.") }
+        guard !(found.worktree.host == agents.host?.id && found.worktree.path == record.worktree) else {
+            return .error("That is the worktree your card is in.")
+        }
+        let worktree = found.worktree
+        if arguments["force"] as? Bool != true {
+            let work: Git.PendingWork
+            if let host = worktree.host {
+                guard let asked = try? await projects.onHost(host, { _ in Git.pendingWork(at: path) }) else {
+                    return .error("Couldn't reach the worktree's host to check for unsaved work.")
+                }
+                work = asked
+            } else {
+                work = await Task.detached { Git.pendingWork(at: path) }.value
+            }
+            guard work.isEmpty else {
+                return .error("Kept it: it has \(work.changedFiles) changed file(s) and \(work.unpushedCommits) unpushed commit(s). Save them, or pass `force` to lose them.")
+            }
+        }
+        do {
+            try await projects.remove(worktree, from: found.project, force: arguments["force"] as? Bool == true)
+            return .text("Removed the worktree at \(path). Its branch\(worktree.branch.map { " (\($0))" } ?? "") is kept.")
         } catch {
             return .error(WorktreeDraft.cause(of: error.localizedDescription))
         }

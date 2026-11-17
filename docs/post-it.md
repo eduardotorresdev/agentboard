@@ -30,6 +30,7 @@ Status: built (2026-10-30). Replaces the notes block (statuses plus a list of no
 | `postit_read` | The markdown, and who wrote it last and when |
 | `postit_write` | Replaces the markdown, or adds `text` on a new line at the end with `append` |
 | `postit_edit` | Replaces one exact passage (`old_text` must appear once) and leaves the rest |
+| `postit_remove` | Takes a connected post-it off the board |
 
 Agents reach only post-its connected to them; with several connected, `postit` says which by
 name. The tools' instructions ask agents to read the post-it before starting, keep it current,

@@ -459,6 +459,17 @@ struct Rig {
     #expect(rig.projects.worktrees[rig.project.id]?.map(\.branch) == ["main", "here"])
     #expect(rig.projects.worktrees[rig.project.id]?.allSatisfy { $0.host == nil } == true)
 
+    // Removing one: never the main checkout, and work that would be lost keeps it unless forced.
+    let here = try #require(rig.projects.worktrees[rig.project.id]?.last?.path)
+    #expect(await tools.call("worktree_remove", arguments: ["path": rig.repo.path], caller: caller.id).isError)
+    #expect(await tools.call("worktree_remove", arguments: ["path": "/nowhere"], caller: caller.id).isError)
+    try "draft".write(toFile: here + "/draft.txt", atomically: true, encoding: .utf8)
+    let kept = await tools.call("worktree_remove", arguments: ["path": here], caller: caller.id)
+    #expect(kept.isError && text(kept).contains("1 changed file"), "\(kept)")
+    let removed = await tools.call("worktree_remove", arguments: ["path": here, "force": true], caller: caller.id)
+    #expect(!removed.isError, "\(removed)")
+    #expect(rig.projects.worktrees[rig.project.id]?.map(\.branch) == ["main"] && !FileManager.default.fileExists(atPath: here))
+
     // Signed out, there is only this Mac, and the tool says so.
     await rig.hosts.account.signOut()
     let alone = text(await tools.call("host_list", arguments: [:], caller: caller.id))
