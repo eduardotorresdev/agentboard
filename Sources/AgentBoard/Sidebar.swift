@@ -30,6 +30,7 @@ struct Sidebar: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    boardRow
                     ForEach(store.projects) { project in
                         group(for: project)
                     }
@@ -126,6 +127,30 @@ struct Sidebar: View {
             }
         }
         .clipped()
+    }
+
+    /// The user's own board, over the projects: it belongs to none.
+    private var boardRow: some View {
+        let board = store.board
+        let tag = WorktreeSelection(projectID: nil, worktree: board)
+        let source: WorktreeRow.Source = store.isNamedByUser(board) ? .user : .fallback
+        return WorktreeRow(name: store.displayName(of: board), source: source, isMain: false, contents: contents(of: board),
+                           isBoard: true, isSelected: selection == tag, isRenaming: renaming == board,
+                           selectionSpace: selectionSpace,
+                           onSelect: { withAnimation(.snappy(duration: 0.3)) { selection = tag } },
+                           onStartRename: { renaming = board },
+                           onRename: { draft, opened, confirmed in
+                               if case .set(let name) = WorktreeTitle.renameAction(draft: draft, opened: opened,
+                                                                                    openedIsFallback: source == .fallback, confirmed: confirmed) {
+                                   store.rename(board, to: name)
+                               }
+                               renaming = nil
+                           })
+            .help(L("A free canvas of your own, outside any project: plan here and have agents set up projects and worktrees."))
+            .contextMenu {
+                Button(L("Rename")) { renaming = board }
+                if source == .user { Button(L("Reset Name")) { store.rename(board, to: "") } }
+            }
     }
 
     private func row(for worktree: Worktree, in project: Project) -> some View {
@@ -283,6 +308,8 @@ private struct WorktreeRow: View {
     var host: String?
     /// Its host isn't online: what is known of it shows, dimmed.
     var isOffline = false
+    /// The user's own board: a top-level row with its own tile and fill, apart from the projects.
+    var isBoard = false
     let isSelected: Bool
     let isRenaming: Bool
     let selectionSpace: Namespace.ID
@@ -303,6 +330,16 @@ private struct WorktreeRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if isBoard {
+                Image(systemName: MyBoard.symbol)
+                    .font(Theme.Font.caption.weight(.bold))
+                    .foregroundStyle(Theme.onAccent)
+                    .frame(width: ProjectTile.size, height: ProjectTile.size)
+                    .background(Theme.deep, in: .rect(cornerRadius: Theme.Radius.thumb))
+                    // The title lines up with the projects' names.
+                    .padding(.trailing, 1)
+                    .accessibilityHidden(true)
+            }
             // The title gets the row's width; where it lives goes under it.
             VStack(alignment: .leading, spacing: 1) {
                 title
@@ -322,9 +359,9 @@ private struct WorktreeRow: View {
             CardStatusDot(status: status ?? .stopped)
                 .help(status?.label ?? "")
         }
-        .padding(.leading, Self.textInset)
+        .padding(.leading, isBoard ? 8 : Self.textInset)
         .padding(.trailing, 12)
-        .frame(height: host == nil ? 32 : 46)
+        .frame(height: isBoard ? 40 : host == nil ? 32 : 46)
         .background { background }
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onStartRename)
@@ -341,7 +378,7 @@ private struct WorktreeRow: View {
         if isRenaming {
             TextField(L("Name"), text: $draft, prompt: Text(name))
                 .textFieldStyle(.plain)
-                .font(Theme.Font.body)
+                .font(isBoard ? Theme.Font.heading : Theme.Font.body)
                 .focused($fieldFocused)
                 .onAppear {
                     draft = name
@@ -353,9 +390,9 @@ private struct WorktreeRow: View {
                 .onChange(of: fieldFocused) { _, focused in if !focused { onRename(draft, opened, false) } }
         } else {
             Text(name)
-                .font(Theme.Font.body.weight(needsUser ? .bold : isSelected ? .medium : .regular))
+                .font(isBoard ? Theme.Font.heading : Theme.Font.body.weight(needsUser ? .bold : isSelected ? .medium : .regular))
                 // Dimmed with the muted ink, which still passes AA, not with opacity.
-                .foregroundStyle(isOffline ? Theme.inkMuted : needsUser || isSelected ? Theme.ink : Theme.ink.opacity(0.82))
+                .foregroundStyle(isBoard ? Theme.deep : isOffline ? Theme.inkMuted : needsUser || isSelected ? Theme.ink : Theme.ink.opacity(0.82))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .help(source == .user ? L("\(name) · Named by you; agents can't rename it") : name)
@@ -364,7 +401,10 @@ private struct WorktreeRow: View {
 
     @ViewBuilder private var background: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.Radius.control)
-        if isSelected {
+        if isBoard {
+            // Always filled, in the sky's blues: deeper when open.
+            shape.fill(isSelected ? Theme.accentTint : isHovered ? Theme.accentTint.opacity(0.6) : Theme.accentSoft)
+        } else if isSelected {
             shape.fill(Theme.ink.opacity(0.08))
                 .matchedGeometryEffect(id: "selection", in: selectionSpace)
         } else {

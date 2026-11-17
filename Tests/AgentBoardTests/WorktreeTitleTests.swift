@@ -247,3 +247,31 @@ private func waitUntil(_ condition: () -> Bool) async throws {
     #expect(ProjectTile.colorIndex(for: "docs-site") == 0)
     #expect(ProjectTile.colorIndex(for: "api-gateway") == 2)
 }
+
+// MARK: The user's own board
+
+@MainActor @Test func theUsersBoardIsTitledByThemAndAgentsStartInItOrInAWorktree() async throws {
+    let (store, _, worktree) = try storeWithWorktree()
+    let board = store.board
+    #expect(MyBoard.isBoard(board.path) && !MyBoard.isBoard(worktree.path))
+    #expect(!MyBoard.isBoard((board.path as NSString).deletingLastPathComponent + "/claude/board"))
+    #expect(FileManager.default.fileExists(atPath: board.path))
+    #expect(store.displayName(of: board) == MyBoard.defaultTitle)
+    store.rename(board, to: "Life")
+    #expect(store.displayName(of: board) == "Life")
+
+    let agents = AgentStore(database: FileManager.default.temporaryDirectory.appendingPathComponent("abcards-\(UUID().uuidString).sqlite"),
+                            connect: { .failure(.noCore) })
+    let tools = ProjectTools(projects: store, agents: agents)
+    let caller = AgentRecord(id: UUID(), worktree: board.path, providerID: "claude", name: "Claude",
+                             frame: .zero, organization: store.organizationID)
+    agents.insert(caller)
+    // What `agent_start` asks before starting an agent somewhere else.
+    #expect(!(await tools.call("worktree_resolve", arguments: ["path": worktree.path], caller: caller.id).isError))
+    #expect(!(await tools.call("worktree_resolve", arguments: ["path": board.path], caller: caller.id).isError))
+    #expect(await tools.call("worktree_resolve", arguments: ["path": NSTemporaryDirectory()], caller: caller.id).isError)
+    // Only the user titles their board.
+    #expect(!(await tools.call("worktree_set_title", arguments: ["title": "Other"], caller: caller.id).isError))
+    store.rename(board, to: "")
+    #expect(store.displayName(of: board) == MyBoard.defaultTitle)
+}

@@ -64,7 +64,10 @@ public final class MessagingTools: ToolProvider {
     }
 
     private func peerList(for caller: UUID) -> String {
-        Self.listing(of: bus.elements(onBoardOf: caller), connected: Set(bus.peers(of: caller).map(\.id)), caller: caller)
+        let onBoard = bus.elements(onBoardOf: caller), peers = bus.peers(of: caller)
+        // An agent started in another worktree stays connected: listed with the board's own.
+        let elsewhere = peers.filter { peer in !onBoard.contains { $0.id == peer.id } }
+        return Self.listing(of: onBoard + elsewhere, connected: Set(peers.map(\.id)), caller: caller)
     }
 
     /// One line per element: name, then type, id, whether it is connected to `caller`, and detail.

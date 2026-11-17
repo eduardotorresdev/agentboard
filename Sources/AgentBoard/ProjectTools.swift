@@ -27,14 +27,28 @@ final class ProjectTools {
         case "worktree_set_title": return setTitle(arguments, caller: caller)
         case "worktree_create": return await createWorktree(arguments, caller: caller)
         case "worktree_remove": return await removeWorktree(arguments, caller: caller)
+        case "worktree_resolve": return resolveWorktree(arguments, caller: caller)
         case "host_list": return .text(await hostList())
         default: return .error("Unknown tool “\(name)”.")
         }
     }
 
+    /// Not listed to agents: the core asks it before starting an agent in a worktree other than
+    /// its caller's (`agent_start`), since only the board knows the projects.
+    private func resolveWorktree(_ arguments: [String: Any], caller: UUID) -> ToolResult {
+        guard let record = agents.record(caller) else { return .error("Your card isn't on the board.") }
+        let path = arguments["path"] as? String ?? ""
+        let isBoard = agents.host == nil && path == MyBoard.worktree(in: record.organizationID).path
+        guard isBoard || projects.project(ofWorktree: path, on: agents.host?.id, in: record.organizationID) != nil else {
+            return .error("No worktree at \(path) on your host in your organization's projects. project_list shows them.")
+        }
+        return .text(path)
+    }
+
     private func setTitle(_ arguments: [String: Any], caller: UUID) -> ToolResult {
         guard let record = agents.record(caller) else { return .error("Your card isn't on the board.") }
         let title = arguments["title"] as? String ?? ""
+        if MyBoard.isBoard(record.worktree) { return .text("You are on the user's own board, not a worktree: only the user titles it.") }
         switch projects.setAgentTitle(title, path: record.worktree, in: record.organizationID, on: agents.host?.id) {
         case .applied: return .text("The worktree is titled “\(WorktreeTitle.clean(title) ?? title)”.")
         case .keptUserTitle(let user):

@@ -344,6 +344,9 @@
 "Couldn't add %lld files" = "Não foi possível adicionar %lld arquivos";
 "No cards" = "Sem cards";
 "Let Agents Rename" = "Deixar agentes renomearem";
+"My Board" = "Meu Quadro";
+"Reset Name" = "Restaurar nome";
+"A free canvas of your own, outside any project: plan here and have agents set up projects and worktrees." = "Um canvas livre só seu, fora de qualquer projeto: planeje aqui e peça aos agentes para configurar projetos e worktrees.";
 "main" = "principal";
 "%@ · Named by you; agents can't rename it" = "%@ · Nome dado por você; agentes não podem renomear";
 "%@ isn't a file." = "%@ não é um arquivo.";

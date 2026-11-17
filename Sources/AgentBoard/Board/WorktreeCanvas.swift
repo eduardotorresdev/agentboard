@@ -9,6 +9,8 @@ struct WorktreeCanvas: View {
     let fileTrees: FileTreeStore
     let worktree: Worktree
     let board: BoardController
+    /// The user's own board shows its title where a worktree shows its branch, and has no files to browse.
+    var title: String?
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -40,8 +42,8 @@ struct WorktreeCanvas: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 ViewThatFits(in: .horizontal) {
-                    CanvasToolbar(board: board)
-                    ScrollView(.horizontal, showsIndicators: false) { CanvasToolbar(board: board) }
+                    CanvasToolbar(board: board, hasFiles: title == nil)
+                    ScrollView(.horizontal, showsIndicators: false) { CanvasToolbar(board: board, hasFiles: title == nil) }
                 }
                 .layoutPriority(1)
                 VStack(alignment: .trailing, spacing: 8) {
@@ -57,7 +59,7 @@ struct WorktreeCanvas: View {
             .padding(.trailing, 16)
             .frame(maxHeight: .infinity, alignment: .bottom)
             if !board.isZen {
-                BranchBadge(branch: worktree.branch)
+                BranchBadge(branch: worktree.branch, title: title)
                     .padding(.top, 14)
                     .padding(.leading, board.leadingInset + 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -117,6 +119,7 @@ struct WorktreeCanvas: View {
 /// The board's tools, floating at the bottom center, as icon buttons.
 private struct CanvasToolbar: View {
     let board: BoardController
+    var hasFiles = true
 
     var body: some View {
         HStack(spacing: 2) {
@@ -144,11 +147,13 @@ private struct CanvasToolbar: View {
                 .fixedSize()
                 .accessibilityLabel(L("Add media"))
                 .help(L("Puts pictures or videos from your files on the board; agents connected to one see it."))
-            Button { board.addFileTree() } label: { Image(systemName: "folder") }
-                .buttonStyle(ToolbarButtonStyle(icon: true))
-                .fixedSize()
-                .accessibilityLabel(L("Add file tree"))
-                .help(L("Browse the worktree's files and leave notes on their lines for the connected agents."))
+            if hasFiles {
+                Button { board.addFileTree() } label: { Image(systemName: "folder") }
+                    .buttonStyle(ToolbarButtonStyle(icon: true))
+                    .fixedSize()
+                    .accessibilityLabel(L("Add file tree"))
+                    .help(L("Browse the worktree's files and leave notes on their lines for the connected agents."))
+            }
         }
         .font(.system(size: 18, weight: .medium))
         .padding(5)

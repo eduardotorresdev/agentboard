@@ -25,10 +25,11 @@ final class CardTools: ToolProvider {
         return [
             ToolDefinition(
                 name: "agent_start",
-                description: "Adds an agent card to the board next to you, in your worktree, connected to you, and starts it. Tell it what to do with send_message.",
+                description: "Adds an agent card to the board next to you, in your worktree, connected to you, and starts it. Give `worktree` to start it in another worktree instead; it stays connected to you. Tell it what to do with send_message.",
                 inputSchema: Self.schema([
                     "agent": ["type": "string", "enum": store.providers.map(\.id), "description": "Which agent to run: \(agents)."],
                     "name": ["type": "string", "description": "Card name, which is how you address it. Named after the agent when left out."],
+                    "worktree": ["type": "string", "description": "Absolute path of another worktree of your organization's projects, on your host, as project_list shows it. Yours when left out. Needs the board open."],
                 ], required: ["agent"])),
             ToolDefinition(
                 name: "agent_close",
@@ -70,8 +71,15 @@ final class CardTools: ToolProvider {
                     ?? store.providers.first(where: { $0.title.caseInsensitiveCompare(wanted) == .orderedSame }) else {
                 return .error("No agent “\(wanted)”. Give `agent` one of: \(store.providers.map(\.id).joined(separator: ", ")).")
             }
-            let record = store.addAgent(provider, name: cardName, owner: me)
-            return .text("Started agent “\(record.name)”, connected to you. Tell it what to do with send_message.")
+            var worktree = me.worktree
+            if let other = (arguments["worktree"] as? String)?.trimmingCharacters(in: .whitespaces), !other.isEmpty, other != worktree {
+                // The board knows the projects: it says whether the path is one of their worktrees.
+                let known = await store.relay("worktree_resolve", arguments: ["path": other], caller: caller)
+                guard !known.isError else { return known }
+                worktree = other
+            }
+            let record = store.addAgent(provider, name: cardName, owner: me, in: worktree)
+            return .text("Started agent “\(record.name)”\(worktree == me.worktree ? "" : " in \(worktree)"), connected to you. Tell it what to do with send_message.")
         case "agent_close":
             return connected(.agent, "agent", arguments["agent"], to: caller) { element in
                 let name = element.name
@@ -107,13 +115,18 @@ final class CardTools: ToolProvider {
 }
 
 extension Orchestrator {
-    /// Adds an agent card next to `owner`, in its worktree and organization, connected to it, and starts it.
-    func addAgent(_ provider: any AgentProvider, name: String?, owner: AgentRecord) -> AgentRecord {
+    /// Adds an agent card in `owner`'s organization, connected to it, and starts it: next to it in
+    /// its worktree, or to the right of what `worktree`'s canvas holds.
+    func addAgent(_ provider: any AgentProvider, name: String?, owner: AgentRecord, in worktree: String? = nil) -> AgentRecord {
         let size = CGSize(width: 640, height: 420)
         let base = name?.isEmpty == false ? name ?? provider.title : provider.title
-        let record = AgentRecord(id: UUID(), worktree: owner.worktree, providerID: provider.id,
-                                 name: AgentRecord.uniqueName(base, among: cards(in: owner.worktree)),
-                                 frame: CGRect(origin: origin(near: owner, size: size), size: size), organization: owner.organization)
+        let worktree = worktree ?? owner.worktree
+        let frames = layoutItems(in: worktree).map(\.frame)
+        let origin = worktree == owner.worktree ? origin(near: owner, size: size)
+            : CGPoint(x: frames.map(\.maxX).max().map { $0 + BoardLayout.columnGap } ?? 0, y: frames.map(\.minY).min() ?? 0)
+        let record = AgentRecord(id: UUID(), worktree: worktree, providerID: provider.id,
+                                 name: AgentRecord.uniqueName(base, among: cards(in: worktree)),
+                                 frame: CGRect(origin: origin, size: size), organization: owner.organization)
         insert(record)
         bus.connect(owner.id, record.id)
         server.openSession(record.id, cols: Self.estimatedColumns(record.frame), rows: Self.estimatedRows(record.frame), for: nil)

@@ -10,11 +10,13 @@ struct WorktreeContents: Equatable {
 /// The worktree's branch, small and quiet in the canvas's top-leading corner: the one place it shows.
 struct BranchBadge: View {
     let branch: String?
+    /// The user's own board has no branch: its title shows instead.
+    var title: String?
 
     var body: some View {
-        Label(branch ?? L("Detached HEAD"), systemImage: "arrow.triangle.branch")
-            .font(Theme.Font.caption.monospaced())
-            .foregroundStyle(Theme.inkMuted)
+        Label(title ?? branch ?? L("Detached HEAD"), systemImage: title == nil ? "arrow.triangle.branch" : MyBoard.symbol)
+            .font(title == nil ? Theme.Font.caption.monospaced() : Theme.Font.heading)
+            .foregroundStyle(title == nil ? Theme.inkMuted : Theme.deep)
             .lineLimit(1)
             .truncationMode(.middle)
             .frame(maxWidth: 280, alignment: .leading)

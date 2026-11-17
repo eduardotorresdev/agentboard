@@ -4,7 +4,8 @@ import Orchestration
 import SwiftUI
 
 struct WorktreeSelection: Hashable {
-    let projectID: Project.ID
+    /// nil for the user's own board, which no project holds.
+    let projectID: Project.ID?
     let worktree: Worktree
 }
 
@@ -200,7 +201,8 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         if let selection, let agents = hosts[selection.worktree.host] {
-            WorktreeCanvas(agents: agents, browsers: browsers, fileTrees: fileTrees, worktree: selection.worktree, board: boardController)
+            WorktreeCanvas(agents: agents, browsers: browsers, fileTrees: fileTrees, worktree: selection.worktree, board: boardController,
+                           title: selection.projectID == nil ? store.displayName(of: selection.worktree) : nil)
                 // Another host's cards are another store's: the board is built again for it.
                 .id(selection.worktree.host)
         } else if selection != nil {
@@ -234,6 +236,12 @@ struct ContentView: View {
     /// Reopens the worktree last open in this organization, as after a rebuild or a switch.
     private func restoreSelection() {
         guard selection == nil, let path = OpenWorktree.path(in: store.organizationID) else { return }
+        select(path: path)
+    }
+
+    /// Opens the shown organization's worktree at `path`, or its own board.
+    private func select(path: String) {
+        if path == store.board.path { selection = WorktreeSelection(projectID: nil, worktree: store.board) }
         for project in store.projects {
             if let worktree = store.worktrees[project.id]?.first(where: { $0.path == path }) {
                 selection = WorktreeSelection(projectID: project.id, worktree: worktree)
@@ -258,11 +266,7 @@ struct ContentView: View {
             DispatchQueue.main.async { reveal(record) }
             return
         }
-        for project in store.projects {
-            if let worktree = store.worktrees[project.id]?.first(where: { $0.path == record.worktree }) {
-                selection = WorktreeSelection(projectID: project.id, worktree: worktree)
-            }
-        }
+        select(path: record.worktree)
         boardController.reveal(record.id)
     }
 

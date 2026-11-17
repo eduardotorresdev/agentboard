@@ -36,6 +36,8 @@ final class ProjectStore {
     /// Titles agents gave worktrees (see `WorktreeTitle`), keyed by worktree path.
     private(set) var agentTitles: [String: String] = [:]
     var errorMessage: String?
+    /// The user's own board in the shown organization (see `MyBoard`).
+    var board: Worktree { MyBoard.worktree(in: organizationID) }
 
     let database: Database?
     /// Title writes go through their own connection on this queue, so a database another
@@ -88,9 +90,10 @@ final class ProjectStore {
 
     /// The same for a worktree that may not be in the shown organization (Needs you).
     func displayName(ofPath path: String) -> String {
+        if MyBoard.isBoard(path) { return aliases[path] ?? MyBoard.defaultTitle }
         // NSString, not URL(fileURLWithPath:): that one asks the disk whether the path is a
         // folder, on every sidebar redraw, and a host's path (/home/…) waits on the automounter.
-        WorktreeTitle.resolve(user: aliases[path], agent: agentTitles[path],
+        return WorktreeTitle.resolve(user: aliases[path], agent: agentTitles[path],
                               folder: (path as NSString).lastPathComponent, isMain: isMainCheckout(path))
     }
 
@@ -270,6 +273,7 @@ final class ProjectStore {
             organizations = try database.organizations()
             if !organizations.contains(where: { $0.id == organizationID }) { organizationID = OrganizationHome.defaultID }
             projects = try database.projects(in: organizationID)
+            MyBoard.prepare(in: organizationID)
             // Names of paths missing on disk stay: a volume may be unmounted. Only removing the
             // worktree in the app forgets them.
             aliases = try database.aliases()

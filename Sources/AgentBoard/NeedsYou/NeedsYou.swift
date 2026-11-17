@@ -251,6 +251,8 @@ struct NeedsYouDeck: View {
         let worktree = projects.worktrees.values.joined().first { $0.path == record.worktree }
         var place = [project?.name ?? worktreeURL.deletingLastPathComponent().lastPathComponent,
                      worktree.map(projects.displayName(of:)) ?? projects.displayName(ofPath: record.worktree)]
+        // The user's own board has no project over it.
+        if MyBoard.isBoard(record.worktree) { place.removeFirst() }
         if projects.organizations.count > 1,
            let organization = projects.organizations.first(where: { $0.id == record.organization }) {
             place.insert(organization.name, at: 0)
