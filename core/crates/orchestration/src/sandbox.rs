@@ -128,14 +128,14 @@ fn arguments(home: &Path, visible: &[PathBuf], data_folder: &Path, directory: Op
     }
     list.extend(["--tmpfs".to_string(), text(data_folder)]);
     // Back in from the data folder: the organizations' agent settings, which agents write, and
-    // the private toolchain `agentboard setup` made (git, Node), which nothing inside may change.
+    // the private toolchain `agentboard setup` made (git, Node) and the agents' board skill
+    // (`agent-plugin`), which nothing inside may change.
     let organizations = data_folder.join("organizations");
     if organizations.is_dir() {
         bind(&mut list, "--bind", &organizations, &organizations);
     }
-    let tools = data_folder.join("tools");
-    if tools.is_dir() {
-        bind(&mut list, "--ro-bind", &tools, &tools);
+    for kept in ["tools", "agent-plugin"].map(|name| data_folder.join(name)).iter().filter(|path| path.is_dir()) {
+        bind(&mut list, "--ro-bind", kept, kept);
     }
     for path in visible.iter().filter(|path| path.exists()) {
         bind(&mut list, "--bind", path, path);
@@ -163,6 +163,7 @@ mod tests {
         let data = home.join(".local/share/agentboard");
         std::fs::create_dir_all(&worktree).unwrap();
         std::fs::create_dir_all(data.join("organizations")).unwrap();
+        std::fs::create_dir_all(data.join("agent-plugin")).unwrap();
         let repository = home.join("agentboard/projects/app/.git");
         std::fs::write(worktree.join(".git"), format!("gitdir: {}/worktrees/fix\n", repository.display())).unwrap();
 
@@ -175,6 +176,7 @@ mod tests {
         assert!(at("--tmpfs", &home.join("agentboard")) < at("--bind", &repository));
         assert!(at("--tmpfs", &home.join("agentboard")) < at("--bind", &worktree));
         assert!(at("--tmpfs", &data) < at("--bind", &data.join("organizations")));
+        assert!(at("--tmpfs", &data) < at("--ro-bind", &data.join("agent-plugin")));
         assert_eq!(&list[..3], ["--ro-bind", "/", "/"]);
         assert_eq!(list.last().unwrap(), "--");
         // Git's settings and the kept folders are there, read-only; no shell file is made up.
