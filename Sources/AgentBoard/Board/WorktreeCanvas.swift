@@ -65,6 +65,12 @@ struct WorktreeCanvas: View {
             .padding(.leading, board.leadingInset + 16)
             .padding(.trailing, 16)
             .frame(maxHeight: .infinity, alignment: .bottom)
+            if let format = board.postItFormat {
+                PostItFormatToolbar(board: board, format: format)
+                    .padding(.trailing, 16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .transition(.opacity)
+            }
             if !board.isZen {
                 BranchBadge(branch: worktree.branch, title: title)
                     .padding(.top, 14)
@@ -75,6 +81,7 @@ struct WorktreeCanvas: View {
             }
         }
         .animation(.smooth(duration: 0.3), value: isEmpty)
+        .animation(.snappy(duration: 0.25), value: board.postItFormat != nil)
         .animation(.snappy(duration: 0.32), value: board.isZen)
         .animation(.smooth(duration: 0.3), value: notice)
         .animation(.smooth(duration: 0.3), value: agents.hostStats == nil)
@@ -310,6 +317,44 @@ private struct ViewToolbar: View {
     }
 }
 
+/// The style of the post-it text being written, floating at the canvas's right edge while it is.
+private struct PostItFormatToolbar: View {
+    let board: BoardController
+    let format: PostItFormat
+
+    var body: some View {
+        VStack(spacing: 2) {
+            size(1, L("Title"), L("Title: the largest text, for the note's name."))
+            size(2, L("Heading"), L("Heading: large text that opens a section."))
+            size(3, L("Subheading"), L("Subheading: slightly larger text for a part of a section."))
+            size(nil, L("Text"), L("Text: the normal size, for paragraphs."))
+            Button { board.togglePostItBold() } label: { Image(systemName: "bold") }
+                .buttonStyle(ToolbarButtonStyle(icon: true, active: format.bold))
+                .disabled(format.heading != nil)
+                .accessibilityLabel(L("Bold"))
+                .help(L("Bold: makes the selected text, or what you type next, heavier."))
+                .padding(.top, 8)
+            Button { board.togglePostItUnderline() } label: { Image(systemName: "underline") }
+                .buttonStyle(ToolbarButtonStyle(icon: true, active: format.underline))
+                .accessibilityLabel(L("Underline"))
+                .help(L("Underline: draws a line under the selected text, or what you type next."))
+        }
+        .font(.system(size: 16, weight: .medium))
+        .padding(5)
+        .modifier(GlassCapsule())
+    }
+
+    /// One paragraph size, shown as a letter in the note's handwriting at that size.
+    private func size(_ level: Int?, _ name: String, _ help: String) -> some View {
+        Button { board.setPostItHeading(level) } label: {
+            Text(verbatim: "A").font(Font(Theme.Font.hand(size: MarkdownText.size(heading: level), bold: level != nil)))
+        }
+        .buttonStyle(ToolbarButtonStyle(icon: true, active: format.heading == level))
+        .accessibilityLabel(name)
+        .help(help)
+    }
+}
+
 /// Liquid Glass where the system has it, a translucent material before that.
 struct GlassCapsule: ViewModifier {
     func body(content: Content) -> some View {
@@ -326,6 +371,8 @@ struct ToolbarButtonStyle: ButtonStyle {
     var compact = false
     /// A lone symbol in a round button.
     var icon = false
+    /// On, for a control that toggles.
+    var active = false
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
 
@@ -335,7 +382,7 @@ struct ToolbarButtonStyle: ButtonStyle {
             .padding(.horizontal, icon ? 0 : compact ? 8 : 12)
             .padding(.vertical, icon ? 0 : 6)
             .frame(width: icon ? 40 : nil, height: icon ? 40 : nil)
-            .background(.black.opacity(configuration.isPressed ? 0.12 : isHovered && isEnabled ? 0.06 : 0), in: .capsule)
+            .background(.black.opacity(configuration.isPressed || active ? 0.12 : isHovered && isEnabled ? 0.06 : 0), in: .capsule)
             .contentShape(.capsule)
             .onHover { isHovered = $0 }
             .animation(.snappy(duration: 0.2), value: isHovered)

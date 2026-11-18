@@ -67,6 +67,11 @@ final class BoardController {
     func add(_ provider: any AgentProvider) { view?.addAgent(provider) }
     func add(_ device: BrowserDevice) { view?.addBrowser(device) }
     func addPostIt() { view?.addPostIt() }
+    /// The style at the cursor of the post-it being written as rich text; nil when none is.
+    fileprivate(set) var postItFormat: PostItFormat?
+    func setPostItHeading(_ level: Int?) { view?.postItEditor?.setHeading(level) }
+    func togglePostItBold() { view?.postItEditor?.toggleBold() }
+    func togglePostItUnderline() { view?.postItEditor?.toggleUnderline() }
     func addFileTree() { view?.addFileTree() }
     func addImages() { view?.addImages() }
     func addVideos() { view?.addVideos() }
@@ -527,7 +532,6 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         bringIntoView(record.frame)
         focusedID = record.id
         // A new post-it opens for writing.
-        postItModes[record.id] = .code
         syncLayers()
         beginPostItEditing(on: record.id, at: nil)
     }
@@ -2392,9 +2396,9 @@ extension BoardView {
         CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
     }
 
-    /// An empty post-it opens in Code, one with text in View, until the user picks.
+    /// A post-it shows in View, where it is written as rich text, until the user picks Code.
     fileprivate func mode(of record: PostItRecord) -> PostItMode {
-        postItModes[record.id] ?? (record.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .code : .view)
+        postItModes[record.id] ?? .view
     }
 
     /// Post-its sit above the agents and below the browsers, in their own stacking order.
@@ -2465,8 +2469,10 @@ extension BoardView {
             focusedID = nil
             hoveredPostIt = nil
         case .mode(let mode):
+            // Whatever was being written is sent before the other form shows it.
+            endPostItEditing()
             postItModes[record.id] = mode
-            if mode == .code { beginPostItEditing(on: record.id, at: nil) } else { endPostItEditing() }
+            if mode == .code { beginPostItEditing(on: record.id, at: nil) }
         case .text where mode(of: record) == .code:
             beginPostItEditing(on: record.id, at: textPoint)
         case .text:
@@ -2474,9 +2480,8 @@ extension BoardView {
             if let url = postItCards[record.id]?.link(at: point, layout: layout, scroll: postItScroll[record.id] ?? 0) {
                 NSWorkspace.shared.open(url)
             } else if event.clickCount == 2 {
-                // Double-clicking the rendered text writes it.
-                postItModes[record.id] = .code
-                beginPostItEditing(on: record.id, at: nil)
+                // Double-clicking the rendered text writes it, where it was clicked.
+                beginPostItEditing(on: record.id, at: textPoint)
             } else {
                 interaction = Interaction(id: record.id, kind: .move, start: start, frame: frame)
             }
@@ -2516,9 +2521,12 @@ extension BoardView {
             return editor
         }()
         editor.onWrite = { [weak self] text in self?.store.writePostIt(text, on: id) }
+        editor.onFormat = { [weak self] format in
+            if self?.controller?.postItFormat != format { self?.controller?.postItFormat = format }
+        }
         if editingPostIt != id {
             editingPostIt = id
-            editor.show(record.text)
+            editor.show(record.text, form: mode(of: record) == .view ? .rendered : .source)
         }
         if editor.scrollView.superview == nil { addSubview(editor.scrollView) }
         syncLayers()
@@ -2529,9 +2537,8 @@ extension BoardView {
 
     fileprivate func placePostItEditor() {
         guard let editor = postItEditor, let id = editingPostIt, let record = store.postIt(id) else { return }
-        editor.setZoom(zoom)
         let content = PostItCardLayout(size: record.frame.size).content
-        editor.scrollView.frame = screen(content.offsetBy(dx: record.frame.minX, dy: record.frame.minY))
+        editor.place(screen(content.offsetBy(dx: record.frame.minX, dy: record.frame.minY)), zoom: zoom)
     }
 
     /// Sends what was written and closes the text view; the card shows the text again.
@@ -2540,6 +2547,7 @@ extension BoardView {
         editor.flush()
         postItScroll[id] = editor.scroll
         editingPostIt = nil
+        controller?.postItFormat = nil
         let responder = window?.firstResponder
         editor.scrollView.removeFromSuperview()
         if responder === editor.textView { window?.makeFirstResponder(self) }

@@ -110,6 +110,11 @@ enum Theme {
         static let headlineTracking: CGFloat = -0.4
         static let titleTracking: CGFloat = -0.1
         static let eyebrowTracking: CGFloat = 0.8
+
+        /// Handwriting, only for what is written on a post-it.
+        static func hand(size: CGFloat, bold: Bool = false) -> NSFont {
+            NSFont(name: bold ? "Noteworthy-Bold" : "Noteworthy-Light", size: size) ?? .systemFont(ofSize: size, weight: bold ? .bold : .regular)
+        }
     }
 
     // MARK: Paper texture
