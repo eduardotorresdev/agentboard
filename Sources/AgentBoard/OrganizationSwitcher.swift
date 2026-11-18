@@ -109,7 +109,14 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
     init(leading: Bool = false, above: Bool = false) {
         self.leading = leading
         self.above = above
+        super.init()
+        // A non-activating panel stays key when another app comes forward, so resigning key
+        // never fires: without this the menu floats over the other app.
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidResignActive),
+                                               name: NSApplication.didResignActiveNotification, object: nil)
     }
+
+    @objc private func appDidResignActive() { close() }
 
     func toggle(store: ProjectStore, attention: @escaping () -> [UUID: OrganizationAttention]) {
         toggle { state, close in OrganizationMenu(store: store, attention: attention, state: state, close: close) }
