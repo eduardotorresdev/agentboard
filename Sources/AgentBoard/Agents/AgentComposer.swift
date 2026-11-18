@@ -387,6 +387,28 @@ final class ComposerTextView: NSTextView, NSTextViewDelegate {
         super.viewWillMove(toWindow: newWindow)
     }
 
+    override func paste(_ sender: Any?) {
+        if !attach(from: .general) { super.paste(sender) }
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        attach(from: sender.draggingPasteboard) || super.performDragOperation(sender)
+    }
+
+    /// Copied or dropped files (or a picture with no text) go in as their paths on the agent's
+    /// machine, copied to its host first, instead of the bare file name a text view would paste.
+    private func attach(from pasteboard: NSPasteboard) -> Bool {
+        let sources = AgentStore.attachments(on: pasteboard)
+        let hasFiles = sources.contains { if case .file = $0 { true } else { false } }
+        guard let store, !sources.isEmpty, hasFiles || pasteboard.string(forType: .string) == nil else { return false }
+        Task { @MainActor [weak self] in
+            let paths = await store.attachmentPaths(sources)
+            guard let self, !paths.isEmpty else { return NSSound.beep() }
+            insertText(AgentStore.typed(paths), replacementRange: selectedRange())
+        }
+        return true
+    }
+
     func submit() {
         guard let store, let storage = textStorage else { return }
         let text = BoardMention.serialize(storage).trimmingCharacters(in: .whitespacesAndNewlines)
