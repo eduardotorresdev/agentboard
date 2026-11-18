@@ -585,3 +585,7 @@
 "%lld browsers" = "%lld navegadores";
 "1 file tree" = "1 árvore de arquivos";
 "%lld file trees" = "%lld árvores de arquivos";
+
+"Sending to %@…" = "Enviando para %@…";
+"Couldn't attach %@." = "Não foi possível anexar %@.";
+"the picture" = "a imagem";

@@ -698,3 +698,13 @@ func aRealPageReachesWhatOnlyTheHostServes() throws {
     #expect(await HostFiles.within(5) { 2 } == 2)
     #expect(HostFiles.unanswered.status != 0 && !HostFiles.unanswered.error.isEmpty)
 }
+
+@Test func aLargeFileReachesTheHostInPiecesAndShowsOnlyWhole() async throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent("pieces-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: home) }
+    let data = Data((0..<1000).map { UInt8($0 % 251) })
+    let path = home.appendingPathComponent("attachments/file.bin").path
+    #expect(await machine(home: home).write(data, to: path, piece: 300))
+    #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == data)
+    #expect(!FileManager.default.fileExists(atPath: path + ".part"))
+}

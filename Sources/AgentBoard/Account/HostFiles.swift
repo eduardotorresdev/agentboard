@@ -81,6 +81,24 @@ struct HostFiles: Sendable {
         await run("sh", ["-c", "mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"", "sh", path], data)?.status == 0
     }
 
+    /// Writes `data` to `path` in pieces no larger than `piece` bytes, so a large file never
+    /// rides one `run`; it shows at `path` only once whole.
+    func write(_ data: Data, to path: String, piece: Int) async -> Bool {
+        guard data.count > piece else { return await write(data, to: path) }
+        let partial = path + ".part"
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + piece, data.count)
+            let script = offset == 0 ? "mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"" : "cat >> \"$1\""
+            guard await carried("sh", ["-c", script, "sh", partial], data.subdata(in: offset..<end), bulk: true)?.status == 0 else {
+                _ = await run("rm", ["-f", "--", partial], nil)
+                return false
+            }
+            offset = end
+        }
+        return await run("mv", ["-f", "--", partial, path], nil)?.status == 0
+    }
+
     /// What a program printed, when it succeeded.
     func output(_ executable: String, _ arguments: [String]) async -> String? {
         guard let ran = await run(executable, arguments, nil), ran.status == 0 else { return nil }

@@ -14,11 +14,19 @@ extension AgentStore {
         return []
     }
 
+    /// The largest file carried to a host.
+    static let attachmentLimit = 1024 * 1024 * 1024
+
     /// Paths on this store's machine for `sources`: this Mac's files as they are, a picture
-    /// without a file saved first; on another host, copies there. What can't be brought (too
-    /// large, host unreachable) is left out.
-    func attachmentPaths(_ sources: [ImageSource]) async -> [String] {
-        var paths: [String] = []
+    /// without a file saved first; on another host, copies there. What can't be brought (a
+    /// folder, too large, host unreachable) is left out, and `agent`'s composer says why.
+    func attachmentPaths(_ sources: [ImageSource], for agent: UUID) async -> [String] {
+        var paths: [String] = [], missed: [String] = []
+        if let host { composerNotices[agent] = L("Sending to \(host.name)…") }
+        defer {
+            if host != nil { composerNotices[agent] = nil }
+            if !missed.isEmpty { composerNotices[agent] = L("Couldn't attach \(missed.joined(separator: ", ")).") }
+        }
         for source in sources {
             if host == nil, case .file(let url) = source {
                 paths.append(url.path)
@@ -28,18 +36,25 @@ extension AgentStore {
                 if case .file(let url) = source { return url.lastPathComponent }
                 return "pasted.png"
             }()
-            guard let data = await Task.detached(operation: { Self.data(of: source) }).value else { continue }
+            let shown: String = if case .file(let url) = source { url.lastPathComponent } else { L("the picture") }
+            guard let data = await Task.detached(operation: { Self.data(of: source) }).value, data.count <= Self.attachmentLimit else {
+                missed.append(shown)
+                continue
+            }
             if let files {
-                guard data.count <= HostMediaFailure.maximumBytes, let folder = await askHostDataFolder() else { continue }
+                guard let folder = await askHostDataFolder() else {
+                    missed.append(shown)
+                    continue
+                }
                 let path = folder + "/attachments/" + name
-                if await files.write(data, to: path) { paths.append(path) }
+                if await files.write(data, to: path, piece: HostMediaFailure.maximumBytes / 2) { paths.append(path) } else { missed.append(shown) }
             } else {
                 let url = dataFolder.appendingPathComponent("attachments/" + name)
                 let saved = await Task.detached {
                     try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                     return (try? data.write(to: url, options: .atomic)) != nil
                 }.value
-                if saved { paths.append(url.path) }
+                if saved { paths.append(url.path) } else { missed.append(shown) }
             }
         }
         return paths
