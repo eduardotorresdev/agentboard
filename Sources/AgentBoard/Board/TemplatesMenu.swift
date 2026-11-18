@@ -14,26 +14,32 @@ struct TemplatesMenu: View {
     @State private var removing: CanvasTemplate?
 
     var body: some View {
-        Button { isOpen.toggle() } label: {
-            HStack(spacing: 6) {
-                Text(L("Templates"))
-                Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
+        // Nothing to memorize and nothing memorized: no button at all.
+        ZStack {
+            if !isEmpty || !templates.isEmpty {
+                Button { isOpen.toggle() } label: {
+                    HStack(spacing: 6) {
+                        Text(L("Templates"))
+                        Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
+                    }
+                }
+                .buttonStyle(ToolbarButtonStyle(compact: true))
+                .font(Theme.Font.label)
+                .padding(4)
+                .modifier(GlassCapsule())
+                .help(L("Canvases memorized for this project: lay one out here, or memorize this one."))
+                .popover(isPresented: $isOpen, arrowEdge: .top) { list }
+                .transition(.opacity)
             }
         }
-        .buttonStyle(ToolbarButtonStyle(compact: true))
-        .font(Theme.Font.label)
-        .padding(4)
-        .modifier(GlassCapsule())
-        .help(L("Canvases memorized for this project: lay one out here, or memorize this one."))
-        .popover(isPresented: $isOpen, arrowEdge: .top) { list }
-        .onChange(of: isOpen) { if isOpen { reload() } }
+        .task(id: project) { reload() }
     }
 
     private var list: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             if !templates.isEmpty {
                 ScrollView {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 6) {
                         ForEach(templates) { template in
                             TemplateRow(template: template) {
                                 isOpen = false
@@ -42,30 +48,30 @@ struct TemplatesMenu: View {
                         }
                     }
                 }
-                .frame(height: min(CGFloat(templates.count) * (TemplateRow.height + 8) - 8, 376))
+                .frame(height: min(CGFloat(templates.count) * (TemplateRow.height + 6) - 6, 372))
             }
-            Button(action: save) {
-                VStack(spacing: 2) {
-                    Text(L("Save this canvas")).font(Theme.Font.label)
-                    Text(L("Keeps its cards, their places and lines to reuse in this project's worktrees."))
-                        .font(Theme.Font.caption)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
+            if !isEmpty, let current = board.template(), !current.cards.isEmpty {
+                Button { save(current) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus").font(Theme.Font.label).foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(L("Create new")).font(Theme.Font.label).foregroundStyle(Theme.ink)
+                            Text(current.summary).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.control))
+                    .contentShape(.rect)
                 }
-                .foregroundStyle(Theme.onAccent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
-                .background(Theme.accent, in: .rect(cornerRadius: Theme.Radius.control))
-                .contentShape(.rect)
+                .buttonStyle(.plain)
+                .help(L("Memorizes this canvas: its cards, their places and lines, to reuse in this project's worktrees."))
             }
-            .buttonStyle(.plain)
-            .disabled(isEmpty)
-            .opacity(isEmpty ? 0.4 : 1)
         }
-        .padding(10)
-        .frame(width: 240)
-        .background(Theme.surface)
+        .padding(8)
+        .frame(width: 220)
+        .background(Theme.surfaceDeep)
         .animation(.snappy(duration: 0.3), value: templates)
         .alert(L("Remove this template?"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { template in
             Button(L("Remove"), role: .destructive) {
@@ -82,8 +88,7 @@ struct TemplatesMenu: View {
         templates = (try? database?.templates(project: project)) ?? []
     }
 
-    private func save() {
-        guard let template = board.template(), !template.cards.isEmpty else { return }
+    private func save(_ template: CanvasTemplate) {
         do { try database?.saveTemplate(template, project: project) } catch { NSLog("AgentBoard: couldn't save the template: \(error)") }
         reload()
     }
@@ -92,7 +97,7 @@ struct TemplatesMenu: View {
 /// A template, shown as its layout. A click lays it out; dragging it sideways uncovers the
 /// button that removes it.
 private struct TemplateRow: View {
-    static let height: CGFloat = 120
+    static let height: CGFloat = 96
     private static let reveal: CGFloat = 72
 
     let template: CanvasTemplate
@@ -159,13 +164,13 @@ private struct TemplateThumbnail: View {
                 let color = switch card.kind {
                 case .agent: Theme.accent
                 case .runner: Theme.deep
-                case .postIt: Theme.accentTint
+                case .postIt: Theme.color(Theme.Hex.blueLight)
                 case .browser, .fileTree: Theme.inkMuted
                 }
                 context.fill(Path(roundedRect: frame, cornerRadius: 2), with: .color(color))
             }
         }
-        .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.card))
+        .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.card))
         .contentShape(.rect)
     }
 }

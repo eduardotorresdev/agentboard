@@ -59,6 +59,19 @@ struct CanvasTemplate: Identifiable, Codable, Equatable {
         return directory.hasPrefix("/") ? directory : worktree + "/" + directory
     }
 
+    /// What it holds, in a line: "2 agents, 1 runner".
+    var summary: String {
+        func count(_ kinds: Card.Kind...) -> Int { cards.count { kinds.contains($0.kind) } }
+        let parts: [(Int, String, String)] = [
+            (count(.agent), L("1 agent"), L("\(count(.agent)) agents")),
+            (count(.runner), L("1 runner"), L("\(count(.runner)) runners")),
+            (count(.postIt), L("1 post-it"), L("\(count(.postIt)) post-its")),
+            (count(.browser), L("1 browser"), L("\(count(.browser)) browsers")),
+            (count(.fileTree), L("1 file tree"), L("\(count(.fileTree)) file trees")),
+        ]
+        return parts.filter { $0.0 > 0 }.map { $0.0 == 1 ? $0.1 : $0.2 }.joined(separator: ", ")
+    }
+
     /// The cards' frames scaled to fit `size`, centered, `inset` from its edges.
     func thumbnail(in size: CGSize, inset: CGFloat = 10) -> [CGRect] {
         guard let first = cards.first?.frame else { return [] }

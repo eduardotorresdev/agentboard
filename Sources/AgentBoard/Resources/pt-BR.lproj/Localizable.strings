@@ -563,8 +563,6 @@
 "Removes %@ from your account and from this board." = "Remove %@ da sua conta e deste quadro.";
 "Templates" = "Templates";
 "Canvases memorized for this project: lay one out here, or memorize this one." = "Canvas memorizados deste projeto: aplique um aqui ou memorize este.";
-"Save this canvas" = "Salvar este canvas";
-"Keeps its cards, their places and lines to reuse in this project's worktrees." = "Guarda os cards, suas posições e linhas para reaproveitar nas worktrees deste projeto.";
 "Remove this template?" = "Remover este template?";
 "The canvases it was laid out on stay as they are. This can't be undone." = "Os canvas em que ele foi aplicado continuam como estão. Não dá para desfazer.";
 "Replaces this canvas with the template. Drag it sideways to remove it." = "Substitui este canvas pelo template. Arraste para o lado para remover.";
@@ -572,3 +570,15 @@
 "Replace this canvas with the template?" = "Substituir este canvas pelo template?";
 "Every card on it is removed, and its agents and runners stop. This can't be undone." = "Todos os cards dele são removidos, e seus agentes e runners são encerrados. Não dá para desfazer.";
 "Replace" = "Substituir";
+"Create new" = "Criar novo";
+"Memorizes this canvas: its cards, their places and lines, to reuse in this project's worktrees." = "Memoriza este canvas: os cards, suas posições e linhas, para reaproveitar nas worktrees deste projeto.";
+"1 agent" = "1 agente";
+"%lld agents" = "%lld agentes";
+"1 runner" = "1 runner";
+"%lld runners" = "%lld runners";
+"1 post-it" = "1 post-it";
+"%lld post-its" = "%lld post-its";
+"1 browser" = "1 navegador";
+"%lld browsers" = "%lld navegadores";
+"1 file tree" = "1 árvore de arquivos";
+"%lld file trees" = "%lld árvores de arquivos";
