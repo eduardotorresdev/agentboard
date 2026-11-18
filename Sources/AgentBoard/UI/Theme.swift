@@ -111,9 +111,17 @@ enum Theme {
         static let titleTracking: CGFloat = -0.1
         static let eyebrowTracking: CGFloat = 0.8
 
-        /// Handwriting, only for what is written on a post-it.
+        /// The app's own handwriting faces, registered on first use (see scripts/board-hand.py).
+        private static let handFaces: Void = {
+            for face in ["BoardHand-Regular", "BoardHand-Bold"] {
+                if let url = Bundle.module.url(forResource: face, withExtension: "ttf") { CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil) }
+            }
+        }()
+
+        /// Handwriting leaning to the right, only for what is written on a post-it.
         static func hand(size: CGFloat, bold: Bool = false) -> NSFont {
-            NSFont(name: bold ? "Noteworthy-Bold" : "Noteworthy-Light", size: size) ?? .systemFont(ofSize: size, weight: bold ? .bold : .regular)
+            _ = handFaces
+            return NSFont(name: bold ? "BoardHand-Bold" : "BoardHand-Regular", size: size) ?? .systemFont(ofSize: size, weight: bold ? .bold : .regular)
         }
     }
 

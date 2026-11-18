@@ -1,19 +1,13 @@
 import AppKit
 
-/// A post-it's text laid out for drawing and hit-testing, at the card's own size: rendered
-/// markdown, or the source itself in monospace.
+/// A post-it's text laid out for drawing and hit-testing, at the card's own size: its markdown, rendered.
 final class PostItText {
-    enum Form: Equatable {
-        case rendered
-        case source
-    }
-
     let storage: NSTextStorage
     let layoutManager = NSLayoutManager()
     let container: NSTextContainer
 
-    init(_ text: String, form: Form, width: CGFloat) {
-        storage = NSTextStorage(attributedString: form == .rendered ? MarkdownText.render(text) : MarkdownText.source(text))
+    init(_ text: String, width: CGFloat) {
+        storage = NSTextStorage(attributedString: MarkdownText.render(text))
         container = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
         container.lineFragmentPadding = 0
         layoutManager.addTextContainer(container)
@@ -60,24 +54,16 @@ enum PostItBlock: Hashable {
 }
 
 /// Styled text for a post-it: markdown (headings, lists, task lists, quotes, code, tables,
-/// emphasis, links) rendered in handwriting at the card's base size, or the source shown as
-/// written. Rendered text the user edited goes back to markdown with `markdown(from:)`.
+/// emphasis, links) rendered in handwriting at the card's base size. Rendered text the user
+/// edited goes back to markdown with `markdown(from:)`.
 enum MarkdownText {
     static let baseSize: CGFloat = 15
     static let codeSize: CGFloat = 12
-    static let sourceFont = NSFont.monospacedSystemFont(ofSize: codeSize, weight: .regular)
 
     private static let indent: CGFloat = 18
 
     private static func color(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
         NSColor(cgColor: BoardPalette.rgb(hex, alpha)) ?? .black
-    }
-
-    static func source(_ text: String) -> NSAttributedString {
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = 2
-        return NSAttributedString(string: text, attributes: [.font: sourceFont, .foregroundColor: color(BoardPalette.ink, 0.85),
-                                                             .paragraphStyle: style])
     }
 
     /// The type size of a heading, or of plain text.
@@ -112,7 +98,10 @@ enum MarkdownText {
 
     static func render(_ markdown: String) -> NSAttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .full, failurePolicy: .returnPartiallyParsedIfPossible)
-        guard let parsed = try? AttributedString(markdown: markdown, options: options) else { return source(markdown) }
+        guard let parsed = try? AttributedString(markdown: markdown, options: options) else {
+            // Markdown that can't be parsed shows as written.
+            return NSAttributedString(string: markdown, attributes: attributes(heading: nil))
+        }
         let output = NSMutableAttributedString()
         var block: Int?
         var cell: Int?

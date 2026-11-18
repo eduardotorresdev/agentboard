@@ -13,7 +13,7 @@ private final class PostItTextView: NSTextView {
 }
 
 /// The text view a post-it is written in, laid over the card while the user writes: rich text
-/// kept as markdown, or the markdown itself. What is typed reaches the core shortly after typing
+/// kept as markdown. What is typed reaches the core shortly after typing
 /// pauses, and when writing ends.
 @MainActor
 final class PostItEditor: NSObject, NSTextViewDelegate {
@@ -23,13 +23,12 @@ final class PostItEditor: NSObject, NSTextViewDelegate {
     var onWrite: ((String) -> Void)?
     /// Escape: stop writing.
     var onEscape: (() -> Void)?
-    /// The style at the cursor changed; nil while the markdown itself is written.
+    /// The style at the cursor changed.
     var onFormat: ((PostItFormat?) -> Void)?
     /// Typed since the text was last sent.
     private(set) var isDirty = false
     /// The markdown last shown or sent.
     private(set) var text = ""
-    private var form = PostItText.Form.source
     private var pending: DispatchWorkItem?
 
     override init() {
@@ -64,16 +63,13 @@ final class PostItEditor: NSObject, NSTextViewDelegate {
         textView.isAutomaticLinkDetectionEnabled = false
     }
 
-    /// Shows `text` in place of what is there, keeping the cursor where it can; `form` nil keeps
-    /// the form it is written in.
-    func show(_ text: String, form: PostItText.Form? = nil) {
-        if let form { self.form = form }
+    /// Shows `text` in place of what is there, keeping the cursor where it can.
+    func show(_ text: String) {
         let selection = textView.selectedRange()
-        let rich = self.form == .rendered
-        textView.textStorage?.setAttributedString(rich ? MarkdownText.render(text) : MarkdownText.source(text))
+        textView.textStorage?.setAttributedString(MarkdownText.render(text))
         textView.setSelectedRange(NSRange(location: min(selection.location, textView.textStorage?.length ?? 0), length: 0))
         if textView.textStorage?.length == 0 {
-            textView.typingAttributes = rich ? MarkdownText.attributes(heading: nil) : MarkdownText.source(" ").attributes(at: 0, effectiveRange: nil)
+            textView.typingAttributes = MarkdownText.attributes(heading: nil)
         }
         self.text = text
         isDirty = false
@@ -114,7 +110,7 @@ final class PostItEditor: NSObject, NSTextViewDelegate {
         pending = nil
         guard isDirty, let storage = textView.textStorage else { return }
         isDirty = false
-        text = form == .rendered ? MarkdownText.markdown(from: storage) : storage.string
+        text = MarkdownText.markdown(from: storage)
         onWrite?(text)
     }
 
@@ -122,7 +118,7 @@ final class PostItEditor: NSObject, NSTextViewDelegate {
 
     /// Makes the paragraphs under the selection a heading of `level`, or plain text.
     func setHeading(_ level: Int?) {
-        guard form == .rendered, let storage = textView.textStorage else { return }
+        guard let storage = textView.textStorage else { return }
         let range = (storage.string as NSString).paragraphRange(for: textView.selectedRange())
         restyle(range) {
             storage.enumerateAttributes(in: range) { attributes, run, _ in
@@ -146,7 +142,7 @@ final class PostItEditor: NSObject, NSTextViewDelegate {
     }
 
     func toggleBold() {
-        guard form == .rendered, let format, format.heading == nil else { return }
+        guard let format, format.heading == nil else { return }
         let bold = !format.bold
         func restyled(_ font: NSFont) -> NSFont {
             MarkdownText.font(size: font.pointSize, bold: bold, monospaced: font.fontDescriptor.symbolicTraits.contains(.monoSpace))
@@ -164,7 +160,7 @@ final class PostItEditor: NSObject, NSTextViewDelegate {
     }
 
     func toggleUnderline() {
-        guard form == .rendered, let format else { return }
+        guard let format else { return }
         let range = textView.selectedRange()
         if range.length > 0, let storage = textView.textStorage {
             restyle(range) {
@@ -187,7 +183,7 @@ final class PostItEditor: NSObject, NSTextViewDelegate {
 
     /// The style of the selection's start, or of what would be typed at the cursor.
     private var format: PostItFormat? {
-        guard form == .rendered, let storage = textView.textStorage else { return nil }
+        guard let storage = textView.textStorage else { return nil }
         let range = textView.selectedRange()
         let attributes = range.length > 0 && range.location < storage.length
             ? storage.attributes(at: range.location, effectiveRange: nil) : textView.typingAttributes

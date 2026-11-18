@@ -228,7 +228,6 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// How far each post-it's text is scrolled.
     fileprivate var postItScroll: [UUID: CGFloat] = [:]
     /// View or Code, per post-it, as the user last chose.
-    fileprivate var postItModes: [UUID: PostItMode] = [:]
     /// The post-it control under the pointer.
     fileprivate var hoveredPostIt: (card: UUID, control: PostItControl?)?
     /// The text view over the post-it being written in.
@@ -2396,11 +2395,6 @@ extension BoardView {
         CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
     }
 
-    /// A post-it shows in View, where it is written as rich text, until the user picks Code.
-    fileprivate func mode(of record: PostItRecord) -> PostItMode {
-        postItModes[record.id] ?? .view
-    }
-
     /// Post-its sit above the agents and below the browsers, in their own stacking order.
     fileprivate func syncPostIts(scale: CGFloat) {
         let records = store.postIts(in: worktree)
@@ -2425,14 +2419,14 @@ extension BoardView {
             // What an agent wrote shows in the editor too, unless the user has typed since.
             if editing, let editor = postItEditor, !editor.isDirty, editor.text != record.text { editor.show(record.text) }
             card.zPosition = agentCount + CGFloat(index)
-            card.update(frame: record.frame, record: record, layout: layout, mode: mode(of: record), scroll: postItScroll[record.id] ?? 0,
+            card.update(frame: record.frame, record: record, layout: layout, scroll: postItScroll[record.id] ?? 0,
                         focused: highlighted(record.id), hovered: hoveredPostIt?.card == record.id ? hoveredPostIt?.control : nil,
                         editing: editing, scale: scale)
             // The text may have shrunk since it was scrolled.
             let maxScroll = max(0, card.contentHeight - layout.content.height)
             if let scroll = postItScroll[record.id], scroll > maxScroll {
                 postItScroll[record.id] = maxScroll
-                card.update(frame: record.frame, record: record, layout: layout, mode: mode(of: record), scroll: maxScroll,
+                card.update(frame: record.frame, record: record, layout: layout, scroll: maxScroll,
                             focused: highlighted(record.id), hovered: hoveredPostIt?.card == record.id ? hoveredPostIt?.control : nil,
                             editing: editing, scale: scale)
             }
@@ -2468,13 +2462,6 @@ extension BoardView {
             store.removePostIt(record.id)
             focusedID = nil
             hoveredPostIt = nil
-        case .mode(let mode):
-            // Whatever was being written is sent before the other form shows it.
-            endPostItEditing()
-            postItModes[record.id] = mode
-            if mode == .code { beginPostItEditing(on: record.id, at: nil) }
-        case .text where mode(of: record) == .code:
-            beginPostItEditing(on: record.id, at: textPoint)
         case .text:
             endPostItEditing()
             if let url = postItCards[record.id]?.link(at: point, layout: layout, scroll: postItScroll[record.id] ?? 0) {
@@ -2526,7 +2513,7 @@ extension BoardView {
         }
         if editingPostIt != id {
             editingPostIt = id
-            editor.show(record.text, form: mode(of: record) == .view ? .rendered : .source)
+            editor.show(record.text)
         }
         if editor.scrollView.superview == nil { addSubview(editor.scrollView) }
         syncLayers()

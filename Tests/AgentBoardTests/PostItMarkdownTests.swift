@@ -55,14 +55,14 @@ struct PostItMarkdownTests {
     }
 
     @Test func handwritingFontIsInstalled() {
-        #expect(Theme.Font.hand(size: 15).familyName == "Noteworthy")
+        #expect(Theme.Font.hand(size: 15).familyName == "Board Hand")
     }
 
     @MainActor @Test func headingAndUnderlineFromTheToolbarReachTheMarkdown() {
         let editor = PostItEditor()
         var written = ""
         editor.onWrite = { written = $0 }
-        editor.show("first\n\nsecond", form: .rendered)
+        editor.show("first\n\nsecond")
         editor.textView.setSelectedRange(NSRange(location: 0, length: 5))
         editor.setHeading(2)
         editor.textView.setSelectedRange(NSRange(location: 6, length: 6))
