@@ -219,7 +219,10 @@ struct ContentView: View {
     private var detail: some View {
         if let selection, let agents = hosts[selection.worktree.host] {
             WorktreeCanvas(agents: agents, browsers: browsers, fileTrees: fileTrees, worktree: selection.worktree, board: boardController,
-                           title: selection.projectID == nil ? store.displayName(of: selection.worktree) : nil)
+                           title: selection.projectID == nil ? store.displayName(of: selection.worktree) : nil,
+                           database: store.database,
+                           // The user's own board keeps its templates under its own folder.
+                           project: store.projects.first { $0.id == selection.projectID }?.path ?? selection.worktree.path)
                 // Another host's cards are another store's: the board is built again for it.
                 .id(selection.worktree.host)
         } else if selection != nil {

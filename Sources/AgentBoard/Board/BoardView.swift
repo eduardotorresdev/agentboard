@@ -85,6 +85,23 @@ final class BoardController {
     func resetZoom() { view?.animateZoom(to: 1) }
     func fitAgents() { view?.fitAgents() }
     func organize() { view?.organize() }
+    /// The canvas as a template (see `CanvasTemplate`).
+    func template() -> CanvasTemplate? { view?.template() }
+    /// Replaces the canvas with `template`; asks first when that ends what is on it.
+    func apply(_ template: CanvasTemplate) {
+        guard let view else { return }
+        guard view.hasCards, let window = view.window else { return view.apply(template) }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L("Replace this canvas with the template?")
+        alert.informativeText = L("Every card on it is removed, and its agents and runners stop. This can't be undone.")
+        alert.addButton(withTitle: L("Replace"))
+        alert.addButton(withTitle: L("Cancel"))
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { response in
+            if response == .alertFirstButtonReturn { view.apply(template) }
+        }
+    }
     /// A card to frame and focus once its worktree shows on the board.
     @ObservationIgnored var pendingReveal: UUID?
     func reveal(_ id: UUID) {
@@ -1872,6 +1889,69 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 }
 
 // MARK: Runners
+
+extension BoardView {
+    fileprivate var hasCards: Bool { !itemFrames.isEmpty }
+
+    /// The worktree's canvas as a template.
+    fileprivate func template() -> CanvasTemplate {
+        typealias Card = CanvasTemplate.Card
+        let host = store.host?.id
+        var cards: [(UUID, Card)] = store.agents(in: worktree).map { record in
+            let runner = record.runner.map {
+                Card(kind: .runner, name: record.name, frame: record.frame, command: $0.command,
+                     directory: CanvasTemplate.relative($0.directory, to: worktree))
+            }
+            return (record.id, runner ?? Card(kind: .agent, name: record.name, frame: record.frame, provider: record.providerID,
+                                              orchestrates: record.orchestrates))
+        }
+        cards += store.postIts(in: worktree).map { ($0.id, Card(kind: .postIt, name: $0.name, frame: $0.frame, text: $0.text)) }
+        cards += browsers.browsers(in: worktree, on: host).map {
+            ($0.id, Card(kind: .browser, name: $0.name, frame: $0.frame, device: $0.device.stored, url: $0.url, profile: $0.profile))
+        }
+        cards += fileTrees.trees(in: worktree, on: host).map { ($0.id, Card(kind: .fileTree, name: $0.name, frame: $0.frame)) }
+        return CanvasTemplate(cards: cards.map(\.1), lines: CanvasTemplate.lines(worktreeConnections, among: cards.map(\.0)))
+    }
+
+    /// Removes every card of the worktree and lays `template` out in their place: agents start
+    /// fresh, runners wait to be started.
+    fileprivate func apply(_ template: CanvasTemplate) {
+        deleteCards(Set(itemFrames.map(\.id)))
+        let host = store.host?.id
+        let ids = template.cards.map { card -> UUID in
+            switch card.kind {
+            case .agent, .runner:
+                let runner = card.command.map { RunnerSpec(command: $0, directory: CanvasTemplate.resolve(card.directory ?? "", in: worktree), owner: nil) }
+                let record = AgentRecord(id: UUID(), worktree: worktree, providerID: card.provider ?? AgentRecord.runnerProviderID,
+                                         name: AgentRecord.uniqueName(card.name, among: store.agents(in: worktree)), frame: card.frame,
+                                         runner: runner, organization: store.organizationID, orchestrates: card.orchestrates)
+                store.insert(record)
+                return record.id
+            case .postIt:
+                let record = PostItRecord(id: UUID(), worktree: worktree, name: card.name, frame: card.frame, text: card.text ?? "",
+                                          organization: store.organizationID)
+                store.postIts.append(record)
+                store.send(.addPostIt(record))
+                return record.id
+            case .browser:
+                let device = card.device.flatMap(BrowserDevice.init(stored:)) ?? .desktop
+                // A profile deleted since falls back to the default one.
+                return browsers.add(device, to: worktree, on: host, at: card.frame.origin, named: card.name, url: card.url ?? "",
+                                    profile: browsers.profile(card.profile ?? BrowserProfile.defaultID).id, frame: card.frame).id
+            case .fileTree:
+                let record = fileTrees.add(to: worktree, on: host, at: card.frame.origin)
+                fileTrees.setFrame(card.frame, for: record.id, persist: true)
+                return record.id
+            }
+        }
+        appearing.formUnion(ids)
+        for line in template.lines where ids.indices.contains(line.a) && ids.indices.contains(line.b) {
+            store.connect(ids[line.a], ids[line.b], sides: (line.aSide, line.bSide))
+        }
+        syncLayers()
+        fitAgents()
+    }
+}
 
 extension BoardView {
     /// What a runner card says over its terminal: a failure, or how to start one that hasn't run.

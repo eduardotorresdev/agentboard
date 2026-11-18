@@ -11,6 +11,9 @@ struct WorktreeCanvas: View {
     let board: BoardController
     /// The user's own board shows its title where a worktree shows its branch, and has no files to browse.
     var title: String?
+    /// Where templates are kept, and the project folder they are kept for.
+    var database: Database?
+    var project = ""
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -48,9 +51,13 @@ struct WorktreeCanvas: View {
                 .layoutPriority(1)
                 VStack(alignment: .trailing, spacing: 8) {
                     AppUsage()
-                    NavigationToolbar(board: board)
+                    if !board.isZen {
+                        TemplatesMenu(board: board, database: database, project: project, isEmpty: isEmpty)
+                            .transition(.opacity)
+                    }
+                    ViewToolbar(board: board)
                 }
-                // Never squeezed below its size, or the zoom bar slides under the centered tools.
+                // Never squeezed below its size, or the view toolbar slides under the centered tools.
                 .fixedSize()
                 .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -225,8 +232,8 @@ private struct CanvasToolbar: View {
     }
 }
 
-/// Zoom and navigation, floating at the bottom-right corner.
-private struct NavigationToolbar: View {
+/// The view toolbar: zoom, fit, organize, zen and caffeinate, floating at the bottom-right corner.
+private struct ViewToolbar: View {
     let board: BoardController
     private let caffeinate = Caffeinate.shared
 
@@ -304,7 +311,7 @@ private struct NavigationToolbar: View {
 }
 
 /// Liquid Glass where the system has it, a translucent material before that.
-private struct GlassCapsule: ViewModifier {
+struct GlassCapsule: ViewModifier {
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
             content.glassEffect(.regular, in: .capsule)
@@ -315,7 +322,7 @@ private struct GlassCapsule: ViewModifier {
 }
 
 /// Black controls on glass; hover and press show as a faint black fill.
-private struct ToolbarButtonStyle: ButtonStyle {
+struct ToolbarButtonStyle: ButtonStyle {
     var compact = false
     /// A lone symbol in a round button.
     var icon = false

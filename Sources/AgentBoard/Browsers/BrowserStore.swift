@@ -339,15 +339,15 @@ final class BrowserStore {
 
     @discardableResult
     func add(_ device: BrowserDevice, to worktree: String, on host: UUID? = nil, at origin: CGPoint, organization: UUID? = nil,
-             named name: String? = nil) -> BrowserRecord {
+             named name: String? = nil, url: String = "", profile: UUID = BrowserProfile.defaultID, frame: CGRect? = nil) -> BrowserRecord {
         let organization = organization ?? agents()?.organizationID ?? OrganizationHome.defaultID
         let trimmed = name?.trimmingCharacters(in: .whitespaces) ?? ""
         let siblings = browsers.filter { $0.worktree == worktree && $0.organization == organization && $0.host == host }
         let record = BrowserRecord(id: UUID(), worktree: worktree,
                                    name: Self.uniqueName(trimmed.isEmpty ? device.title : trimmed, among: siblings),
-                                   device: device, url: "",
-                                   frame: Self.frame(for: device, at: origin, scale: Self.initialScale(for: device)),
-                                   organization: organization, host: host)
+                                   device: device, url: url,
+                                   frame: frame ?? Self.frame(for: device, at: origin, scale: Self.initialScale(for: device)),
+                                   profile: profile, organization: organization, host: host)
         browsers.append(record)
         try? database?.saveBrowser(record)
         agents(host)?.elementsChanged()

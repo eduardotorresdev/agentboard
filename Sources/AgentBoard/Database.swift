@@ -103,6 +103,11 @@ final class Database {
                 path TEXT NOT NULL,
                 branch TEXT,
                 PRIMARY KEY (host, path)
+            );
+            CREATE TABLE IF NOT EXISTS templates (
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL,
+                data TEXT NOT NULL
             )
             """)
         if try !columns(of: "projects").contains("organization") {
@@ -417,6 +422,37 @@ final class Database {
 
     func deleteBrowser(id: UUID) throws {
         let stmt = try prepare("DELETE FROM browsers WHERE id = ?")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// The canvases memorized for the project at `project` (the board's own folder for the
+    /// user's board), newest first. One a newer build wrote and this one can't read is skipped.
+    func templates(project: String) throws -> [CanvasTemplate] {
+        let stmt = try prepare("SELECT data FROM templates WHERE project = ? ORDER BY rowid DESC")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, project)
+        var result: [CanvasTemplate] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let template = try? JSONDecoder().decode(CanvasTemplate.self, from: Data(String(cString: sqlite3_column_text(stmt, 0)).utf8)) {
+                result.append(template)
+            }
+        }
+        return result
+    }
+
+    func saveTemplate(_ template: CanvasTemplate, project: String) throws {
+        let stmt = try prepare("INSERT OR REPLACE INTO templates (id, project, data) VALUES (?, ?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, template.id.uuidString)
+        bind(stmt, 2, project)
+        bind(stmt, 3, String(decoding: try JSONEncoder().encode(template), as: UTF8.self))
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func deleteTemplate(id: UUID) throws {
+        let stmt = try prepare("DELETE FROM templates WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }

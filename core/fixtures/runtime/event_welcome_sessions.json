@@ -2,10 +2,11 @@
   "welcome" : {
     "oldest" : 2,
     "sessions" : [
-      "00000003-ABCD-4EF0-8A1B-000000000003",
+      "00000002-ABCD-4EF0-8A1B-000000000002",
       {
+        "exitCode" : 0,
         "state" : {
-          "stopped" : {
+          "exited" : {
 
           }
         }
@@ -19,11 +20,10 @@
           }
         }
       },
-      "00000002-ABCD-4EF0-8A1B-000000000002",
+      "00000003-ABCD-4EF0-8A1B-000000000003",
       {
-        "exitCode" : 0,
         "state" : {
-          "exited" : {
+          "stopped" : {
 
           }
         }
