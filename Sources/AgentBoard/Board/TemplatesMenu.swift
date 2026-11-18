@@ -9,14 +9,17 @@ struct TemplatesMenu: View {
     let project: String
     /// Nothing on the canvas to memorize.
     let isEmpty: Bool
+    /// The project's templates, kept by the canvas, and how to read them again.
+    let templates: [CanvasTemplate]
+    let reload: () -> Void
     @State private var isOpen = false
-    @State private var templates: [CanvasTemplate] = []
     @State private var removing: CanvasTemplate?
 
     var body: some View {
-        // Nothing to memorize and nothing memorized: no button at all.
+        // Nothing to memorize, and nothing memorized or few enough to show on the empty canvas
+        // itself (see `TemplateCards`): no button at all.
         ZStack {
-            if !isEmpty || !templates.isEmpty {
+            if !isEmpty || templates.count > TemplateCards.limit {
                 Button { isOpen.toggle() } label: {
                     HStack(spacing: 6) {
                         Text(L("Templates"))
@@ -32,7 +35,8 @@ struct TemplatesMenu: View {
                 .transition(.opacity)
             }
         }
-        .task(id: project) { reload() }
+        // Read again each time it opens, so the list never shows less than what is kept.
+        .onChange(of: isOpen) { if isOpen { reload() } }
     }
 
     private var list: some View {
@@ -56,7 +60,20 @@ struct TemplatesMenu: View {
                         Image(systemName: "plus").font(Theme.Font.label).foregroundStyle(Theme.accent)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(L("Create new")).font(Theme.Font.label).foregroundStyle(Theme.ink)
-                            Text(current.summary).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted).lineLimit(1)
+                            // Counts beside each kind's symbol: all five kinds fit the row, where words were cut short.
+                            HStack(spacing: 8) {
+                                ForEach(current.counts, id: \.symbol) { part in
+                                    HStack(spacing: 2) {
+                                        Text(verbatim: "\(part.count)")
+                                        Image(systemName: part.symbol)
+                                    }
+                                }
+                            }
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(Theme.inkMuted)
+                            .fixedSize()
+                            .accessibilityElement()
+                            .accessibilityLabel(current.summary)
                         }
                         Spacer(minLength: 0)
                     }
@@ -73,7 +90,53 @@ struct TemplatesMenu: View {
         .frame(width: 220)
         .background(Theme.surfaceDeep)
         .animation(.snappy(duration: 0.3), value: templates)
-        .alert(L("Remove this template?"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { template in
+        .modifier(TemplateRemoval(removing: $removing, database: database, reload: reload))
+    }
+
+    private func save(_ template: CanvasTemplate) {
+        do { try database?.saveTemplate(template, project: project) } catch { NSLog("AgentBoard: couldn't save the template: \(error)") }
+        reload()
+    }
+}
+
+/// The project's templates on an empty canvas, when they are few enough to show at once: a
+/// click lays one out, without opening the dropdown first.
+struct TemplateCards: View {
+    /// More templates than this go in the dropdown instead.
+    static let limit = 3
+
+    let board: BoardController
+    let database: Database?
+    let templates: [CanvasTemplate]
+    let reload: () -> Void
+    @State private var removing: CanvasTemplate?
+
+    var body: some View {
+        VStack(spacing: 10) {
+            VStack(spacing: 2) {
+                Text(L("Or start from a template")).font(Theme.Font.label).foregroundStyle(Theme.ink)
+                Text(L("Lays out its cards and lines on this canvas.")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+            }
+            HStack(spacing: 8) {
+                ForEach(templates) { template in
+                    TemplateRow(template: template) { board.apply(template) } onRemove: { removing = template }
+                        .frame(width: 204)
+                }
+            }
+        }
+        .animation(.snappy(duration: 0.3), value: templates)
+        .modifier(TemplateRemoval(removing: $removing, database: database, reload: reload))
+    }
+}
+
+/// Asks before removing the template in `removing`.
+private struct TemplateRemoval: ViewModifier {
+    @Binding var removing: CanvasTemplate?
+    let database: Database?
+    let reload: () -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(L("Remove this template?"), isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { template in
             Button(L("Remove"), role: .destructive) {
                 do { try database?.deleteTemplate(id: template.id) } catch { NSLog("AgentBoard: couldn't remove the template: \(error)") }
                 reload()
@@ -82,15 +145,6 @@ struct TemplatesMenu: View {
         } message: { _ in
             Text(L("The canvases it was laid out on stay as they are. This can't be undone."))
         }
-    }
-
-    private func reload() {
-        templates = (try? database?.templates(project: project)) ?? []
-    }
-
-    private func save(_ template: CanvasTemplate) {
-        do { try database?.saveTemplate(template, project: project) } catch { NSLog("AgentBoard: couldn't save the template: \(error)") }
-        reload()
     }
 }
 

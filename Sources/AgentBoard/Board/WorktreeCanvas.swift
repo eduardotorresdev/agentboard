@@ -14,6 +14,8 @@ struct WorktreeCanvas: View {
     /// Where templates are kept, and the project folder they are kept for.
     var database: Database?
     var project = ""
+    /// The project's templates, read again when the project changes and when they are opened or changed.
+    @State private var templates: [CanvasTemplate] = []
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -26,10 +28,15 @@ struct WorktreeCanvas: View {
                     .allowsHitTesting(false)
                     .transition(.opacity)
             } else if isEmpty {
-                SkyBlobEmptyState()
+                VStack(spacing: 28) {
+                    SkyBlobEmptyState().allowsHitTesting(false)
+                    if !templates.isEmpty, templates.count <= TemplateCards.limit, !board.isZen {
+                        TemplateCards(board: board, database: database, templates: templates, reload: reloadTemplates)
+                            .transition(.opacity)
+                    }
+                }
                 .padding(.leading, board.leadingInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .allowsHitTesting(false)
                 .transition(.opacity)
             }
             // One row, so the side groups give way to the centered tools instead of overlapping them.
@@ -52,7 +59,8 @@ struct WorktreeCanvas: View {
                 VStack(alignment: .trailing, spacing: 8) {
                     AppUsage()
                     if !board.isZen {
-                        TemplatesMenu(board: board, database: database, project: project, isEmpty: isEmpty)
+                        TemplatesMenu(board: board, database: database, project: project, isEmpty: isEmpty,
+                                      templates: templates, reload: reloadTemplates)
                             .transition(.opacity)
                     }
                     ViewToolbar(board: board)
@@ -88,6 +96,7 @@ struct WorktreeCanvas: View {
         // Content centers on the canvas the sidebar leaves uncovered, following it as it slides.
         .animation(.snappy(duration: 0.32), value: board.leadingInset)
         .clipped()
+        .task(id: project) { reloadTemplates() }
         .sheet(item: Binding(get: { board.deviceRequest }, set: { board.deviceRequest = $0 })) { request in
             let current: BrowserDevice? = if case .browser(let id) = request.target { browsers.record(id)?.device } else { nil }
             BrowserDeviceDialog(browsers: browsers, initial: current ?? .desktop, isNew: request.target == .new) { device in
@@ -116,6 +125,10 @@ struct WorktreeCanvas: View {
             ClaudeUsageToolbar(organization: agents.organizationID)
         }
         .transition(.opacity)
+    }
+
+    private func reloadTemplates() {
+        do { templates = try database?.templates(project: project) ?? [] } catch { NSLog("AgentBoard: couldn't read the templates: \(error)") }
     }
 
     private var notice: String? {

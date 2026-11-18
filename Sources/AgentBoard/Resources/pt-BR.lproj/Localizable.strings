@@ -564,6 +564,8 @@
 "Templates" = "Templates";
 "Canvases memorized for this project: lay one out here, or memorize this one." = "Canvas memorizados deste projeto: aplique um aqui ou memorize este.";
 "Remove this template?" = "Remover este template?";
+"Or start from a template" = "Ou comece por um template";
+"Lays out its cards and lines on this canvas." = "Aplica os cards e as linhas dele neste canvas.";
 "The canvases it was laid out on stay as they are. This can't be undone." = "Os canvas em que ele foi aplicado continuam como estão. Não dá para desfazer.";
 "Replaces this canvas with the template. Drag it sideways to remove it." = "Substitui este canvas pelo template. Arraste para o lado para remover.";
 "Template with %lld cards" = "Template com %lld cards";

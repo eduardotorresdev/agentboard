@@ -434,11 +434,15 @@ final class Database {
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, project)
         var result: [CanvasTemplate] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var step = sqlite3_step(stmt)
+        while step == SQLITE_ROW {
             if let template = try? JSONDecoder().decode(CanvasTemplate.self, from: Data(String(cString: sqlite3_column_text(stmt, 0)).utf8)) {
                 result.append(template)
             }
+            step = sqlite3_step(stmt)
         }
+        // A read cut short (the database busy) is a failure, not a project without templates.
+        guard step == SQLITE_DONE else { throw error() }
         return result
     }
 
