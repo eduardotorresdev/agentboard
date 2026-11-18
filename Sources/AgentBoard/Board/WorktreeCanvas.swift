@@ -43,11 +43,7 @@ struct WorktreeCanvas: View {
             HStack(alignment: .bottom, spacing: 12) {
                 // Narrow windows drop the usage first, then scroll the tools: nothing overlaps.
                 ViewThatFits(in: .horizontal) {
-                    if !board.isZen {
-                        usage(compact: false)
-                        // Narrower, the labels become glyphs before the host's name goes.
-                        usage(compact: true)
-                    }
+                    if !board.isZen { ClaudeUsageToolbar(organization: agents.organizationID).transition(.opacity) }
                     Color.clear.frame(width: 0, height: 0)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,12 +76,18 @@ struct WorktreeCanvas: View {
                     .transition(.opacity)
             }
             if !board.isZen {
-                BranchBadge(branch: worktree.branch, title: title)
-                    .padding(.top, 14)
-                    .padding(.leading, board.leadingInset + 16)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
+                HStack(spacing: 8) {
+                    BranchBadge(branch: worktree.branch, title: title)
+                        .allowsHitTesting(false)
+                    if let host = agents.host, let stats = agents.hostStats {
+                        HostUsage(name: host.name, stats: stats, path: agents.hostPath)
+                            .transition(.opacity)
+                    }
+                }
+                .padding(.top, 14)
+                .padding(.leading, board.leadingInset + 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .transition(.opacity)
             }
         }
         .animation(.smooth(duration: 0.3), value: isEmpty)
@@ -112,19 +114,6 @@ struct WorktreeCanvas: View {
             let profile: UUID = if case .browser(let id) = request.target { browsers.record(id)?.profile ?? BrowserProfile.defaultID } else { BrowserProfile.defaultID }
             BrowserImportDialog(browsers: browsers, initialProfile: profile) {}
         }
-    }
-
-    /// Shown where the cards would be, when there are none to show.
-    /// The host's stats above the agent's usage; `compact` names each number with a glyph.
-    private func usage(compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let host = agents.host, let stats = agents.hostStats {
-                HostUsage(name: host.name, stats: stats, path: agents.hostPath, compact: compact)
-                    .transition(.opacity)
-            }
-            ClaudeUsageToolbar(organization: agents.organizationID)
-        }
-        .transition(.opacity)
     }
 
     private func reloadTemplates() {
@@ -439,21 +428,19 @@ private struct AppUsage: View {
     }
 }
 
-/// What the worktree's host is using (CPU, memory, disk), above the agent usage, as its core
-/// reports it every couple of seconds.
+/// What the worktree's host is using (CPU, memory, disk), beside the branch badge and as tall
+/// as it, as its core reports it every couple of seconds.
 private struct HostUsage: View {
     let name: String
     let stats: HostStats
     var path: HostChannel.Path?
-    var compact = false
 
     var body: some View {
-        HStack(spacing: 2) {
-            Label(name, systemImage: "server.rack")
+        HStack(spacing: 0) {
+            Label(name, systemImage: "icloud")
                 .foregroundStyle(Theme.ink)
                 .lineLimit(1)
-                .padding(.leading, 8)
-                .padding(.trailing, 4)
+                .padding(.horizontal, 8)
                 .help(path.map(\.note) ?? "")
             item(L("CPU"), "cpu", stats.cpu.formatted(.percent.precision(.fractionLength(0))), isHigh: stats.cpu > 0.9,
                  help: L("Of every processor on \(name) together."))
@@ -462,24 +449,24 @@ private struct HostUsage: View {
             item(L("Disk"), "internaldrive", Self.used(stats.diskUsed, of: stats.diskTotal), isHigh: stats.diskUsed > stats.diskTotal / 10 * 9,
                  help: L("Disk in use on \(name), of the volume its home folder is on."))
         }
-        .font(Theme.Font.label)
-        .padding(4)
+        .font(Theme.Font.caption)
+        // The branch badge's padding, so both sit at one height.
+        .padding(.vertical, 4)
         .modifier(GlassCapsule())
+        .fixedSize()
         .accessibilityElement(children: .combine)
     }
 
     private func item(_ title: String, _ symbol: String, _ value: String, isHigh: Bool, help: String) -> some View {
-        HStack(spacing: 6) {
-            // Narrower, a glyph still tells memory from disk.
-            if compact { Image(systemName: symbol).foregroundStyle(Theme.inkMuted).accessibilityHidden(true) } else { Text(title).foregroundStyle(Theme.inkMuted) }
+        HStack(spacing: 4) {
+            Image(systemName: symbol).foregroundStyle(Theme.inkMuted).accessibilityHidden(true)
             Text(value)
                 .monospacedDigit()
                 .foregroundStyle(isHigh ? Theme.danger : Theme.ink)
                 .accessibilityLabel("\(title) \(value)")
                 .contentTransition(.numericText())
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
         .help(help)
     }
 

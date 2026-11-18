@@ -85,7 +85,7 @@ fn is_real(folder: &Path, environment: &HashMap<String, String>) -> bool {
     real_folders(environment).iter().any(|real| key(real) == key(folder))
 }
 
-fn runs_under_tests() -> bool {
+pub(crate) fn runs_under_tests() -> bool {
     cfg!(test) || std::env::var("AGENTBOARD_TEST").as_deref() == Ok("1")
 }
 

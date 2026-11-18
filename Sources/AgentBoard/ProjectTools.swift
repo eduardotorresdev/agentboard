@@ -51,8 +51,6 @@ final class ProjectTools {
         if MyBoard.isBoard(record.worktree) { return .text("You are on the user's own board, not a worktree: only the user titles it.") }
         switch projects.setAgentTitle(title, path: record.worktree, in: record.organizationID, on: agents.host?.id) {
         case .applied: return .text("The worktree is titled “\(WorktreeTitle.clean(title) ?? title)”.")
-        case .keptUserTitle(let user):
-            return .text("Kept the user's title “\(user)”: they named this worktree, so yours wasn't applied.")
         case .unknownWorktree: return .error("Your card's folder isn't a worktree of a project in your organization.")
         case .invalid: return .error("Give a `title` of a few visible words, other than a label the sidebar uses itself.")
         case .failed(let reason): return .error("Couldn't save the title: \(reason)")

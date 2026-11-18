@@ -38,6 +38,12 @@ public struct TerminalTheme: Equatable, Sendable {
             rgb(0x5B, 0x8D, 0xEF), rgb(0xA6, 0x6B, 0xD9), rgb(0x2A, 0x9D, 0xB8), rgb(0xC7, 0xC3, 0xD1),
         ])
 
+    /// Perceived brightness, 0...255 (Rec. 709 weights), of a packed color.
+    @inline(__always)
+    static func luminance(_ color: UInt32) -> UInt32 {
+        ((color & 0xFF) * 54 + (color >> 8 & 0xFF) * 183 + (color >> 16 & 0xFF) * 19) >> 8
+    }
+
     public static func rgb(_ r: UInt32, _ g: UInt32, _ b: UInt32, _ a: UInt32 = 255) -> UInt32 {
         r | g << 8 | b << 16 | a << 24
     }
@@ -68,6 +74,9 @@ public struct TerminalTheme: Equatable, Sendable {
             bg = fg | 0xFF00_0000
             fg = opaqueBackground
         }
+        // Text a program colored for a dark terminal (near white on our white default background)
+        // would vanish: it takes the theme's ink instead, like a terminal's minimum contrast.
+        if bg >> 24 == 0, Self.luminance(fg) > 200, Self.luminance(background) > 200 { fg = foreground | fg & 0xFF00_0000 }
         if attributes.contains(.dim) { fg = fg & 0x00FF_FFFF | UInt32(Float(fg >> 24) * dimAlpha) << 24 }
         if attributes.contains(.invisible) { fg &= 0x00FF_FFFF }
         return (fg, bg)

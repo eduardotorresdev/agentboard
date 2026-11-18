@@ -1769,6 +1769,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let key = Self.terminalKey(event) {
             let modifiers = Self.modifiers(event)
             session.send(session.withTerminal { $0.encode(key, modifiers: modifiers) })
+        } else if flags == .control, event.charactersIgnoringModifiers == "v", store.host != nil,
+                  case let attachments = AgentStore.attachments(on: .general), !attachments.isEmpty {
+            // The agent there reads its own clipboard, which doesn't have this Mac's picture.
+            attach(attachments, to: session)
         } else if flags.contains(.control), let bytes = Self.controlKey(event) {
             session.send(bytes)
         } else {
@@ -1807,9 +1811,26 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     @objc func paste(_ sender: Any?) {
-        guard let session = focusedSession, let text = NSPasteboard.general.string(forType: .string) else { return }
+        guard let session = focusedSession else { return }
         interacted()
-        session.send(session.withTerminal { $0.encodePaste(text) })
+        let pasteboard = NSPasteboard.general
+        let files = AgentStore.attachments(on: pasteboard).filter { if case .file = $0 { true } else { false } }
+        if let text = pasteboard.string(forType: .string), files.isEmpty {
+            session.send(session.withTerminal { $0.encodePaste(text) })
+        } else {
+            attach(files.isEmpty ? AgentStore.attachments(on: pasteboard) : files, to: session)
+        }
+    }
+
+    /// Types the paths of `sources` into the terminal, as on its machine (copied to its host first).
+    private func attach(_ sources: [ImageSource], to session: AgentSession) {
+        guard !sources.isEmpty else { return }
+        let store = store
+        Task {
+            let paths = await store.attachmentPaths(sources)
+            guard !paths.isEmpty else { return NSSound.beep() }
+            session.send(session.withTerminal { $0.encodePaste(AgentStore.typed(paths)) })
+        }
     }
 
     static func terminalKey(_ event: NSEvent) -> TerminalKey? {
@@ -3221,15 +3242,28 @@ extension BoardView {
         return urls.filter(ImageSource.isMediaFile)
     }
 
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        droppedImages(sender).isEmpty ? [] : .copy
+    /// The terminal a drop lands on, if any.
+    private func droppedSession(_ info: NSDraggingInfo) -> AgentSession? {
+        card(at: world(convert(info.draggingLocation, from: nil))).flatMap { store.sessions[$0.id] }
     }
 
-    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        droppedImages(sender).isEmpty ? [] : .copy
+    private func dropOperation(_ info: NSDraggingInfo) -> NSDragOperation {
+        if droppedSession(info) != nil, !AgentStore.attachments(on: info.draggingPasteboard).isEmpty { return .copy }
+        return droppedImages(info).isEmpty ? [] : .copy
     }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dropOperation(sender) }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dropOperation(sender) }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        // Onto a terminal, any file is handed to its program, as a terminal types a dropped path.
+        if let session = droppedSession(sender) {
+            let attachments = AgentStore.attachments(on: sender.draggingPasteboard)
+            guard !attachments.isEmpty else { return false }
+            attach(attachments, to: session)
+            return true
+        }
         let urls = droppedImages(sender)
         guard !urls.isEmpty else { return false }
         addImages(urls.map(ImageSource.file), at: world(convert(sender.draggingLocation, from: nil)))

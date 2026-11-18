@@ -43,7 +43,7 @@ public enum DataFolder {
 
     static func isReal(_ folder: URL) -> Bool { realFolders.map(key).contains(key(folder)) }
 
-    private static var runsUnderTests: Bool {
+    static var runsUnderTests: Bool {
         let name = ProcessInfo.processInfo.processName
         return ProcessInfo.processInfo.environment["AGENTBOARD_TEST"] == "1" || name.hasSuffix("xctest") || name.contains("swiftpm-testing-helper") || NSClassFromString("XCTestCase") != nil
     }

@@ -21,7 +21,7 @@ enum WorktreeTitle {
         return words.isEmpty ? folder : words.prefix(1).uppercased() + words.dropFirst()
     }
 
-    static var mainLabel: String { L("Main checkout") }
+    static var mainLabel: String { L("Main") }
 
     /// One line of visible text within the limits; see `DisplayText.clean`.
     static func clean(_ title: String) -> String? {
@@ -31,7 +31,7 @@ enum WorktreeTitle {
     /// Whether a title would pass for one the app shows itself (the main checkout's label), in
     /// any case, accents, width or a lookalike script.
     static func isReserved(_ title: String) -> Bool {
-        let reserved = ["Main checkout", mainLabel].map(skeleton)
+        let reserved = ["Main checkout", "Main", mainLabel].map(skeleton)
         return reserved.contains(skeleton(title))
     }
 

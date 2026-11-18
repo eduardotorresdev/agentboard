@@ -96,16 +96,16 @@ private func storeWithWorktree() throws -> (ProjectStore, Project, Worktree) {
     return (store, project, worktree)
 }
 
-@MainActor @Test func agentTitlesApplyUntilTheUserNamesTheWorktree() throws {
+@MainActor @Test func theLatestTitleWinsWhetherTheUserOrAnAgentGaveIt() throws {
     let (store, _, worktree) = try storeWithWorktree()
     #expect(store.displayName(of: worktree) == "Eduardo fix login")
     #expect(store.setAgentTitle("Login bug", path: worktree.path) == .applied)
     #expect(store.displayName(of: worktree) == "Login bug")
     store.rename(worktree, to: "Mine")
-    #expect(store.setAgentTitle("Other", path: worktree.path) == .keptUserTitle("Mine"))
     #expect(store.displayName(of: worktree) == "Mine")
-    store.rename(worktree, to: "")
-    #expect(store.displayName(of: worktree) == "Login bug")
+    #expect(store.setAgentTitle("Other", path: worktree.path) == .applied)
+    #expect(store.displayName(of: worktree) == "Other")
+    #expect(!store.isNamedByUser(worktree))
 }
 
 @MainActor @Test func theInitialTitleIsRefinedByAgents() throws {
@@ -175,7 +175,7 @@ private func storeWithWorktree() throws -> (ProjectStore, Project, Worktree) {
     #expect(store.setAgentTitle("\u{2060}", path: worktree.path) == .invalid)
 }
 
-@MainActor @Test func theToolTitlesTheCallersWorktreeAndKeepsTheUsersTitle() async throws {
+@MainActor @Test func theToolTitlesTheCallersWorktreeOverTheUsersTitle() async throws {
     let (store, _, worktree) = try storeWithWorktree()
     let agents = AgentStore(database: FileManager.default.temporaryDirectory.appendingPathComponent("abcards-\(UUID().uuidString).sqlite"),
                             connect: { .failure(.noCore) })
@@ -188,9 +188,9 @@ private func storeWithWorktree() throws -> (ProjectStore, Project, Worktree) {
     #expect(!(await tools.call("worktree_set_title", arguments: ["title": "Login bug"], caller: caller.id).isError))
     #expect(store.displayName(of: worktree) == "Login bug")
     store.rename(worktree, to: "Mine")
-    let kept = await tools.call("worktree_set_title", arguments: ["title": "Other"], caller: caller.id)
-    #expect(!kept.isError)
-    #expect(store.displayName(of: worktree) == "Mine")
+    let retitled = await tools.call("worktree_set_title", arguments: ["title": "Other"], caller: caller.id)
+    #expect(!retitled.isError)
+    #expect(store.displayName(of: worktree) == "Other")
 }
 
 // MARK: States

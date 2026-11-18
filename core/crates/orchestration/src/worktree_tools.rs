@@ -15,7 +15,7 @@ impl<'a> ToolProvider<Turn<'a>> for WorktreeTools {
                 "worktree_set_title",
                 "Titles the worktree your card is in, as the user's sidebar shows it: what the work here is \
                  about, in a few words (e.g. \"Board input with mentions\"). Set it once you know, and again \
-                 when the work changes course. A title the user wrote stays; the result says so. Needs the board open.",
+                 when the work changes course. Needs the board open.",
                 json!({"type": "object", "properties": {
                     "title": {"type": "string", "description": "A few words, at most 60 characters."},
                 }, "required": ["title"]}),

@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use serde::Deserialize;
@@ -149,6 +149,9 @@ impl AgentProvider for ClaudeCode {
             arguments.extend(["--mcp-config".to_string(), Self::mcp_config(tools), "--allowedTools".to_string(), format!("mcp__{}", tools.name)]);
         }
         arguments.extend(["--settings".to_string(), Self::settings(tools)]);
+        if let Some(plugin) = tools.and_then(|_| board_plugin()) {
+            arguments.extend(["--plugin-dir".to_string(), plugin.to_string_lossy().into_owned()]);
+        }
         let resume = Self::conversation_exists(&id, &data_folder::home_directory());
         arguments.extend([if resume { "--resume" } else { "--session-id" }.to_string(), id]);
         arguments
@@ -161,6 +164,29 @@ impl AgentProvider for ClaudeCode {
         base.retain(|key, _| !key.starts_with("CLAUDE_CODE") && key != "CLAUDECODE");
         base
     }
+}
+
+/// How to use the board's tools, as a skill (see `board_skill.md`).
+pub const BOARD_SKILL: &str = include_str!("board_skill.md");
+
+/// The board's skill as a plugin Claude Code loads for one launch (`--plugin-dir`), kept in the
+/// data folder, never in the user's own config. None where no data folder may be used (tests
+/// without their own) or it can't be written.
+fn board_plugin() -> Option<PathBuf> {
+    let data_folder::Resolution::Folder(folder) = data_folder::resolve(&std::env::vars().collect(), data_folder::runs_under_tests()) else { return None };
+    write_board_plugin(&folder.join("agent-plugin")).ok()
+}
+
+/// Writes the plugin at `root` when it differs, so a launch rarely touches the disk.
+fn write_board_plugin(root: &Path) -> std::io::Result<PathBuf> {
+    let files = [(root.join(".claude-plugin/plugin.json"), r#"{"name": "agentboard"}"#), (root.join("skills/board/SKILL.md"), BOARD_SKILL)];
+    for (path, contents) in files {
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(contents) {
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            std::fs::write(&path, contents)?;
+        }
+    }
+    Ok(root.to_path_buf())
 }
 
 impl ClaudeCode {
@@ -453,6 +479,20 @@ mod tests {
     }
 
     #[test]
+    fn the_board_plugin_carries_the_skill_and_is_rewritten_only_when_stale() {
+        let root = std::env::temp_dir().join(format!("board-plugin-{}", Uuid::new().lowercased()));
+        let skill = root.join("skills/board/SKILL.md");
+        write_board_plugin(&root).unwrap();
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), BOARD_SKILL);
+        assert!(std::fs::read_to_string(root.join(".claude-plugin/plugin.json")).unwrap().contains("agentboard"));
+        std::fs::write(&skill, "old").unwrap();
+        write_board_plugin(&root).unwrap();
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), BOARD_SKILL);
+        assert!(BOARD_SKILL.starts_with("---\nname: board\n"));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn claude_gets_the_board_and_its_hooks() {
         let session = Uuid::new();
         let arguments = ClaudeCode.arguments(session, Some(&link()));
@@ -466,7 +506,7 @@ mod tests {
         assert_eq!(hooks["UserPromptSubmit"][0]["hooks"].as_array().unwrap().len(), 2);
         assert_eq!(hooks["PreToolUse"][0]["matcher"], "AskUserQuestion");
         assert!(hooks["Stop"][0]["hooks"][0]["command"].as_str().unwrap().contains("'http://127.0.0.1:9/mcp/attention'"));
-        assert_eq!(arguments[7..], ["--session-id".to_string(), session.lowercased()]);
+        assert_eq!(arguments[arguments.len() - 2..], ["--session-id".to_string(), session.lowercased()]);
 
         // Without the board's tools only the attention hook, through the terminal.
         let alone = ClaudeCode.arguments(session, None);

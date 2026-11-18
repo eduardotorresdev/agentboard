@@ -26,6 +26,9 @@ final class ProjectStore {
     }
     /// The worktrees on this Mac.
     private var local: [Project.ID: [Worktree]] = [:]
+    /// What other organizations' projects listed when last shown: switching back shows it at once
+    /// while git lists them again.
+    @ObservationIgnored private var listedBefore: [Project.ID: [Worktree]] = [:]
     /// What other hosts' clones of the projects hold, by host then project path, as last listed
     /// (see `Database.hostWorktrees`): an offline host's worktrees still show.
     private(set) var hostWorktrees: [UUID: [String: [Worktree]]] = [:]
@@ -102,13 +105,13 @@ final class ProjectStore {
         worktrees.values.contains { $0.first?.path == path }
     }
 
-    /// Whether the user named the worktree, which agents then can't retitle.
+    /// Whether the user named the worktree (since an agent last titled it).
     func isNamedByUser(_ worktree: Worktree) -> Bool {
         aliases[worktree.path] != nil
     }
 
-    /// The user named the worktree in the sidebar: the name is theirs, and agents can't replace
-    /// it. An empty name hands the title back to agents.
+    /// The user named the worktree in the sidebar, until an agent titles it again. An empty name
+    /// goes back to the agents' title.
     func rename(_ worktree: Worktree, to name: String) {
         let alias = WorktreeTitle.clean(name), path = worktree.path, before = aliases[path]
         aliases[path] = alias
@@ -121,8 +124,6 @@ final class ProjectStore {
 
     enum TitleResult: Equatable {
         case applied
-        /// The user named it; their name stays.
-        case keptUserTitle(String)
         case unknownWorktree
         /// Nothing visible was left once cleaned, or it would pass for a label the app shows.
         case invalid
@@ -137,8 +138,8 @@ final class ProjectStore {
         setTitle(title, path: path, in: organization)
     }
 
-    /// An agent's title for the worktree at `path` (in its card's organization), unless the user
-    /// named it.
+    /// An agent's title for the worktree at `path` (in its card's organization). It replaces a
+    /// name the user gave: the latest title wins.
     func setAgentTitle(_ title: String, path: String, in organization: UUID? = nil, on host: UUID? = nil) -> TitleResult {
         setTitle(title, path: path, in: organization, on: host)
     }
@@ -148,14 +149,18 @@ final class ProjectStore {
         let known = host.map { project(ofWorktree: path, on: $0, in: organization ?? organizationID) != nil }
         guard known ?? isWorktree(path, in: organization ?? organizationID) else { return .unknownWorktree }
         guard let title = WorktreeTitle.clean(title), !WorktreeTitle.isReserved(title) else { return .invalid }
-        if let user = aliases[path] { return .keptUserTitle(user) }
         guard let titleWriter else { return .failed("The app's database isn't open.") }
-        let before = agentTitles[path]
+        let before = agentTitles[path], userBefore = aliases[path]
         agentTitles[path] = title
-        // Shown at once; a write that fails puts the old title back.
-        titleWriter.write({ try $0.setWorktreeTitle(title, path: path) }) { [weak self] error in
+        aliases[path] = nil
+        // Shown at once; a write that fails puts the old titles back.
+        titleWriter.write({
+            try $0.setWorktreeTitle(title, path: path)
+            if userBefore != nil { try $0.setAlias(nil, path: path) }
+        }) { [weak self] error in
             guard let self, agentTitles[path] == title else { return }
             agentTitles[path] = before
+            if aliases[path] == nil { aliases[path] = userBefore }
             errorMessage = "\(error)"
         }
         return .applied
@@ -267,7 +272,8 @@ final class ProjectStore {
         removeWorktree(worktree, from: project, force: false)
     }
 
-    func reload() {
+    /// `listing`: false shows what was listed before (none yet: no rows) and leaves git to the caller.
+    func reload(listing: Bool = true) {
         guard let database else { return }
         do {
             organizations = try database.organizations()
@@ -278,7 +284,7 @@ final class ProjectStore {
             // worktree in the app forgets them.
             aliases = try database.aliases()
             agentTitles = try database.worktreeTitles()
-            local = projects.reduce(into: [:]) { $0[$1.id] = Git.worktrees(at: $1.path) }
+            local = projects.reduce(into: [:]) { $0[$1.id] = listing ? Git.worktrees(at: $1.path) : listedBefore[$1.id] ?? [] }
             hostWorktrees = try database.hostWorktrees()
         } catch {
             errorMessage = "\(error)"
@@ -356,7 +362,23 @@ final class ProjectStore {
         guard id != organizationID else { return }
         organizationID = id
         AppDefaults.shared.set(id.uuidString, forKey: Self.organizationKey)
-        reload()
+        listedBefore.merge(local) { $1 }
+        // git runs once per project: off the main thread, so a switch never waits on it.
+        reload(listing: false)
+        listLocalWorktrees()
+    }
+
+    /// Lists the shown projects' worktrees off the main thread, then keeps what changed, unless
+    /// another organization came forward meanwhile.
+    private func listLocalWorktrees() {
+        let shown = projects, organization = organizationID
+        Task {
+            let listed = await Task.detached {
+                shown.reduce(into: [Project.ID: [Worktree]]()) { $0[$1.id] = Git.worktrees(at: $1.path) }
+            }.value
+            guard organizationID == organization else { return }
+            for project in shown where local[project.id] != listed[project.id] { local[project.id] = listed[project.id] }
+        }
     }
 
     /// Adds an organization signed in as `~/.claude` is, and switches to it.

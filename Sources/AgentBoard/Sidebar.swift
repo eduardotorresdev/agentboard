@@ -161,7 +161,7 @@ struct Sidebar: View {
         let host = worktree.host.flatMap { id in hosts.account.hosts.first { $0.id == id } }
         return WorktreeRow(name: store.displayName(of: worktree), source: source,
                            isMain: store.isMain(worktree, in: project), contents: contents(of: worktree),
-                           host: host?.name, isOffline: host?.online == false,
+                           host: worktree.host == nil ? nil : host?.name ?? "", isOffline: host?.online == false,
                            isSelected: selection == tag, isRenaming: renaming == worktree,
                            selectionSpace: selectionSpace,
                            onSelect: { withAnimation(.snappy(duration: 0.3)) { selection = tag } },
@@ -175,10 +175,6 @@ struct Sidebar: View {
                            })
             .contextMenu {
                 Button(L("Rename")) { renaming = worktree }
-                if source == .user {
-                    // Your name stays until you hand the title back.
-                    Button(L("Let Agents Rename")) { store.rename(worktree, to: "") }
-                }
                 Button(L("Pull")) { store.pull(worktree) }
                 if !store.isMain(worktree, in: project) {
                     Divider()
@@ -250,7 +246,7 @@ private struct ProjectHeader: View {
             .buttonStyle(.plain)
             .accessibilityLabel(name)
             .accessibilityValue(isCollapsed ? L("Collapsed") : L("Expanded"))
-            if let onAddWorktree, isHovered {
+            if let onAddWorktree {
                 Button(action: onAddWorktree) {
                     Image(systemName: "plus")
                         .font(Theme.Font.caption.weight(.semibold))
@@ -294,7 +290,7 @@ struct ProjectTile: View {
     }
 }
 
-/// A worktree: its title, text only, bold when it needs the user, with a small dot on the right
+/// A worktree: where it lives as a glyph, then its title, bold when it needs the user, with a small dot on the right
 /// while something runs or waits. Double-click renames.
 private struct WorktreeRow: View {
     enum Source { case user, agent, fallback }
@@ -305,7 +301,7 @@ private struct WorktreeRow: View {
     /// The project's own checkout: marked, so no title can pass for it.
     let isMain: Bool
     let contents: WorktreeContents
-    /// The name of the host it lives on, when not this Mac.
+    /// The name of the host it lives on, when not this Mac (empty when unknown); nil on this Mac.
     var host: String?
     /// Its host isn't online: what is known of it shows, dimmed.
     var isOffline = false
@@ -340,17 +336,18 @@ private struct WorktreeRow: View {
                     // The title lines up with the projects' names.
                     .padding(.trailing, 1)
                     .accessibilityHidden(true)
+            } else {
+                // Under the project's tile: the main checkout's own mark, else where it lives (a cloud
+                // for a host, a computer for this Mac).
+                Image(systemName: isMain ? "house" : host == nil ? "desktopcomputer" : isOffline ? "icloud.slash" : "icloud")
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(Theme.inkMuted)
+                    .frame(width: ProjectTile.size, height: ProjectTile.size)
+                    .padding(.trailing, 1)
+                    .help(isMain ? WorktreeTitle.mainLabel : host.map { isOffline ? L("\($0) · offline") : $0 } ?? L("This Mac"))
+                    .accessibilityLabel(isMain ? WorktreeTitle.mainLabel : host.map { isOffline ? L("\($0) · offline") : $0 } ?? L("This Mac"))
             }
-            // The title gets the row's width; where it lives goes under it.
-            VStack(alignment: .leading, spacing: 1) {
-                title
-                if let host {
-                    Text(isOffline ? L("\(host) · offline") : host)
-                        .font(Theme.Font.caption)
-                        .foregroundStyle(Theme.inkMuted)
-                        .lineLimit(1)
-                }
-            }
+            title
             Spacer(minLength: 0)
             if isMain && source != .fallback {
                 Text(L("main"))
@@ -360,9 +357,9 @@ private struct WorktreeRow: View {
             CardStatusDot(status: status ?? .stopped)
                 .help(status?.label ?? "")
         }
-        .padding(.leading, isBoard ? 8 : Self.textInset)
+        .padding(.leading, 8)
         .padding(.trailing, 12)
-        .frame(height: isBoard ? 40 : host == nil ? 32 : 46)
+        .frame(height: isBoard ? 40 : 32)
         .background { background }
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onStartRename)
@@ -396,7 +393,7 @@ private struct WorktreeRow: View {
                 .foregroundStyle(isBoard ? Theme.deep : isOffline ? Theme.inkMuted : needsUser || isSelected ? Theme.ink : Theme.ink.opacity(0.82))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .help(source == .user ? L("\(name) · Named by you; agents can't rename it") : name)
+                .help(name)
         }
     }
 

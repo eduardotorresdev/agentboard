@@ -119,7 +119,8 @@ struct ContentView: View {
             store.refreshHostWorktrees()
             restoreSelection()
         }
-        .onChange(of: store.hostWorktrees) { restoreSelection() }
+        // Worktrees listed after a switch or from a host: one that was open is restored then.
+        .onChange(of: store.worktrees) { restoreSelection() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             dismissAttentionOnScreen()
         }
