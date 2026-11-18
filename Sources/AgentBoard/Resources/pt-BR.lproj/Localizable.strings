@@ -193,6 +193,18 @@
 "Code" = "Código";
 "Empty. Double-click to write." = "Vazio. Clique duas vezes para escrever.";
 "Write in markdown…" = "Escreva em markdown…";
+"Title" = "Título";
+"Heading" = "Cabeçalho";
+"Subheading" = "Subtítulo";
+"Text" = "Texto";
+"Bold" = "Negrito";
+"Underline" = "Sublinhado";
+"Title: the largest text, for the note's name." = "Título: o maior texto, para o nome da nota.";
+"Heading: large text that opens a section." = "Cabeçalho: texto grande que abre uma seção.";
+"Subheading: slightly larger text for a part of a section." = "Subtítulo: texto um pouco maior, para uma parte de uma seção.";
+"Text: the normal size, for paragraphs." = "Texto: o tamanho normal, para parágrafos.";
+"Bold: makes the selected text, or what you type next, heavier." = "Negrito: deixa mais forte o texto selecionado, ou o que você digitar a seguir.";
+"Underline: draws a line under the selected text, or what you type next." = "Sublinhado: traça uma linha sob o texto selecionado, ou sob o que você digitar a seguir.";
 
 /* Organizations */
 "Default" = "Padrão";
