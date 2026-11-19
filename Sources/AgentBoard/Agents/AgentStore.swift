@@ -31,6 +31,10 @@ final class AgentStore {
     @ObservationIgnored var mediaNotes: [String: String] = [:]
     /// Called with the file name when a host's picture arrived or couldn't, so the board redraws its card.
     @ObservationIgnored var onMediaChange: ((String) -> Void)?
+    /// Pictures still on their way to the host, by file: their cards wait, dimmed, with a spinner.
+    @ObservationIgnored var sendingMedia: Set<String> = []
+    /// A card's note or waiting changed; its picture didn't.
+    @ObservationIgnored var onMediaNote: ((String) -> Void)?
     /// Called each time the host's core answers (see `HostStores`).
     @ObservationIgnored var onConnect: (() -> Void)?
     /// Agents waiting on the developer, in every organization, oldest first.
@@ -39,6 +43,10 @@ final class AgentStore {
     var heldMessages: [UUID: Int] = [:]
     /// Why the core gave a composer prompt back, by agent: shown in its composer.
     var composerNotices: [UUID: String] = [:]
+    /// Files being sent to the host from an agent's composer or terminal, by agent: shown under its composer.
+    var uploads: [UUID: [Upload]] = [:] {
+        didSet { for id in Set(oldValue.keys).union(uploads.keys) { ComposerDrafts.setUploads(uploads[id]?.count ?? 0, for: id) } }
+    }
     /// False until the core has said which cards there are.
     private(set) var isLoaded = false
     /// Why the cards can't be shown, when the core runs another build this one can't talk to.

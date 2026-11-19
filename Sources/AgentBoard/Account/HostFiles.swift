@@ -72,6 +72,10 @@ struct HostFiles: Sendable {
         return ran.output
     }
 
+    func exists(_ path: String) async -> Bool {
+        await run("test", ["-f", path], nil)?.status == 0
+    }
+
     func isFolder(_ path: String) async -> Bool {
         await run("test", ["-d", path], nil)?.status == 0
     }
@@ -83,7 +87,8 @@ struct HostFiles: Sendable {
 
     /// Writes `data` to `path` in pieces no larger than `piece` bytes, so a large file never
     /// rides one `run`; it shows at `path` only once whole.
-    func write(_ data: Data, to path: String, piece: Int) async -> Bool {
+    /// `progress` hears the share written so far after each piece.
+    func write(_ data: Data, to path: String, piece: Int, progress: (Double) -> Void = { _ in }) async -> Bool {
         guard data.count > piece else { return await write(data, to: path) }
         let partial = path + ".part"
         var offset = 0
@@ -95,6 +100,7 @@ struct HostFiles: Sendable {
                 return false
             }
             offset = end
+            progress(Double(offset) / Double(data.count))
         }
         return await run("mv", ["-f", "--", partial, path], nil)?.status == 0
     }

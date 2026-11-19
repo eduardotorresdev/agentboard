@@ -587,5 +587,7 @@
 "%lld file trees" = "%lld árvores de arquivos";
 
 "Sending to %@…" = "Enviando para %@…";
+"Sending %@" = "Enviando %@";
 "Couldn't attach %@." = "Não foi possível anexar %@.";
 "the picture" = "a imagem";
+"Sending to %@… %lld%%" = "Enviando para %@… %lld%%";

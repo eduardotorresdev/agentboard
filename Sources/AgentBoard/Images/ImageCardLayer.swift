@@ -29,6 +29,8 @@ final class ImageCardLayer: CALayer {
     private var handlesVisible = false
     private var hoveredHandle: Int?
     private var shownFile: String?
+    /// Turns over the picture while it is on its way to the host.
+    private var spinner: CAShapeLayer?
     /// The player, for a video card.
     private(set) var video: VideoPlayback?
 
@@ -56,10 +58,48 @@ final class ImageCardLayer: CALayer {
     override init(layer: Any) { super.init(layer: layer) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// A skeleton while the file is sent: the picture dimmed, a quarter ring turning over it.
+    private func showSending(_ sending: Bool, in area: CGRect) {
+        picture.opacity = sending ? 0.35 : 1
+        guard sending else {
+            spinner?.removeFromSuperlayer()
+            spinner = nil
+            return
+        }
+        let ring = spinner ?? {
+            let ring = CAShapeLayer()
+            let side: CGFloat = 22
+            ring.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+            ring.path = CGPath(ellipseIn: ring.bounds.insetBy(dx: 1.5, dy: 1.5), transform: nil)
+            ring.fillColor = nil
+            ring.strokeColor = BoardPalette.rgb(BoardPalette.accent)
+            ring.lineWidth = 3
+            ring.lineCap = .round
+            ring.strokeEnd = 0.28
+            ring.zPosition = 5
+            // Spring-driven turns, one after another: never a timing curve.
+            let turn = CASpringAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = 0
+            turn.toValue = Double.pi * 2
+            turn.damping = 14
+            turn.stiffness = 60
+            turn.duration = turn.settlingDuration
+            turn.repeatCount = .infinity
+            ring.add(turn, forKey: "turn")
+            addSublayer(ring)
+            spinner = ring
+            return ring
+        }()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ring.position = CGPoint(x: area.midX, y: area.midY)
+        CATransaction.commit()
+    }
+
     /// The picture as last loaded, for copying.
     var image: CGImage? { picture.contents.map { $0 as! CGImage } }
 
-    @MainActor func update(frame: CGRect, record: ImageRecord, dataFolder: URL, focused: Bool, closeHovered: Bool, renaming: Bool, scale: CGFloat, visible: Bool = true, note: String? = nil) {
+    @MainActor func update(frame: CGRect, record: ImageRecord, dataFolder: URL, focused: Bool, closeHovered: Bool, renaming: Bool, scale: CGFloat, visible: Bool = true, note: String? = nil, sending: Bool = false) {
         self.frame = frame
         let layout = ImageCardLayout(size: frame.size)
         self.focused = focused
@@ -70,6 +110,7 @@ final class ImageCardLayer: CALayer {
                    detail: note, focused: focused, reserve: bounds.width - layout.title.maxX, scale: scale)
         CardFrame.closeButton(closeHover, closeGlyph, in: layout.close, hovered: closeHovered, scale: scale)
         picture.frame = layout.picture
+        showSending(sending, in: layout.picture)
 
         if !record.isVideo, let video {
             // No longer a video: the player goes, the picture shows.

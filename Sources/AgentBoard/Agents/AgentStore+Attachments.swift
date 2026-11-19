@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 
 /// Files the user pastes or drops into a terminal, handed to its program as paths it can open
@@ -18,39 +19,49 @@ extension AgentStore {
     static let attachmentLimit = 1024 * 1024 * 1024
 
     /// Paths on this store's machine for `sources`: this Mac's files as they are, a picture
-    /// without a file saved first; on another host, copies there. What can't be brought (a
-    /// folder, too large, host unreachable) is left out, and `agent`'s composer says why.
+    /// without a file saved first; on another host, copies there. A copy is named by its
+    /// content, so the same file pasted again is found there and not sent twice. While a file
+    /// goes, `agent`'s composer shows how far along it is; what can't be brought (a folder, too
+    /// large, host unreachable) is left out, and the composer says why.
     func attachmentPaths(_ sources: [ImageSource], for agent: UUID) async -> [String] {
         var paths: [String] = [], missed: [String] = []
-        if let host { composerNotices[agent] = L("Sending to \(host.name)…") }
-        defer {
-            if host != nil { composerNotices[agent] = nil }
-            if !missed.isEmpty { composerNotices[agent] = L("Couldn't attach \(missed.joined(separator: ", ")).") }
-        }
+        defer { if !missed.isEmpty { composerNotices[agent] = L("Couldn't attach \(missed.joined(separator: ", ")).") } }
         for source in sources {
             if host == nil, case .file(let url) = source {
                 paths.append(url.path)
                 continue
             }
-            let name = UUID().uuidString.prefix(8) + "-" + {
-                if case .file(let url) = source { return url.lastPathComponent }
-                return "pasted.png"
-            }()
             let shown: String = if case .file(let url) = source { url.lastPathComponent } else { L("the picture") }
-            guard let data = await Task.detached(operation: { Self.data(of: source) }).value, data.count <= Self.attachmentLimit else {
+            guard let (data, digest) = await Task.detached(operation: { Self.data(of: source).map { ($0, Self.digest(of: $0)) } }).value,
+                  data.count <= Self.attachmentLimit else {
                 missed.append(shown)
                 continue
             }
+            let file: String = if case .file(let url) = source { url.lastPathComponent } else { "pasted.png" }
+            let name = digest + "-" + file
             if let files {
                 guard let folder = await askHostDataFolder() else {
                     missed.append(shown)
                     continue
                 }
                 let path = folder + "/attachments/" + name
-                if await files.write(data, to: path, piece: HostMediaFailure.maximumBytes / 2) { paths.append(path) } else { missed.append(shown) }
+                if await files.exists(path) {
+                    paths.append(path)
+                    continue
+                }
+                let upload = Upload(name: shown)
+                uploads[agent, default: []].append(upload)
+                let sent = await files.write(data, to: path, piece: Self.attachmentPiece) { [weak self] share in
+                    guard let self, let index = uploads[agent]?.firstIndex(where: { $0.id == upload.id }) else { return }
+                    uploads[agent]?[index].progress = share
+                }
+                uploads[agent]?.removeAll { $0.id == upload.id }
+                if uploads[agent]?.isEmpty == true { uploads[agent] = nil }
+                if sent { paths.append(path) } else { missed.append(shown) }
             } else {
                 let url = dataFolder.appendingPathComponent("attachments/" + name)
                 let saved = await Task.detached {
+                    if FileManager.default.fileExists(atPath: url.path) { return true }
                     try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                     return (try? data.write(to: url, options: .atomic)) != nil
                 }.value
@@ -58,6 +69,15 @@ extension AgentStore {
             }
         }
         return paths
+    }
+
+    /// Pieces a file goes to a host in: small enough for its progress to move, large enough
+    /// that a big file isn't hundreds of round trips.
+    static let attachmentPiece = 4 * 1024 * 1024
+
+    /// What names a copy: the first 16 hex digits of its SHA-256.
+    nonisolated static func digest(of data: Data) -> String {
+        SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
     /// The bytes to carry; a TIFF picture as PNG, which agents read.
@@ -77,4 +97,11 @@ extension AgentStore {
             path.unicodeScalars.map { " \\'\"()[]{}&;|<>$`!*?#~".unicodeScalars.contains($0) ? "\\" + String($0) : String($0) }.joined()
         }.joined(separator: " ") + (paths.isEmpty ? "" : " ")
     }
+}
+
+/// A file on its way to a host, and the share of it sent.
+struct Upload: Identifiable, Sendable {
+    let id = UUID()
+    let name: String
+    var progress: Double = 0
 }

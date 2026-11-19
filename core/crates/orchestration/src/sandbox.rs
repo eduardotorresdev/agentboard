@@ -129,12 +129,15 @@ fn arguments(home: &Path, visible: &[PathBuf], data_folder: &Path, directory: Op
     list.extend(["--tmpfs".to_string(), text(data_folder)]);
     // Back in from the data folder: the organizations' agent settings, which agents write, and
     // the private toolchain `agentboard setup` made (git, Node) and the agents' board skill
-    // (`agent-plugin`), which nothing inside may change.
+    // (`agent-plugin`), and the files the user pastes into a terminal (`attachments`), which
+    // nothing inside may change.
     let organizations = data_folder.join("organizations");
     if organizations.is_dir() {
         bind(&mut list, "--bind", &organizations, &organizations);
     }
-    for kept in ["tools", "agent-plugin"].map(|name| data_folder.join(name)).iter().filter(|path| path.is_dir()) {
+    // Made now: a folder that appears after the sandbox starts never shows inside it.
+    let _ = std::fs::create_dir_all(data_folder.join("attachments"));
+    for kept in ["tools", "agent-plugin", "attachments"].map(|name| data_folder.join(name)).iter().filter(|path| path.is_dir()) {
         bind(&mut list, "--ro-bind", kept, kept);
     }
     for path in visible.iter().filter(|path| path.exists()) {
@@ -177,6 +180,7 @@ mod tests {
         assert!(at("--tmpfs", &home.join("agentboard")) < at("--bind", &worktree));
         assert!(at("--tmpfs", &data) < at("--bind", &data.join("organizations")));
         assert!(at("--tmpfs", &data) < at("--ro-bind", &data.join("agent-plugin")));
+        assert!(at("--tmpfs", &data) < at("--ro-bind", &data.join("attachments")));
         assert_eq!(&list[..3], ["--ro-bind", "/", "/"]);
         assert_eq!(list.last().unwrap(), "--");
         // Git's settings and the kept folders are there, read-only; no shell file is made up.

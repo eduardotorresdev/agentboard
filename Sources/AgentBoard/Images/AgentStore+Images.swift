@@ -79,19 +79,15 @@ extension AgentStore {
     }
 
     /// Stores the picture or video and adds a card for it at `origin`, named `name` (made
-    /// unique). A video is checked and copied off the main thread.
+    /// unique). A video is checked and copied off the main thread. On another host the card
+    /// shows at its size at once (`shown`), dimmed with a spinner while the file goes there, and
+    /// joins the board once it has arrived; it goes again if the file can't be sent.
     @discardableResult
-    func addImage(_ source: ImageSource, named name: String, to worktree: String, at origin: CGPoint) async throws -> ImageRecord {
+    func addImage(_ source: ImageSource, named name: String, to worktree: String, at origin: CGPoint,
+                  shown: (ImageRecord) -> Void = { _ in }) async throws -> ImageRecord {
         let stored = switch source {
         case .file(let url): try await ImageFiles.storeMedia(contentsOf: url, in: dataFolder)
         case .data(let data): try ImageFiles.store(data, in: dataFolder)
-        }
-        if host != nil {
-            // The host's core reads the picture from its own folder: it goes there first.
-            do { try await upload(stored.file) } catch {
-                ImageFiles.remove(stored.file, in: dataFolder)
-                throw error
-            }
         }
         // A file's name reaches agents: one line of visible text.
         let name = BoardName.clean(name) ?? (stored.duration == nil ? L("Image") : L("Video"))
@@ -100,6 +96,31 @@ extension AgentStore {
                                  file: stored.file, pixelSize: stored.pixelSize, organization: organizationID,
                                  duration: stored.duration)
         images.append(record)
+        if let host {
+            sendingMedia.insert(record.file)
+            mediaNotes[record.file] = L("Sending to \(host.name)…")
+            shown(record)
+            // The host's core reads the picture from its own folder: it goes there first.
+            do {
+                try await upload(record.file) { [weak self] share in
+                    self?.mediaNotes[record.file] = L("Sending to \(host.name)… \(Int(share * 100))%")
+                    self?.onMediaNote?(record.file)
+                }
+            } catch {
+                sendingMedia.remove(record.file)
+                mediaNotes[record.file] = nil
+                images.removeAll { $0.id == record.id }
+                ImageFiles.remove(stored.file, in: dataFolder)
+                throw error
+            }
+            sendingMedia.remove(record.file)
+            mediaNotes[record.file] = nil
+            // Moved, renamed or closed while it was sent: the board gets it as it is now.
+            guard let current = image(record.id) else { return record }
+            send(.addImage(current))
+            onMediaNote?(record.file)
+            return current
+        }
         send(.addImage(record))
         return record
     }
@@ -121,11 +142,12 @@ extension AgentStore {
     }
 
     /// Copies a picture this Mac just stored (in its copy of the host's pictures) to the host.
-    private func upload(_ file: String) async throws {
+    private func upload(_ file: String, progress: (Double) -> Void) async throws {
         let url = ImageFiles.url(of: file, in: dataFolder)
         guard let data = await Task.detached(operation: { try? Data(contentsOf: url, options: .mappedIfSafe) }).value,
               data.count <= HostMediaFailure.maximumBytes else { throw HostMediaFailure.tooLarge }
-        guard let folder = await hostMediaFolder(), let files, await files.write(data, to: folder + "/" + file) else {
+        guard let folder = await hostMediaFolder(), let files,
+              await files.write(data, to: folder + "/" + file, piece: Self.attachmentPiece, progress: progress) else {
             throw HostMediaFailure.unreachable
         }
     }
@@ -173,16 +195,18 @@ extension AgentStore {
     }
 
     func removeImage(_ id: UUID) {
+        // One still on its way never reached the board.
+        let unsent = image(id).map { sendingMedia.contains($0.file) } ?? false
         forgetHostMedia(of: id)
         images.removeAll { $0.id == id }
         dropConnections(touching: id)
-        send(.removeImage(id))
+        if !unsent { send(.removeImage(id)) }
     }
 
     func setImageFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
         guard let index = images.firstIndex(where: { $0.id == id }) else { return }
         images[index].frame = frame
-        if persist { send(.updateImage(images[index])) }
+        if persist, !sendingMedia.contains(images[index].file) { send(.updateImage(images[index])) }
     }
 
     func renameImage(_ id: UUID, to name: String) {
@@ -190,7 +214,7 @@ extension AgentStore {
         let trimmed = BoardName.clean(name) ?? ""
         guard !trimmed.isEmpty, trimmed != images[index].name else { return }
         images[index].name = ImageRecord.uniqueName(trimmed, among: images(in: images[index].worktree).filter { $0.id != id })
-        send(.updateImage(images[index]))
+        if !sendingMedia.contains(images[index].file) { send(.updateImage(images[index])) }
     }
 
     /// Moves the image to the top of the image stack.

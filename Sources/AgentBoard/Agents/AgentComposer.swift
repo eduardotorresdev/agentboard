@@ -120,6 +120,15 @@ enum ComposerDrafts {
         lineCounts[id] = lines
         NotificationCenter.default.post(name: linesChanged, object: id)
     }
+    private static var uploadCounts: [UUID: Int] = [:]
+    /// Files being sent shown under the agent's composer, one row each.
+    static func uploads(_ id: UUID) -> Int { uploadCounts[id] ?? 0 }
+
+    static func setUploads(_ count: Int, for id: UUID) {
+        guard count != uploads(id) else { return }
+        uploadCounts[id] = count
+        NotificationCenter.default.post(name: linesChanged, object: id)
+    }
     /// Serialized drafts, read from the data folder once and written back on each change.
     private static var saved: [String: String] = {
         (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
@@ -202,6 +211,7 @@ struct AgentComposer: View {
     var body: some View {
         let blocker = store.promptBlocker(id)
         let notice = notice ?? store.composerNotices[id]
+        VStack(spacing: 0) {
         HStack(alignment: .bottom, spacing: 6) {
             MentionField(store: store, id: id, isEmpty: $isEmpty, notice: $notice)
                 .padding(.vertical, 5)
@@ -232,10 +242,39 @@ struct AgentComposer: View {
             .accessibilityLabel(L("Send"))
             .padding(.bottom, 6)
         }
+        .frame(maxHeight: .infinity, alignment: .bottom)
+        ForEach(store.uploads[id] ?? []) { UploadRow(upload: $0) }
+        }
+        .padding(.bottom, store.uploads[id]?.isEmpty == false ? 4 : 0)
         .padding(.leading, 14)
         .padding(.trailing, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .modifier(ComposerGlass())
+    }
+}
+
+/// A file on its way to the host: "Sending name", a bar that eases toward its share, the percent.
+private struct UploadRow: View {
+    let upload: Upload
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(L("Sending \(upload.name)")).font(Theme.Font.caption).foregroundStyle(Theme.ink)
+                .lineLimit(1).truncationMode(.middle)
+            GeometryReader { box in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.surfaceDeep)
+                    Capsule().fill(Theme.accent).frame(width: box.size.width * upload.progress)
+                }
+            }
+            .frame(height: 5)
+            .animation(.smooth(duration: 0.6), value: upload.progress)
+            Text("\(Int(upload.progress * 100))%").font(Theme.Font.caption).monospacedDigit().foregroundStyle(Theme.inkMuted)
+                .frame(width: 34, alignment: .trailing)
+        }
+        .frame(height: CardMetrics.uploadRowHeight)
+        .padding(.trailing, 8)
+        .accessibilityElement(children: .combine)
     }
 }
 

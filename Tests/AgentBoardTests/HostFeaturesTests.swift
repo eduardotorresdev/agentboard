@@ -704,7 +704,11 @@ func aRealPageReachesWhatOnlyTheHostServes() throws {
     defer { try? FileManager.default.removeItem(at: home) }
     let data = Data((0..<1000).map { UInt8($0 % 251) })
     let path = home.appendingPathComponent("attachments/file.bin").path
-    #expect(await machine(home: home).write(data, to: path, piece: 300))
+    var shares: [Double] = []
+    #expect(await machine(home: home).write(data, to: path, piece: 300) { shares.append($0) })
+    #expect(shares == [0.3, 0.6, 0.9, 1])
+    #expect(await machine(home: home).exists(path))
+    #expect(AgentStore.digest(of: data) == AgentStore.digest(of: Data(data)) && AgentStore.digest(of: data).count == 16)
     #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == data)
     #expect(!FileManager.default.fileExists(atPath: path + ".part"))
 }

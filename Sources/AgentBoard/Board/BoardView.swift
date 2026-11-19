@@ -372,6 +372,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }
         browsers.onPageChange = { [weak self] _ in self?.syncLayers() }
         store.onMediaChange = { [weak self] file in self?.mediaChanged(file) }
+        store.onMediaNote = { [weak self] _ in self?.syncLayers() }
         registerForDraggedTypes([.fileURL])
     }
 
@@ -564,8 +565,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             let step = CGFloat(index) * 32
             do {
                 let origin = point.map { CGPoint(x: $0.x + step, y: $0.y + step) } ?? newCardOrigin(for: CGSize(width: ImageRecord.initialSide, height: ImageRecord.initialSide))
-                let record = try await store.addImage(source, named: source.baseName, to: worktree, at: origin)
-                appearing.insert(record.id)
+                let record = try await store.addImage(source, named: source.baseName, to: worktree, at: origin) { [weak self] record in
+                    guard let self, record.worktree == self.worktree else { return }
+                    appearing.insert(record.id)
+                    bringIntoView(record.frame)
+                    syncLayers()
+                }
+                if imageCards[record.id] == nil { appearing.insert(record.id) }
                 added = record
             } catch {
                 let name = if case .file(let url) = source { url.lastPathComponent } else { L("The pasted picture") }
@@ -3135,7 +3141,7 @@ extension BoardView {
             if visible { store.fetchMedia(record) }
             card.update(frame: record.frame, record: record, dataFolder: store.dataFolder, focused: highlighted(record.id),
                         closeHovered: hoveredClose == record.id, renaming: renamingCard == record.id, scale: scale,
-                        visible: visible, note: store.mediaNotes[record.file])
+                        visible: visible, note: store.mediaNotes[record.file], sending: store.sendingMedia.contains(record.file))
             let showsHandles = linkDrag != nil || record.id == hoveredCard
             let lit: Int? = if let linkDrag {
                 linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil

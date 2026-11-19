@@ -198,19 +198,26 @@ extension CardMetrics {
     @MainActor static func terminal(of record: AgentRecord) -> CGRect {
         guard record.runner == nil else { return RunnerChromeLayout.terminal(in: record.frame) }
         var area = content(of: record.frame)
-        area.size.height -= composerHeight(lines: ComposerDrafts.lines(record.id)) + composerGap
+        area.size.height -= composerHeight(of: record.id) + composerGap
         return area
     }
 
     /// The agent's composer, along the bottom of the card, growing upward one line at a time.
     @MainActor static func composer(of record: AgentRecord) -> CGRect {
-        let height = composerHeight(lines: ComposerDrafts.lines(record.id))
+        let height = composerHeight(of: record.id)
         return CGRect(x: record.frame.minX + inset, y: record.frame.maxY - inset - height, width: record.frame.width - inset * 2, height: height)
     }
 
     static let composerGap: CGFloat = 8
     /// Lines the composer grows to before it scrolls.
     static let composerMaxLines = 6
+
+    /// One row per file being sent, under the text.
+    static let uploadRowHeight: CGFloat = 20
+
+    @MainActor static func composerHeight(of id: UUID) -> CGFloat {
+        composerHeight(lines: ComposerDrafts.lines(id)) + CGFloat(ComposerDrafts.uploads(id)) * uploadRowHeight
+    }
 
     static func composerHeight(lines: Int) -> CGFloat {
         36 + CGFloat(min(max(lines, 1), composerMaxLines) - 1) * ComposerTextView.lineHeight
