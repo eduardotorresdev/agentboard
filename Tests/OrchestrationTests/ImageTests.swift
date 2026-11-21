@@ -94,7 +94,7 @@ struct ImageTests {
         #expect(inbox.events.contains { if case .imageAdded(let added) = $0 { added.id == record.id } else { false } })
 
         let peers = try await call("list_peers", as: a.id, on: core)
-        #expect(peers.text.contains("“Image” (image, id: \(record.id.uuidString), connected: true, 800×400"), "\(peers.text)")
+        #expect(peers.text.contains("“Image” (image, id: \(record.id.uuidString), made by: you, connected: true, 800×400"), "\(peers.text)")
 
         // `~` resolves to the home folder; checked with a file that isn't there, so nothing is written to HOME.
         let name = ".abtest-\(UUID().uuidString.prefix(8)).png"
@@ -168,6 +168,12 @@ struct ImageTests {
         #expect(only.mimeType == "image/png")
         #expect(only.image.flatMap(pixelSize) == CGSize(width: 200, height: 100))
         #expect(only.text.contains("200×100"))
+        // The user's marks: the marked copy by its file name, never a path out of the pictures folder.
+        let marked = try await read(["marks": loose.file], as: a.id, on: core)
+        #expect(!marked.isError && marked.text.contains("Small with the user's marks drawn on it") && marked.text.contains("200×100"), "\(marked.text)")
+        #expect(marked.image.flatMap(pixelSize) == CGSize(width: 10, height: 10))
+        let outside = try await read(["marks": "../agentboard.sqlite"], as: a.id, on: core)
+        #expect(outside.isError && outside.text.contains("There are no marks"), "\(outside.text)")
 
         await MainActor.run { for id in [big.id, tiff.id, heic.id] { core.orchestrator.bus.connect(a.id, id) } }
         let several = try await read(as: a.id, on: core)
@@ -223,6 +229,14 @@ struct ImageTests {
         try await waitUntil { otherInbox.events.contains { if case .imageUpdated(let r) = $0 { r.file == now.file } else { false } } }
         #expect(otherInbox.events.contains { if case .imageUpdated(let r) = $0 { r.file == now.file } else { false } })
 
+        // The user's image: a board is asked first (whichever the core picks), and allows it here.
+        for (board, events) in [(client, inbox), (other, otherInbox)] {
+            board.onService { data in
+                guard let event = BoardEvent(data) else { return }
+                events.add(event)
+                if case .toolCall(let call, "board_confirm_removal", _, _) = event { board.send(.toolResult(call: call, result: WireToolResult(.text("allowed")))) }
+            }
+        }
         let removed = try await call("image_remove", as: a.id, on: core)
         #expect(!removed.isError, "\(removed.text)")
         #expect(await core.orchestrator.images.isEmpty)

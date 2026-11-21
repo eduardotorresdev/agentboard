@@ -172,12 +172,12 @@ struct OrchestratorTests {
         #expect(await core.card(named: "terminal")?.runner?.isShell == true)
 
         let closed = try await call("agent_close", as: a.id, on: core)
-        #expect(closed.text == "Ended Helper and removed its card.")
+        #expect(closed.text == "Removed “Helper” (agent).")
         #expect(await core.card(named: "Helper") == nil)
 
         _ = try await call("postit_create", ["name": "Plan"], as: a.id, on: core)
         let removed = try await call("postit_remove", as: a.id, on: core)
-        #expect(removed.text == "Removed “Plan” from the board.")
+        #expect(removed.text == "Removed “Plan” (postit).")
         #expect(await core.orchestrator.postIts.isEmpty)
         _ = try await call("runner_close", as: a.id, on: core)
         client.disconnect()

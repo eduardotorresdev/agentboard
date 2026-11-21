@@ -1,3 +1,4 @@
+import AgentRuntime
 import AppKit
 import Connections
 import Orchestration
@@ -152,6 +153,76 @@ extension AgentStore {
         }
     }
 
+    // MARK: Annotations
+
+    /// The annotations on the image, started over when its picture was replaced.
+    func marks(of record: ImageRecord) -> ImageMarks {
+        if let state = imageMarks[record.id], state.file == record.file { return state }
+        let state = ImageMarks(file: record.file, image: record.id)
+        imageMarks[record.id] = state
+        return state
+    }
+
+    /// Sends the image's annotations, with a copy of the picture that has them drawn on it, to
+    /// `agent` alone (connected to the image first when it isn't), then clears them.
+    func sendMarks(of id: UUID, to agent: UUID) async {
+        guard let record = image(id), let state = imageMarks[id], !state.sending, let name = self.record(agent)?.name else { return }
+        let marks = state.kept
+        guard !marks.isEmpty else { return }
+        state.failure = nil
+        guard let picture = ImageCardLayer.cache[record.file], let data = ImageMarks.render(picture, marks: marks, pixelSize: record.pixelSize),
+              let stored = try? ImageFiles.store(data, in: dataFolder) else {
+            state.failure = L("Couldn't draw the marks on the picture. Nothing was sent.")
+            return
+        }
+        if let host {
+            state.sending = true
+            defer { state.sending = false }
+            // The host's core reads the marked copy from its own folder.
+            do { try await upload(stored.file) { _ in } } catch {
+                ImageFiles.remove(stored.file, in: dataFolder)
+                state.failure = L("Couldn't send the picture to \(host.name). Nothing was sent.")
+                return
+            }
+        }
+        connect(id, agent)
+        send(.deliver(from: id, text: ImageMarks.message(for: marks, on: BoardMention(name: record.name, type: ElementKind.image.rawValue, id: id),
+                                                         pixelSize: record.pixelSize, marked: stored.file), to: agent))
+        lastMarkedAgent = agent
+        state.marks = []
+        state.selected = nil
+        state.marking = false
+        state.sent = marks.count == 1 ? L("Sent 1 annotation to \(name)") : L("Sent \(marks.count) annotations to \(name)")
+        onMediaNote?(record.file)
+        try? await Task.sleep(for: .seconds(2.5))
+        state.sent = nil
+        onMediaNote?(record.file)
+    }
+
+    /// A sample picture with annotations on it, to look at them (`AGENTBOARD_SHOW=image-marks`,
+    /// with an agent to send them to for `image-marks-agent`).
+    func showSampleMarks(in worktree: String, agent: Bool) async {
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: 1440, height: 900, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        context.setFillColor(BoardPalette.card)
+        context.fill(CGRect(x: 0, y: 0, width: 1440, height: 900))
+        for (index, block) in [CGRect(x: 48, y: 282, width: 408, height: 132), CGRect(x: 48, y: 560, width: 900, height: 220), CGRect(x: 1000, y: 120, width: 380, height: 660)].enumerated() {
+            context.setFillColor(BoardPalette.rgb(index == 0 ? BoardPalette.accent : BoardPalette.ink, index == 0 ? 1 : 0.08))
+            context.fill(block)
+        }
+        guard let data = context.makeImage().flatMap({ NSBitmapImageRep(cgImage: $0).representation(using: .png, properties: [:]) }),
+              let record = try? await addImage(.data(data), named: "checkout", to: worktree, at: CGPoint(x: 440, y: 60)) else { return }
+        if agent, let provider = AgentCatalog.all.first { _ = add(provider, to: worktree, at: CGPoint(x: 1300, y: 60)) }
+        let state = marks(of: record)
+        state.marks = [ImageMark(area: CGRect(x: 48, y: 486, width: 408, height: 132), text: "The button should say “Pay $48.00”, not “Submit”."),
+                       ImageMark(area: CGRect(x: 1000, y: 120, width: 380, height: 300), text: "Too much empty space."),
+                       ImageMark(area: CGRect(x: 48, y: 120, width: 520, height: 160))]
+        state.marking = true
+        state.selected = state.marks[2].id
+        onMediaNote?(record.file)
+    }
+
     /// Prints the file when it is no larger than `$2` bytes; exits with 3 when it is.
     private static let fetchScript = "n=$(wc -c < \"$1\") || exit 1; [ \"$n\" -le \"$2\" ] || exit 3; cat \"$1\""
 
@@ -198,6 +269,8 @@ extension AgentStore {
         // One still on its way never reached the board.
         let unsent = image(id).map { sendingMedia.contains($0.file) } ?? false
         forgetHostMedia(of: id)
+        imageMarks[id] = nil
+        ImageMarks.forget(id)
         images.removeAll { $0.id == id }
         dropConnections(touching: id)
         if !unsent { send(.removeImage(id)) }

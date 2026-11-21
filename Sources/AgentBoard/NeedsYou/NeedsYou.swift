@@ -2,6 +2,60 @@ import AgentRuntime
 import Orchestration
 import SwiftUI
 
+/// One card of the Needs You queue: an agent waiting in its terminal, or an agent's decisions.
+enum NeedsYouItem: Identifiable {
+    case attention(AttentionRequest)
+    case decisions(agent: UUID, blocking: Bool)
+
+    /// An agent can have both at once: a prompt in its terminal and decisions on the board.
+    struct ID: Hashable {
+        let agent: UUID
+        let isDecision: Bool
+    }
+
+    var agent: UUID {
+        switch self {
+        case .attention(let request): request.id
+        case .decisions(let agent, _): agent
+        }
+    }
+
+    var id: ID {
+        if case .decisions = self { return ID(agent: agent, isDecision: true) }
+        return ID(agent: agent, isDecision: false)
+    }
+}
+
+extension NeedsYouItem {
+    /// What waits on the developer: agents with a blocking decision first (they are stopped),
+    /// then agents waiting in their terminal, oldest first, then agents with provisional
+    /// decisions (they carry on meanwhile). An agent that only ended its turn while its
+    /// decisions wait shows as its decisions alone.
+    @MainActor static func queue(stores: [AgentStore], attention: [AttentionRequest]) -> [NeedsYouItem] {
+        var blocking: [NeedsYouItem] = [], provisional: [NeedsYouItem] = []
+        var asking = Set<UUID>()
+        for store in stores {
+            for decision in store.decisions where !asking.contains(decision.agent) {
+                guard store.record(decision.agent) != nil, store.decisionSequence(of: decision.agent)?.isWaiting == true else { continue }
+                asking.insert(decision.agent)
+                let blocks = store.decisions.contains { $0.agent == decision.agent && $0.blocking && $0.state == .open && $0.answer == nil }
+                if blocks { blocking.append(.decisions(agent: decision.agent, blocking: true)) }
+                else { provisional.append(.decisions(agent: decision.agent, blocking: false)) }
+            }
+        }
+        let waiting = attention.filter { request in
+            guard stores.contains(where: { $0.record(request.id) != nil }) else { return false }
+            if asking.contains(request.id), case .turnEnded = request.reason, (request.questions ?? []).isEmpty { return false }
+            return true
+        }
+        return blocking + waiting.map(NeedsYouItem.attention) + provisional
+    }
+}
+
+extension HostStores {
+    var needsYou: [NeedsYouItem] { NeedsYouItem.queue(stores: connected, attention: attention) }
+}
+
 /// The count of agents waiting on the developer, centered in the toolbar. Opens the deck.
 struct NeedsYouButton: View {
     let hosts: HostStores
@@ -9,8 +63,8 @@ struct NeedsYouButton: View {
     @Binding var isOpen: Bool
     @State private var isHovered = false
 
-    private var waiting: [AgentRecord] { hosts.attention.compactMap { hosts.store(of: $0.id)?.record($0.id) } }
-    private var count: Int { hosts.attention.count { hosts.store(of: $0.id) != nil } }
+    private var waiting: [AgentRecord] { hosts.needsYou.compactMap { hosts.store(of: $0.agent)?.record($0.agent) } }
+    private var count: Int { hosts.needsYou.count }
 
     /// How many projects have an agent waiting; a worktree outside every project counts as its own.
     private var projectCount: Int {
@@ -109,14 +163,16 @@ struct NeedsYouDeck: View {
     /// Opens the agent's worktree on the board, focused on its card.
     let onReveal: (AgentRecord) -> Void
     /// Where each card was dragged, kept while it flies off.
-    @State private var drags: [UUID: CGSize] = [:]
+    @State private var drags: [NeedsYouItem.ID: CGSize] = [:]
     /// Cards flying off: out of the queue already, gone from the store once they land.
-    @State private var leaving: Set<UUID> = []
+    @State private var leaving: Set<NeedsYouItem.ID> = []
+    /// Decisions put aside for later: they go to the end of the queue while this screen is open.
+    @State private var later: [NeedsYouItem.ID] = []
     /// Whether the top card takes the keyboard. Off when the card above left on its own (its
     /// agent was answered and went back to work): typing still aimed at that agent must not
     /// land in the next one, maybe on a permission prompt. A click on the terminal turns it on.
     @State private var focusFollows = true
-    @State private var leftByUser: Set<UUID> = []
+    @State private var leftByUser: Set<NeedsYouItem.ID> = []
     /// What had the keyboard before the deck opened, to give it back on close.
     @State private var previousResponder: NSResponder?
     /// The hint shows until the first card is dragged away.
@@ -129,8 +185,9 @@ struct NeedsYouDeck: View {
     private static let threshold: CGFloat = 150
     private static let behind = 3
 
-    private var queue: [AttentionRequest] {
-        hosts.attention.filter { hosts.store(of: $0.id) != nil && !leaving.contains($0.id) }
+    private var queue: [NeedsYouItem] {
+        let waiting = hosts.needsYou.filter { !leaving.contains($0.id) }
+        return waiting.filter { !later.contains($0.id) } + later.compactMap { id in waiting.first { $0.id == id } }
     }
 
     var body: some View {
@@ -145,11 +202,11 @@ struct NeedsYouDeck: View {
                 .contentShape(.rect)
                 ZStack {
                     // One list, so a card keeps its identity (and its terminal) as it flies off.
-                    let flying = hosts.attention.filter { leaving.contains($0.id) }
+                    let flying = hosts.needsYou.filter { leaving.contains($0.id) }
                     let cards = flying.map { ($0, 0, true) } + queue.prefix(Self.behind).enumerated().map { ($1, $0, false) }
-                    ForEach(cards.reversed(), id: \.0.id) { request, depth, isLeaving in
-                        if let agents = hosts.store(of: request.id), let record = agents.record(request.id) {
-                            card(request, record, in: agents, depth: depth, size: size, isLeaving: isLeaving)
+                    ForEach(cards.reversed(), id: \.0.id) { item, depth, isLeaving in
+                        if let agents = hosts.store(of: item.agent), let record = agents.record(item.agent) {
+                            card(item, record, in: agents, depth: depth, size: size, isLeaving: isLeaving)
                                 .zIndex(isLeaving ? 1 : Double(-depth))
                         }
                     }
@@ -196,30 +253,43 @@ struct NeedsYouDeck: View {
     }
 
     @ViewBuilder
-    private func card(_ request: AttentionRequest, _ record: AgentRecord, in agents: AgentStore, depth: Int, size: CGSize, isLeaving: Bool = false) -> some View {
-        let drag = drags[request.id] ?? .zero
+    private func card(_ item: NeedsYouItem, _ record: AgentRecord, in agents: AgentStore, depth: Int, size: CGSize, isLeaving: Bool = false) -> some View {
+        let drag = drags[item.id] ?? .zero
         let isTop = depth == 0 && !isLeaving
         let progress = isLeaving ? 1 : isTop ? min(abs(drag.width) / Self.threshold, 1) : 0
-        NeedsYouCard(agents: agents, request: request, record: record, place: place(of: record), size: size, isActive: isTop,
-                     isLive: isTop || isLeaving,
-                     position: L("\(queue.count) waiting"), showsHint: !hasSwiped, progress: progress,
-                     takesFocus: isTop && focusFollows, onDone: { leave(request.id, direction: 1) },
-                     onAnswer: { answers in leave(request.id, direction: 1) { agents.answerQuestions(request.id, answers) } },
-                     onTerminal: { agents.answerQuestions(request.id, nil) }, onEscape: close,
-                     onReveal: {
-                         agents.dismissAttention(request.id)
-                         close()
-                         onReveal(record)
-                     })
-            .frame(width: Self.width(of: record, in: size))
+        let position = L("\(queue.count) waiting")
+        let reveal = {
+            if case .attention = item { agents.dismissAttention(item.agent) }
+            close()
+            onReveal(record)
+        }
+        Group {
+            switch item {
+            case .attention(let request):
+                NeedsYouCard(agents: agents, request: request, record: record, place: projects.place(ofPath: record.worktree),
+                             organization: organization(of: record), size: size, isActive: isTop,
+                             isLive: isTop || isLeaving,
+                             position: position, showsHint: !hasSwiped, progress: progress,
+                             takesFocus: isTop && focusFollows, onDone: { leave(item.id, direction: 1) },
+                             onAnswer: { answers in leave(item.id, direction: 1) { agents.answerQuestions(request.id, answers) } },
+                             onTerminal: { agents.answerQuestions(request.id, nil) }, onEscape: close, onReveal: reveal)
+                    .frame(width: Self.width(of: record, in: size))
+            case .decisions:
+                if let sequence = agents.decisionSequence(of: item.agent) {
+                    NeedsYouDecisions(agents: agents, record: record, sequence: sequence, place: projects.place(ofPath: record.worktree),
+                                      isActive: isTop, position: position, onLater: { leave(item.id, direction: 1) }, onReveal: reveal)
+                        .frame(width: min(size.width, DecisionMetrics.width))
+                }
+            }
+        }
             .frame(maxHeight: size.height)
             .scaleEffect(1 - CGFloat(depth) * 0.04)
             .offset(x: drag.width, y: drag.height * 0.4 + CGFloat(depth) * 14)
-            .rotationEffect(.degrees(depth == 0 ? (reduceMotion ? 0 : Double(drag.width / 24)) : Self.tilt(depth, request.id)))
+            .rotationEffect(.degrees(depth == 0 ? (reduceMotion ? 0 : Double(drag.width / 24)) : Self.tilt(depth, item.agent)))
             .opacity(isLeaving ? 0 : 1)
             .allowsHitTesting(isTop)
             .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.96)), removal: .opacity))
-            .simultaneousGesture(isTop ? swipe(request.id) : nil)
+            .simultaneousGesture(isTop ? swipe(item.id) : nil)
             .animation(.snappy(duration: 0.4), value: depth)
     }
 
@@ -234,7 +304,7 @@ struct NeedsYouDeck: View {
         return side * (depth.isMultiple(of: 2) ? -1 : 1) * (1 + Double(depth) * 0.75)
     }
 
-    private func swipe(_ id: UUID) -> some Gesture {
+    private func swipe(_ id: NeedsYouItem.ID) -> some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
                 let before = abs(drags[id]?.width ?? 0) > Self.threshold
@@ -256,7 +326,7 @@ struct NeedsYouDeck: View {
 
     /// Slides the card a little toward `direction` as it fades, then takes it out of the queue.
     /// `then` runs as it lands, before the request leaves the queue (answering questions).
-    private func leave(_ id: UUID, direction: CGFloat, then: (() -> Void)? = nil) {
+    private func leave(_ id: NeedsYouItem.ID, direction: CGFloat, then: (() -> Void)? = nil) {
         guard !leaving.contains(id) else { return }
         leftByUser.insert(id)
         let current = drags[id] ?? .zero
@@ -268,7 +338,13 @@ struct NeedsYouDeck: View {
             leaving.remove(id)
             drags[id] = nil
             then?()
-            hosts.store(of: id)?.dismissAttention(id)
+            if id.isDecision {
+                // Decisions leave when answered; put aside, they come back after the rest.
+                later.removeAll { $0 == id }
+                later.append(id)
+            } else {
+                hosts.store(of: id.agent)?.dismissAttention(id.agent)
+            }
         }
     }
 
@@ -276,22 +352,77 @@ struct NeedsYouDeck: View {
         withAnimation(.snappy(duration: 0.3)) { isOpen = false }
     }
 
-    /// Where the agent works: its organization (when there are several), project and worktree.
-    private func place(of record: AgentRecord) -> [String] {
-        let worktreeURL = URL(fileURLWithPath: record.worktree)
-        let project = projects.projects.first { project in
-            project.path == record.worktree || projects.worktrees[project.id]?.contains { $0.path == record.worktree } == true
+    /// The agent's organization, named only when there are several.
+    private func organization(of record: AgentRecord) -> String? {
+        projects.organizations.count > 1 ? projects.organizations.first { $0.id == record.organization }?.name : nil
+    }
+}
+
+/// An agent's decisions in the queue: the canvas balloon itself, walking through its questions.
+private struct NeedsYouDecisions: View {
+    let agents: AgentStore
+    let record: AgentRecord
+    let sequence: AgentStore.DecisionSequence
+    let place: ProjectStore.Place
+    let isActive: Bool
+    let position: String
+    let onLater: () -> Void
+    let onReveal: () -> Void
+    @State private var model: DecisionBalloonModel
+
+    init(agents: AgentStore, record: AgentRecord, sequence: AgentStore.DecisionSequence, place: ProjectStore.Place,
+         isActive: Bool, position: String, onLater: @escaping () -> Void, onReveal: @escaping () -> Void) {
+        self.agents = agents
+        self.record = record
+        self.sequence = sequence
+        self.place = place
+        self.isActive = isActive
+        self.position = position
+        self.onLater = onLater
+        self.onReveal = onReveal
+        let model = DecisionBalloonModel(decision: sequence.shown)
+        model.pointsAtCard = false
+        _model = State(initialValue: model)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                DecisionBalloon(store: agents, model: model)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            HStack {
+                Text(position)
+                    .font(Theme.Font.label.weight(.regular).monospacedDigit())
+                    .foregroundStyle(Theme.inkMuted)
+                Spacer()
+                if isActive {
+                    Button(action: onReveal) {
+                        Label(L("Go to Agent"), systemImage: "arrow.up.right").font(.system(size: 14, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.extraLarge)
+                    .help(L("Opens its worktree with its card in focus; the decision stays on the card."))
+                    Button(action: onLater) {
+                        Label(L("Later"), systemImage: "arrow.turn.down.right").font(.system(size: 14, weight: .semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.extraLarge)
+                    .help(L("Keeps the decision open and shows it again after the others."))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
-        let worktree = projects.worktrees.values.joined().first { $0.path == record.worktree }
-        var place = [project?.name ?? worktreeURL.deletingLastPathComponent().lastPathComponent,
-                     worktree.map(projects.displayName(of:)) ?? projects.displayName(ofPath: record.worktree)]
-        // The user's own board has no project over it.
-        if MyBoard.isBoard(record.worktree) { place.removeFirst() }
-        if projects.organizations.count > 1,
-           let organization = projects.organizations.first(where: { $0.id == record.organization }) {
-            place.insert(organization.name, at: 0)
+        .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.dialog))
+        .clipShape(.rect(cornerRadius: Theme.Radius.dialog))
+        .onChange(of: sequence, initial: true) {
+            model.decision = sequence.shown
+            model.position = sequence.position
+            model.total = sequence.total
+            model.agentName = record.name
+            model.place = place
         }
-        return place
     }
 }
 
@@ -299,8 +430,9 @@ private struct NeedsYouCard: View {
     let agents: AgentStore
     let request: AttentionRequest
     let record: AgentRecord
-    /// Organization (when there are several), project, worktree.
-    let place: [String]
+    let place: ProjectStore.Place
+    /// Named only when there are several.
+    let organization: String?
     let size: CGSize
     /// The top card: its terminal is live and its shortcuts work.
     let isActive: Bool
@@ -376,21 +508,15 @@ private struct NeedsYouCard: View {
         .shadow(color: Theme.line.opacity(isLive ? 0.14 : 0.08), radius: isLive ? 30 : 16, y: isLive ? 14 : 8)
     }
 
-    /// Where the agent works leads: the worktree, then its project. The agent's name and its
+    /// Where the agent works leads: the project, then the worktree. The agent's name and its
     /// organization (when there are several) come after, smaller.
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(place[place.count - 1])
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(Theme.line)
-                        .layoutPriority(1)
-                    Label(place[place.count - 2], systemImage: "folder")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.line.opacity(0.55))
-                }
-                Label(L("Agent: \(([record.name] + place.dropLast(2)).joined(separator: " · "))"), systemImage: "sparkles")
+                PlaceTitle(place: place)
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Theme.line)
+                Label(L("Agent: \([record.name, organization].compactMap { $0 }.joined(separator: " - "))"), systemImage: "sparkles")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.line.opacity(0.5))
                     .padding(.top, 3)

@@ -15,13 +15,15 @@ struct WorktreeCanvas: View {
     /// Where templates are kept, and the project folder they are kept for.
     var database: Database?
     var project = ""
+    /// Project and worktree, as decision balloons title themselves.
+    var place = ProjectStore.Place(worktree: "")
     /// The project's templates, read again when the project changes and when they are opened or changed.
     @State private var templates: [CanvasTemplate] = []
 
     var body: some View {
         ZStack(alignment: .bottom) {
             SkyCanvas()
-            Board(store: agents, browsers: browsers, simulators: simulators, fileTrees: fileTrees, worktree: worktree.path, controller: board)
+            Board(store: agents, browsers: browsers, simulators: simulators, fileTrees: fileTrees, worktree: worktree.path, place: place, controller: board)
             if let notice {
                 EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
                     .padding(.leading, board.leadingInset)

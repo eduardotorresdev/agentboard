@@ -34,6 +34,7 @@ impl Turn<'_> {
         };
         self.insert(record.clone(), None);
         if let Some(owner) = owner {
+            self.made(record.id, owner);
             self.connect(owner, record.id);
         }
         self.start_runner(record.id);
@@ -49,6 +50,7 @@ impl Turn<'_> {
             ..AgentRecord::new(Uuid::new(), owner.worktree.clone(), provider.id(), AgentRecord::unique_name(base, self.cards_in(&owner.worktree)), Rect::at(self.origin(owner, size), size))
         };
         self.insert(record.clone(), None);
+        self.made(record.id, owner.id);
         self.connect(owner.id, record.id);
         self.server.open_session(crate::board_protocol::to_runtime(record.id), estimated_columns(record.frame), estimated_rows(record.frame), None);
         self.launch(record.id);

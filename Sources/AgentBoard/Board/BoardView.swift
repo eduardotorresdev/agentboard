@@ -136,6 +136,7 @@ struct Board: NSViewRepresentable {
     let simulators: SimulatorStore
     let fileTrees: FileTreeStore
     let worktree: String
+    var place = ProjectStore.Place(worktree: "")
     let controller: BoardController
 
     func makeNSView(context: Context) -> BoardView {
@@ -148,6 +149,7 @@ struct Board: NSViewRepresentable {
     func updateNSView(_ view: BoardView, context: Context) {
         controller.view = view
         view.controller = controller
+        view.place = place
         view.worktree = worktree
         view.syncLayers()
         if controller.pendingReveal != nil { DispatchQueue.main.async { view.revealPending() } }
@@ -219,8 +221,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var runnerChrome: [UUID: RunnerChromeLayer] = [:]
     /// Each agent card's composer, below the card.
     private var composers: [UUID: NSView] = [:]
-    /// Decision balloons, by decision.
+    /// Project and worktree of this board, for the balloons' title.
+    var place = ProjectStore.Place(worktree: "")
+    /// Decision balloons, by agent: its questions show one after the other in the same balloon.
     private var balloons: [UUID: (view: NSView, model: DecisionBalloonModel)] = [:]
+    /// The annotation chrome over each picture.
+    private var markHosts: [UUID: ImageMarksHost] = [:]
     /// The runner control under the pointer.
     private var hoveredRunnerControl: (card: UUID, control: RunnerControl)?
     private var browserCards: [UUID: BrowserCardLayer] = [:]
@@ -786,33 +792,39 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         view.subviews.first?.frame = view.bounds
     }
 
-    /// One balloon per agent with a decision waiting, its oldest, left of the card and pointing
-    /// at it. A balloon whose decision is gone collapses before it leaves.
+    /// One balloon per agent with decisions, left of the card and pointing at it, walking through
+    /// its questions. It collapses into the card once the agent has nothing left to show.
     private func syncDecisions(_ records: [AgentRecord]) {
         var shown = Set<UUID>()
         for record in records where record.runner == nil {
-            let waiting = store.decisions.filter { $0.agent == record.id }
-            guard let decision = waiting.first else { continue }
-            shown.insert(decision.id)
-            let balloon = balloons[decision.id] ?? {
-                let model = DecisionBalloonModel(decision: decision)
+            guard let sequence = store.decisionSequence(of: record.id) else { continue }
+            shown.insert(record.id)
+            let balloon = balloons[record.id] ?? {
+                let model = DecisionBalloonModel(decision: sequence.shown)
                 let view = NSView()
                 view.addSubview(NSHostingView(rootView: DecisionBalloon(store: store, model: model)))
-                model.onHeight = { [weak self] in DispatchQueue.main.async { self?.placeBalloon(decision.id) } }
-                balloons[decision.id] = (view, model)
+                model.onHeight = { [weak self] in DispatchQueue.main.async { self?.placeBalloon(record.id) } }
+                balloons[record.id] = (view, model)
                 addSubview(view)
                 return (view, model)
             }()
             let model = balloon.model
-            if model.decision != decision { model.decision = decision }
+            model.leaving = false
+            if model.decision != sequence.shown { model.decision = sequence.shown }
             if model.agentName != record.name { model.agentName = record.name }
-            if model.more != waiting.count - 1 { model.more = waiting.count - 1 }
+            if model.position != sequence.position { model.position = sequence.position }
+            if model.total != sequence.total { model.total = sequence.total }
+            if model.place != place { model.place = place }
             model.origin = CGPoint(x: record.frame.minX - DecisionMetrics.gap - DecisionMetrics.outerWidth, y: record.frame.minY)
         }
         for (id, balloon) in balloons {
             if !shown.contains(id), !balloon.model.leaving {
+                // It leaves showing the answer given, not the question again.
+                if let current = store.decisions.first(where: { $0.id == balloon.model.decision.id }) { balloon.model.decision = current }
                 balloon.model.leaving = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    // A question that arrived meanwhile keeps the balloon.
+                    guard balloon.model.leaving else { return }
                     balloon.view.removeFromSuperview()
                     self?.balloons[id] = nil
                 }
@@ -1870,6 +1882,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     }
 
     override func keyDown(with event: NSEvent) {
+        // Escape closes an annotation's balloon, then puts the marker down.
+        if event.keyCode == 53, markHosts.values.contains(where: { $0.state.escape() }) { return }
         if !selection.isEmpty, focusedID == nil {
             switch event.keyCode {
             case 51, 117: return confirmDeleteSelection()  // Delete, Forward Delete
@@ -3419,6 +3433,10 @@ extension BoardView {
             card.removeFromSuperlayer()
             imageCards[id] = nil
         }
+        for (id, host) in markHosts where store.image(id)?.isVideo != false || !ids.contains(id) {
+            host.removeFromSuperview()
+            markHosts[id] = nil
+        }
         let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count)
         for (index, record) in records.enumerated() {
             let card = imageCards[record.id] ?? {
@@ -3430,6 +3448,29 @@ extension BoardView {
             }()
             card.zPosition = below + CGFloat(index)
             let visible = screen(record.frame).intersects(bounds)
+            if !record.isVideo {
+                let state = store.marks(of: record)
+                let layout = ImageMarksLayout(card: record.frame.size, pixelSize: record.pixelSize)
+                if markHosts[record.id]?.state !== state {
+                    markHosts[record.id]?.removeFromSuperview()
+                    let host = ImageMarksHost(state: state, layout: layout, content: ImageMarksView(store: store, state: state, id: record.id) { [weak self] in self?.addAgent($0) })
+                    markHosts[record.id] = host
+                    addSubview(host)
+                }
+                if let host = markHosts[record.id] {
+                    host.layout = layout
+                    let onScreen = screen(record.frame)
+                    let room = (bounds.maxX - onScreen.minX) * record.frame.width / max(onScreen.width, 1)
+                    if state.room != room { state.room = room }
+                    // Nothing to mark while the picture is still on its way to the host.
+                    host.isHidden = store.sendingMedia.contains(record.file)
+                    let rect = layout.frame.offsetBy(dx: record.frame.minX, dy: record.frame.minY)
+                    host.frame = screen(rect)
+                    host.setBoundsSize(rect.size)
+                    host.subviews.first?.frame = host.bounds
+                }
+                card.footed = state.footerOpen
+            }
             // A picture kept on another host is brought here the first time its card shows.
             if visible { store.fetchMedia(record) }
             card.update(frame: record.frame, record: record, dataFolder: store.dataFolder, focused: highlighted(record.id),

@@ -100,6 +100,7 @@ final class SimulatorRelay: ToolProvider {
     }
 
     func call(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
-        await store.relay(name, arguments: arguments, caller: caller)
+        name == "simulator_close" ? await store.close(.simulator, "simulator", arguments["simulator"], for: caller)
+            : await store.relay(name, arguments: arguments, caller: caller)
     }
 }

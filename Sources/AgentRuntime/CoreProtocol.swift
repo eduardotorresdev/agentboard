@@ -44,7 +44,9 @@ public enum CoreProtocol {
     /// 7: `subscribeStatuses`, a board hearing every session's status.
     /// 8: hosts: `run` (a program on the core's machine, answered with `ran`) and `subscribeHost`.
     /// 9: decisions (`BoardEvent.decisions`, `BoardRequest.answerDecision`).
-    public static let version = 9
+    /// 10: nothing new on the wire: the tools changed (removing board elements, decisions as one
+    /// run of questions, `image_read` with the user's marks), so an older core is replaced; `deliver` may name one agent (`to`).
+    public static let version = 10
     public static let oldest = 2
     public static let versions = Versions(version: version, oldest: oldest)
 

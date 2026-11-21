@@ -53,7 +53,7 @@ final class CardTools: ToolProvider {
     func call(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
         switch name {
         case "browser_close":
-            return await store.relay(name, arguments: arguments, caller: caller)
+            return await store.close(.browser, "browser", arguments["browser"], for: caller)
         case "agent_start", "terminal_open":
             guard let me = store.record(caller), me.runner == nil else { return .error("Only agents on the board can add cards.") }
             let cardName: String?
@@ -81,40 +81,33 @@ final class CardTools: ToolProvider {
             let record = store.addAgent(provider, name: cardName, owner: me, in: worktree)
             return .text("Started agent “\(record.name)”\(worktree == me.worktree ? "" : " in \(worktree)"), connected to you. Tell it what to do with send_message.")
         case "agent_close":
-            return connected(.agent, "agent", arguments["agent"], to: caller) { element in
-                let name = element.name
-                store.remove(element.id)
-                return "Ended \(name) and removed its card."
-            }
+            return await store.close(.agent, "agent", arguments["agent"], for: caller)
         case "postit_remove":
-            return connected(.postIt, "post-it", arguments["postit"], to: caller) { element in
-                let name = element.name
-                store.removePostIt(element.id)
-                return "Removed “\(name)” from the board."
-            }
+            return await store.close(.postIt, "post-it", arguments["postit"], for: caller)
         default:
             return .error("Unknown tool “\(name)”.")
         }
     }
 
-    /// Runs `body` on the `kind` element connected to `caller` that `address` names, or the only one.
-    private func connected(_ kind: ElementKind, _ word: String, _ address: Any?, to caller: UUID,
-                           _ body: (any BoardElement) -> String) -> ToolResult {
-        let found = store.bus.peers(of: caller, kind: kind)
+}
+
+extension Orchestrator {
+    /// Removes the `kind` element connected to `caller` that `address` names, or the only one,
+    /// under the rule of `removeElements`.
+    func close(_ kind: ElementKind, _ word: String, _ address: Any?, for caller: UUID) async -> ToolResult {
+        let found = bus.peers(of: caller, kind: kind)
         let names = found.map(\.name).joined(separator: ", ")
         guard !found.isEmpty else { return .error("No \(word) is connected to you.") }
         if let address = (address as? String)?.trimmingCharacters(in: .whitespaces), !address.isEmpty {
             guard let element = findElement(address, among: found) else {
                 return .error("No \(word) named “\(address)” is connected to you. Connected: \(names).")
             }
-            return .text(body(element))
+            return await removeElements([element.id], for: caller)
         }
         guard found.count == 1, let only = found.first else { return .error("Several are connected; say which: \(names).") }
-        return .text(body(only))
+        return await removeElements([only.id], for: caller)
     }
-}
 
-extension Orchestrator {
     /// Adds an agent card in `owner`'s organization, connected to it, and starts it: next to it in
     /// its worktree, or to the right of what `worktree`'s canvas holds.
     func addAgent(_ provider: any AgentProvider, name: String?, owner: AgentRecord, in worktree: String? = nil) -> AgentRecord {
@@ -128,6 +121,7 @@ extension Orchestrator {
                                  name: AgentRecord.uniqueName(base, among: cards(in: worktree)),
                                  frame: CGRect(origin: origin, size: size), organization: owner.organization)
         insert(record)
+        made(record.id, by: owner.id)
         bus.connect(owner.id, record.id)
         server.openSession(record.id, cols: Self.estimatedColumns(record.frame), rows: Self.estimatedRows(record.frame), for: nil)
         launch(record.id)

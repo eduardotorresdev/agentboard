@@ -605,7 +605,12 @@ fn elements_reach_their_organizations_agents() {
     // What the user sends from an element reaches the agents connected to it.
     board.start(&[&a]);
     core.shows(a.id, "ready");
-    board.send(BoardRequest::Deliver { from: elements[0].id, text: "src/main.rs:12 rename this".into() });
+    // Named for one agent, it reaches that one alone: nobody when it names something else.
+    board.send(BoardRequest::Deliver { from: elements[0].id, text: "for nobody".into(), to: Some(elements[2].id) });
+    board.send(BoardRequest::Deliver { from: elements[0].id, text: "for Ada".into(), to: Some(a.id) });
+    core.shows(a.id, "got Message from “Ours”");
+    assert_eq!(core.screen(a.id).matches("got Message").count(), 1, "{}", core.screen(a.id));
+    board.send(BoardRequest::Deliver { from: elements[0].id, text: "src/main.rs:12 rename this".into(), to: None });
     core.shows(a.id, "got Message from “Ours”");
     board.send(BoardRequest::Elements(only(elements[1..].to_vec())));
     board.wait("the line gone", |events| events.iter().any(|event| matches!(event, BoardEvent::Connections(lines) if lines.value.is_empty())));
@@ -949,7 +954,7 @@ fn the_tools_are_listed_with_their_instructions() {
                     image_create image_read image_replace image_remove video_create video_read video_replace video_remove browser_open browser_list browser_navigate browser_snapshot \
                     browser_screenshot browser_click browser_type browser_press browser_scroll browser_evaluate browser_console browser_wait simulator_open simulator_list \
                     simulator_snapshot simulator_screenshot simulator_tap simulator_swipe simulator_type simulator_press simulator_wait simulator_close project_list project_create \
-                    worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove browser_close";
+                    worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove element_connect browser_close";
     assert_eq!(names, expected.split_whitespace().collect::<Vec<_>>());
     let open = tools.as_array().unwrap().iter().find(|tool| tool["name"] == "simulator_open").unwrap();
     assert_eq!(open["inputSchema"]["properties"]["platform"]["enum"], json!(["ios", "android"]));
@@ -1216,6 +1221,16 @@ fn agents_add_and_close_cards() {
     let (removed, _) = core.call("postit_remove", json!({}), a.id);
     assert_eq!(removed, "Removed “Plan” from the board.");
     assert!(core.post_its().is_empty());
+
+    // A line between two elements, neither the caller; who made each shows in the list.
+    core.call("postit_create", json!({"name": "Notes"}), a.id);
+    let (drawn, _) = core.call("element_connect", json!({"a": "Bob", "b": "Notes"}), a.id);
+    assert_eq!(drawn, "Connected “Bob” and “Notes”.");
+    assert!(core.call("element_connect", json!({"a": "Notes", "b": "Bob"}), a.id).0.contains("already connected"));
+    assert!(core.call("element_connect", json!({"a": "Notes", "b": "Notes"}), a.id).1);
+    let (listed, _) = core.call("list_peers", json!({}), a.id);
+    assert!(listed.contains("“Notes” (postit, id: ") && listed.contains("made by: you") && listed.contains("made by: the user"), "{listed}");
+    core.call("postit_remove", json!({"postit": "Notes"}), a.id);
     core.call("runner_close", json!({}), a.id);
 }
 
@@ -1284,6 +1299,11 @@ fn agents_create_and_read_images() {
     let read = core.call_result("image_read", json!({"image": "Login screen"}), a.id);
     assert_eq!(read["content"][0]["text"], "Login screen, 800×400 pixels.");
     assert_eq!((read["content"][1]["mimeType"].as_str(), read["content"][1]["data"].as_str()), (Some("image/png"), Some(base64(&png(800, 400)).as_str())));
+    // The user's marks: the marked copy by its file name, never a path out of the pictures folder.
+    let marked = core.call_result("image_read", json!({"image": "Login screen", "marks": record.file}), a.id);
+    assert_eq!(marked["content"][0]["text"], "Login screen with the user's marks drawn on it. The areas you were given are in the pixels of the picture itself, 800×400.");
+    assert_eq!(marked["content"][1]["mimeType"], "image/png");
+    assert_eq!(core.call("image_read", json!({"image": "Login screen", "marks": "../agentboard.sqlite"}), a.id), ("There are no marks “../agentboard.sqlite”. See the picture without `marks`.".to_string(), true));
     let (replaced, failed) = core.call("image_replace", json!({"path": "big.jpg", "image": "Login screen"}), a.id);
     assert!(!failed && replaced == "Replaced the picture of “Login screen”.", "{replaced}");
     let swapped = core.images().remove(0);

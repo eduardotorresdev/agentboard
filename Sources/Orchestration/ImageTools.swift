@@ -61,6 +61,11 @@ final class ImageTools: ToolProvider {
             : "The video file: absolute, with `~`, or relative to your worktree. MP4, MOV or M4V, up to \(ImageFiles.maximumVideoBytes / 1024 / 1024) MB."]
     }
 
+    private static let marksArgument: [String: Any] = [
+        "type": "string",
+        "description": "The id of marks the user sent you on this image: the picture comes with those numbered areas drawn on it. Leave out for the picture as it is.",
+    ]
+
     func tools(for caller: UUID) -> [ToolDefinition] {
         let word = medium.word
         let picture = medium == .image
@@ -77,7 +82,8 @@ final class ImageTools: ToolProvider {
                 name: "\(word)_read",
                 description: picture ? "Shows you the pixels of a connected image."
                     : "Gives a connected video's size and length and \(ImageFiles.readFrames) frames sampled evenly through it.",
-                inputSchema: ["type": "object", "properties": [word: elementArgument], "required": [String]()]),
+                inputSchema: ["type": "object", "properties": picture ? [word: elementArgument, "marks": Self.marksArgument] : [word: elementArgument],
+                              "required": [String]()]),
             ToolDefinition(
                 name: "\(word)_replace",
                 description: picture ? "Replaces the picture of a connected image with a file, keeping its card and name."
@@ -113,6 +119,18 @@ final class ImageTools: ToolProvider {
             }
             return ToolResult(content)
         case "image_read":
+            // shortcut: the marks' id is the marked copy's file name in the pictures folder, so any
+            // agent that knows one can read it; keep a table of who was sent what if that matters.
+            let marks = (arguments["marks"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+            if !marks.isEmpty {
+                // A plain file name inside the pictures folder, never a path out of it.
+                guard (marks as NSString).lastPathComponent == marks, marks != ".", marks != "..",
+                      let marked = ImageFiles.reading(marks, in: store.dataFolder) else {
+                    return .error("There are no marks “\(marks)”. See the picture without `marks`.")
+                }
+                return ToolResult([.text("\(record.name) with the user's marks drawn on it. The areas you were given are in the pixels of the picture itself, \(Int(record.pixelSize.width))×\(Int(record.pixelSize.height))."),
+                                   .image(marked.data, mimeType: marked.mimeType)])
+            }
             guard let picture = ImageFiles.reading(record.file, in: store.dataFolder) else {
                 return .error("The picture of \(record.name) can't be read.")
             }
@@ -138,9 +156,9 @@ final class ImageTools: ToolProvider {
             delivered[caller]?[record.id] = Delivered(name: record.name, file: stored.file)
             return .text("Replaced the \(medium == .image ? "picture" : "clip") of “\(record.name)”.")
         case "\(word)_remove":
-            delivered[caller]?[record.id] = nil
-            store.removeImage(record.id)
-            return .text("Removed “\(record.name)” from the board.")
+            let result = await store.removeElements([record.id], for: caller)
+            if !result.isError { delivered[caller]?[record.id] = nil }
+            return result
         default:
             return .error("Unknown tool “\(name)”.")
         }
@@ -171,6 +189,7 @@ final class ImageTools: ToolProvider {
                                  file: stored.file, pixelSize: stored.pixelSize, organization: agent.organization,
                                  duration: stored.duration)
         store.insertImage(record)
+        store.made(record.id, by: caller)
         store.bus.connect(caller, record.id)
         delivered[caller, default: [:]][record.id] = Delivered(name: record.name, file: record.file)
         return .text("Added \(medium.word) “\(record.name)” (\(Int(stored.pixelSize.width))×\(Int(stored.pixelSize.height))), connected to you.")

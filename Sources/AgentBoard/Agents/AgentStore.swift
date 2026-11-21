@@ -33,6 +33,10 @@ final class AgentStore {
     @ObservationIgnored var onMediaChange: ((String) -> Void)?
     /// Pictures still on their way to the host, by file: their cards wait, dimmed, with a spinner.
     @ObservationIgnored var sendingMedia: Set<String> = []
+    /// The user's unsent annotations, by image.
+    @ObservationIgnored var imageMarks: [UUID: ImageMarks] = [:]
+    /// The agent annotations were last sent to: the one offered next time.
+    var lastMarkedAgent: UUID?
     /// A card's note or waiting changed; its picture didn't.
     @ObservationIgnored var onMediaNote: ((String) -> Void)?
     /// Called each time the host's core answers (see `HostStores`).
@@ -43,6 +47,9 @@ final class AgentStore {
     /// a while as `closed`, so the echo can be read.
     private(set) var decisions: [Decision] = [] { didSet { onDecisionsChange?() } }
     @ObservationIgnored var onDecisionsChange: (() -> Void)?
+    private(set) var pendingAnswers: [UUID: PendingAnswer] = [:]
+    /// Questions answered so far in each agent's current run, for “2 of 3”.
+    private var answeredInRun: [UUID: Int] = [:]
     /// How long a closed decision's echo stays on the board.
     static let echoLinger: TimeInterval = 8
     /// Messages held behind the text the user typed in an agent's terminal, by agent.
@@ -93,6 +100,41 @@ final class AgentStore {
     /// Where the board's other elements come from (browsers, file trees), by family; the core
     /// keeps lines to them.
     @ObservationIgnored var elementSources: [String: () -> [ElementInfo]] = [:]
+    /// Removes one of those elements, by family; each ignores ids that aren't its own.
+    @ObservationIgnored var elementRemovers: [String: (UUID) -> Void] = [:]
+    /// Removals agents asked for that wait for the user's answer, oldest first (see `RemovalDialog`).
+    private(set) var removalRequests: [RemovalRequest] = []
+
+    /// A sample request, to look at the dialog (`AGENTBOARD_SHOW=removal-dialog`).
+    func showSampleRemoval() {
+        removalRequests.append(RemovalRequest(asker: "Ada", items: [("agent", "Reviewer"), ("postit", "Plan"), ("image", "Checkout screen"), ("connection", "Ada - Dev server")]) { _ in })
+    }
+
+    /// The user's answer to the oldest request.
+    func answerRemoval(_ allowed: Bool) {
+        guard !removalRequests.isEmpty else { return }
+        removalRequests.removeFirst().answer(allowed)
+    }
+
+    /// The removal tools the core leaves to the board: asking the user, and removing its own elements.
+    private func removalCall(_ name: String, _ arguments: [String: Any]) async -> ToolResult {
+        switch name {
+        case "board_confirm_removal":
+            let items = (arguments["items"] as? [[String: String]] ?? []).map { (kind: $0["kind"] ?? "", name: $0["name"] ?? "") }
+            guard !items.isEmpty else { return .error("Nothing to confirm.") }
+            let allowed = await withCheckedContinuation { done in
+                removalRequests.append(RemovalRequest(asker: arguments["asker"] as? String ?? "", items: items) { done.resume(returning: $0) })
+            }
+            return .text(allowed ? "allowed" : "refused")
+        case "board_remove":
+            for id in (arguments["ids"] as? [String] ?? []).compactMap(UUID.init(uuidString:)) {
+                elementRemovers.values.forEach { $0(id) }
+            }
+            return .text("removed")
+        default:
+            return .error("This board can't run “\(name)”.")
+        }
+    }
 
     func elements() -> [ElementInfo] {
         elementSources.keys.sorted().flatMap { elementSources[$0]?() ?? [] }
@@ -252,6 +294,7 @@ final class AgentStore {
         images = state.images ?? []
         attention = state.attention ?? []
         decisions = state.decisions ?? []
+        settleDecisions()
         connections = state.connections
         runnerReport = state.runners
         isLoaded = true
@@ -346,6 +389,8 @@ final class AgentStore {
             images[index] = record
         case .imageRemoved(let id):
             forgetHostMedia(of: id)
+            imageMarks[id] = nil
+            ImageMarks.forget(id)
             images.removeAll { $0.id == id }
             connections.removeAll { $0.touches(id) }
         case .attention(let list):
@@ -358,6 +403,7 @@ final class AgentStore {
                     self?.decisions.removeAll { $0.id == closed.id }
                 }
             }
+            settleDecisions()
         case .held(let id, let count):
             heldMessages[id] = count == 0 ? nil : count
         case .promptReturned(let id, let text, let reason):
@@ -366,7 +412,8 @@ final class AgentStore {
         case .toolCall(let call, let name, let arguments, let caller):
             let parsed = (try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]
             Task {
-                let result: ToolResult? = name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_")
+                let result: ToolResult? = name.hasPrefix("board_") ? await removalCall(name, parsed)
+                    : name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_")
                     ? await projectTools?.call(name, arguments: parsed, caller: caller)
                     : name.hasPrefix("simulator_") ? await simulatorTools?.call(name, arguments: parsed, caller: caller)
                     : await browserTools?.call(name, arguments: parsed, caller: caller)
@@ -383,6 +430,109 @@ final class AgentStore {
     func send(_ request: BoardRequest) {
         guard !isUnavailable else { return }
         link.send(request)
+    }
+
+    // MARK: Decisions
+
+    /// The last answer of an agent's questions, held for the undo window before the core hears it.
+    struct PendingAnswer: Equatable {
+        let decision: UUID
+        let answer: Decision.Answer
+        var secondsLeft: Int
+    }
+
+    /// Where the user is in an agent's questions: the one to show and its place in the run.
+    struct DecisionSequence: Equatable {
+        var shown: Decision
+        var position: Int
+        var total: Int
+        /// Still the user's to answer (or to undo), as opposed to sent and waiting on the agent.
+        var isWaiting: Bool
+    }
+
+    /// An agent's decisions read as one run of questions: the oldest unanswered, else the answer
+    /// in its undo window, else an answer the agent still has to echo.
+    func decisionSequence(of agent: UUID) -> DecisionSequence? {
+        let mine = decisions.filter { $0.agent == agent }
+        let pending = pendingAnswers[agent]
+        let unanswered = mine.filter { $0.state == .open && $0.answer == nil && $0.id != pending?.decision }
+        let done = answeredInRun[agent] ?? 0
+        if let next = unanswered.first {
+            return DecisionSequence(shown: next, position: done + 1, total: done + unanswered.count, isWaiting: true)
+        }
+        if let held = mine.first(where: { $0.id == pending?.decision }) {
+            return DecisionSequence(shown: held, position: max(done, 1), total: max(done, 1), isWaiting: true)
+        }
+        // OK and a picked alternative need nothing more from the agent: their balloon leaves at once.
+        let echoing = mine.last { decision in
+            if decision.echo != nil { return true }
+            switch decision.answer {
+            case .redirect, .useRecommended: return true
+            default: return false
+            }
+        }
+        return echoing.map { DecisionSequence(shown: $0, position: max(done, 1), total: max(done, 1), isWaiting: false) }
+    }
+
+    /// The user's answer. With more questions of the agent waiting it goes to the core at once
+    /// and the next one shows; the last one waits out the undo window first.
+    func answer(_ decision: Decision, _ answer: Decision.Answer) {
+        guard decisions.contains(where: { $0.id == decision.id && $0.state == .open && $0.answer == nil }),
+              pendingAnswers[decision.agent] == nil else { return }
+        answeredInRun[decision.agent, default: 0] += 1
+        if decisions.contains(where: { $0.agent == decision.agent && $0.id != decision.id && $0.state == .open && $0.answer == nil }) {
+            commit(decision.id, answer)
+        } else {
+            pendingAnswers[decision.agent] = PendingAnswer(decision: decision.id, answer: answer, secondsLeft: DecisionMetrics.undoSeconds)
+            countDown(decision.agent, decision.id)
+        }
+    }
+
+    /// Takes back the answer in its undo window: the question shows again.
+    func undoAnswer(of agent: UUID) {
+        guard pendingAnswers.removeValue(forKey: agent) != nil else { return }
+        answeredInRun[agent] = (answeredInRun[agent] ?? 1) - 1
+        onDecisionsChange?()
+    }
+
+    /// Ends the undo window now: the core hears the answer.
+    func confirmAnswer(of agent: UUID) {
+        guard let pending = pendingAnswers.removeValue(forKey: agent) else { return }
+        commit(pending.decision, pending.answer)
+    }
+
+    /// Sends the answer and shows it as given before the core says so, so the next question
+    /// takes over without a gap.
+    private func commit(_ id: UUID, _ answer: Decision.Answer) {
+        send(.answerDecision(id: id, answer: answer))
+        guard let index = decisions.firstIndex(where: { $0.id == id }) else { return }
+        decisions[index].answer = answer
+    }
+
+    /// The window lives here, not in a view: it closes whatever happens to the screen.
+    private func countDown(_ agent: UUID, _ decision: UUID) {
+        onDecisionsChange?()
+        Task { @MainActor [weak self] in
+            while let pending = self?.pendingAnswers[agent], pending.decision == decision {
+                guard pending.secondsLeft > 0 else { self?.confirmAnswer(of: agent); return }
+                try? await Task.sleep(for: .seconds(1))
+                guard self?.pendingAnswers[agent]?.decision == decision else { return }
+                self?.pendingAnswers[agent]?.secondsLeft -= 1
+            }
+        }
+    }
+
+    /// After the core's list changed: a question that arrived during the undo window is just the
+    /// next one, so the held answer goes now; one whose decision is gone is dropped.
+    private func settleDecisions() {
+        for (agent, pending) in pendingAnswers {
+            if !decisions.contains(where: { $0.id == pending.decision && $0.state == .open && $0.answer == nil }) {
+                pendingAnswers[agent] = nil
+            } else if decisions.contains(where: { $0.agent == agent && $0.id != pending.decision && $0.state == .open && $0.answer == nil }) {
+                confirmAnswer(of: agent)
+            }
+        }
+        for agent in answeredInRun.keys where !decisions.contains(where: { $0.agent == agent }) { answeredInRun[agent] = nil }
     }
 
     /// Tells the core the board's other elements changed (a browser added, removed, renamed…).

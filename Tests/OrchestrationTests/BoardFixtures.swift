@@ -104,6 +104,7 @@ struct BoardFixtures {
             ("deliver", .deliver(from: ids[4], text: "src/main.rs:12 rename this")),
             ("prompt", .prompt(id: ids[0], text: "run the tests")),
             ("deliverHeld", .deliverHeld(ids[0])),
+            ("deliver_to_one", .deliver(from: ids[4], text: "1. Area 48, 486, 408, 132", to: ids[0])),
         ]
         for (name, request) in requests { try write(request, "request_" + name) }
         let message = Message(id: ids[8], from: ids[0], to: ids[2], text: "Run the tests", date: Self.date)

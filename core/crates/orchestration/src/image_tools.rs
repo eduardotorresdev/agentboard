@@ -82,6 +82,10 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
             properties.insert(word.to_string(), self.element_argument());
             properties
         };
+        let mut read = which();
+        if picture {
+            read.insert("marks".into(), json!({"type": "string", "description": "The id of marks the user sent you on this image: the picture comes with those numbered areas drawn on it. Leave out for the picture as it is."}));
+        }
         let mut replaced = which();
         replaced.insert("path".into(), self.path_argument());
         vec![
@@ -96,7 +100,7 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
             ToolDefinition::with_schema(
                 &format!("{word}_read"),
                 &if picture { "Shows you the pixels of a connected image.".to_string() } else { format!("Gives a connected video's size and length and {} frames sampled evenly through it.", ImageFiles::READ_FRAMES) },
-                json!({"type": "object", "properties": which(), "required": []}),
+                json!({"type": "object", "properties": read, "required": []}),
             ),
             ToolDefinition::with_schema(
                 &format!("{word}_replace"),
@@ -135,6 +139,20 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
                     }
                     reply.send(ToolResult::new(content))
                 });
+            }
+            // shortcut: the marks' id is the marked copy's file name in the pictures folder, so any
+            // agent that knows one can read it; keep a table of who was sent what if that matters.
+            "_read" if arguments.get("marks").and_then(Value::as_str).is_some_and(|marks| !marks.trim().is_empty()) => {
+                let marks = arguments.get("marks").and_then(Value::as_str).unwrap_or_default().trim();
+                // A plain file name inside the pictures folder, never a path out of it.
+                let plain = Path::new(marks).file_name().is_some_and(|name| name == marks) && marks != "..";
+                reply.send(match plain.then(|| ImageFiles::reading(marks, &turn.data_folder)).flatten() {
+                    Some((data, mime_type)) => ToolResult::new(vec![
+                        ToolContent::Text(format!("{} with the user's marks drawn on it. The areas you were given are in the pixels of the picture itself, {size}.", record.name)),
+                        ToolContent::Image { data, mime_type },
+                    ]),
+                    None => ToolResult::error(format!("There are no marks “{marks}”. See the picture without `marks`.")),
+                })
             }
             "_read" => reply.send(match ImageFiles::reading(&record.file, &turn.data_folder) {
                 Some((data, mime_type)) => ToolResult::new(vec![ToolContent::Text(format!("{}, {size} pixels.", record.name)), ToolContent::Image { data, mime_type }]),
@@ -248,6 +266,7 @@ impl ImageTools {
                 };
                 let (id, file) = (record.id, record.file.clone());
                 turn.insert_image(record, None);
+                turn.made(id, caller);
                 turn.connect(caller, id);
                 turn.delivered_images.entry((video, caller)).or_default().insert(id, (name.clone(), file));
                 reply.send(ToolResult::text(format!("Added {word} “{name}” ({}×{}), connected to you.", stored.pixel_size.width as i64, stored.pixel_size.height as i64)))

@@ -102,7 +102,7 @@ fn requests_encode_as_swift_does() {
     let names = [
         "addCard", "updateCard", "removeCard", "connect", "disconnect", "elements", "open", "restart", "restart_as_it_is", "startRunner", "stopRunner", "toolResult", "toolResult_error",
         "addPostIt", "updatePostIt", "removePostIt", "writePostIt", "addImage", "updateImage", "removeImage", "dismissAttention", "answerQuestions", "answerQuestions_in_the_terminal", "deliver",
-        "prompt", "deliverHeld",
+        "prompt", "deliverHeld", "deliver_to_one",
     ];
     let requests: Vec<BoardRequest> = names.iter().map(|name| round_trip(&format!("request_{name}"))).collect();
     assert_eq!(requests[0], BoardRequest::AddCard(only(agent())));
@@ -121,6 +121,7 @@ fn requests_encode_as_swift_does() {
     assert_eq!(requests[21], BoardRequest::AnswerQuestions { id: id(1), answers: Some([("Which layout?".to_string(), "Grid".to_string())].into()) });
     assert_eq!(requests[22], BoardRequest::AnswerQuestions { id: id(1), answers: None });
     assert_eq!(requests[25], BoardRequest::DeliverHeld(only(id(1))));
+    assert_eq!(requests[26], BoardRequest::Deliver { from: id(5), text: "1. Area 48, 486, 408, 132".into(), to: Some(id(1)) });
     // An absent optional may also come as null, and a request of a newer board is no request.
     let null = format!(r#"{{"restart":{{"id":"{}","command":null}}}}"#, id(2));
     assert_eq!(BoardRequest::decode(null.as_bytes()), Some(requests[8].clone()));

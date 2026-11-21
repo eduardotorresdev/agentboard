@@ -59,6 +59,9 @@ final class FileTreeStore {
             self?.trees.filter { $0.host == host }.map { ElementInfo(id: $0.id, name: $0.name, kind: ElementKind.fileTree.rawValue, detail: nil,
                                           worktree: $0.worktree, frame: $0.frame, organization: $0.organization) } ?? []
         }
+        agents.elementRemovers[ElementKind.fileTree.rawValue] = { [weak self] id in
+            if self?.record(id) != nil { self?.remove(id) }
+        }
         agents.elementsChanged()
     }
 

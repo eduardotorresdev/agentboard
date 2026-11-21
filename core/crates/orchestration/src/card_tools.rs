@@ -21,6 +21,7 @@ impl<'a> ToolProvider<Turn<'a>> for CardTools {
     fn tools(&self, turn: &mut Turn<'a>, _caller: Uuid) -> Vec<ToolDefinition> {
         let ids: Vec<&str> = turn.providers.iter().map(|provider| provider.id()).collect();
         let agents = turn.providers.iter().map(|provider| format!("{} ({})", provider.id(), provider.title())).collect::<Vec<_>>().join(", ");
+        let end = json!({"type": "string", "description": "An element's name or id, as list_peers shows it. Use the id when two share a name."});
         vec![
             ToolDefinition::with_schema(
                 "agent_start",
@@ -44,6 +45,11 @@ impl<'a> ToolProvider<Turn<'a>> for CardTools {
                 schema(json!({"name": {"type": "string", "description": "Card name. “terminal” when left out."}}), &[]),
             ),
             ToolDefinition::with_schema("postit_remove", "Takes a connected post-it off the board, with its text.", schema(json!({"postit": which("post-it")}), &[])),
+            ToolDefinition::with_schema(
+                "element_connect",
+                "Draws a line between two elements of your board, as the user would; neither needs to be you. Any two different elements that aren't connected yet can be.",
+                schema(json!({"a": end, "b": end}), &["a", "b"]),
+            ),
             ToolDefinition::with_schema("browser_close", "Closes a connected browser and removes its card from the board. Needs the board open.", schema(json!({"browser": which("browser")}), &[])),
         ]
     }
@@ -80,6 +86,17 @@ fn answer(turn: &mut Turn, name: &str, arguments: &Map<String, Value>, caller: U
             turn.remove(element.id, None);
             Ok(format!("Ended {} and removed its card.", element.name))
         }
+        "element_connect" => {
+            let (a, b) = (on_board(turn, arguments.get("a"), caller)?, on_board(turn, arguments.get("b"), caller)?);
+            if a.id == b.id {
+                return Err("An element can't be connected to itself.".to_string());
+            }
+            if turn.bus.graph().connection_between(a.id, b.id).is_some() {
+                return Err(format!("“{}” and “{}” are already connected.", a.name, b.name));
+            }
+            turn.connect(a.id, b.id);
+            Ok(format!("Connected “{}” and “{}”.", a.name, b.name))
+        }
         "postit_remove" => {
             let element = connected(turn, &ElementKind::post_it(), "post-it", arguments.get("postit"), caller)?;
             turn.remove_post_it(element.id, None);
@@ -87,6 +104,18 @@ fn answer(turn: &mut Turn, name: &str, arguments: &Map<String, Value>, caller: U
         }
         _ => Err(format!("Unknown tool “{name}”.")),
     }
+}
+
+/// The element of the caller's board that `address` names, or why there isn't exactly one.
+fn on_board(turn: &Turn, address: Option<&Value>, caller: Uuid) -> Result<Element, String> {
+    let all = turn.bus.elements_on_board_of(caller, &turn.board);
+    let address = address.and_then(Value::as_str).unwrap_or("").trim_matches(is_inline_space);
+    let found = find_element(address, &all).ok_or_else(|| format!("Nothing named “{address}” is on your board; list_peers shows what is."))?;
+    let twins = all.iter().filter(|element| element.name.to_lowercase() == found.name.to_lowercase()).count();
+    if twins > 1 && !address.contains(&found.id.to_string()) {
+        return Err(format!("{twins} elements are named “{}”; give the id of the one you mean.", found.name));
+    }
+    Ok(found.clone())
 }
 
 /// The `kind` element connected to `caller` that `address` names, or the only one.

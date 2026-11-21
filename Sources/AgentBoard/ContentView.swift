@@ -44,6 +44,8 @@ struct ContentView: View {
 
     /// This Mac's store: what isn't about one worktree reads it.
     private var agents: AgentStore { hosts.local }
+    /// The store with a removal an agent asked for that waits for the user.
+    private var removalAsked: AgentStore? { hosts.connected.first { !$0.removalRequests.isEmpty } }
 
     var body: some View {
         Group {
@@ -105,6 +107,13 @@ struct ContentView: View {
                 hosts.account.signIn()
             }
             if DebugShow.items.contains("vault-question") { hosts.showSample() }
+            if DebugShow.items.contains("removal-dialog") { agents.showSampleRemoval() }
+            if let path = DebugShow.worktree, !DebugShow.items.isDisjoint(with: ["image-marks", "image-marks-agent"]) {
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    await agents.showSampleMarks(in: path, agent: DebugShow.items.contains("image-marks-agent"))
+                }
+            }
             restoreSelection()
         }
         .onChange(of: selection) { _, selection in
@@ -130,6 +139,9 @@ struct ContentView: View {
         #endif
         .sheet(isPresented: Binding(get: { hosts.account.isSigningIn }, set: { if !$0 { hosts.account.cancelSignIn() } })) {
             SignInDialog(account: hosts.account)
+        }
+        .sheet(item: Binding(get: { removalAsked?.removalRequests.first }, set: { if $0 == nil { removalAsked?.answerRemoval(false) } })) { request in
+            RemovalDialog(request: request) { removalAsked?.answerRemoval($0) }
         }
         .sheet(isPresented: Binding(get: { hosts.vaultQuestion }, set: { if !$0 { hosts.answerVault(false) } })) {
             VaultQuestionDialog(hosts: hosts)
@@ -224,7 +236,8 @@ struct ContentView: View {
                            title: selection.projectID == nil ? store.displayName(of: selection.worktree) : nil,
                            database: store.database,
                            // The user's own board keeps its templates under its own folder.
-                           project: store.projects.first { $0.id == selection.projectID }?.path ?? selection.worktree.path)
+                           project: store.projects.first { $0.id == selection.projectID }?.path ?? selection.worktree.path,
+                           place: store.place(ofPath: selection.worktree.path))
                 // Another host's cards are another store's: the board is built again for it.
                 .id(selection.worktree.host)
         } else if selection != nil {

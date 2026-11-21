@@ -69,8 +69,13 @@ pub enum BoardRequest {
         answers: Option<HashMap<String, String>>,
     },
     /// The user sent `text` from one of the board's elements (a file tree's annotations) to
-    /// every agent connected to it.
-    Deliver { from: Uuid, text: String },
+    /// every agent connected to it, or only to the connected agent `to` (an image's marks).
+    Deliver {
+        from: Uuid,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Uuid>,
+    },
     /// The user sent `text` from the agent card's composer: typed into its terminal as a
     /// prompt, queued behind messages so neither interrupts the other.
     Prompt { id: Uuid, text: String },

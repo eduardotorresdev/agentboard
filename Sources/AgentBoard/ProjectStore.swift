@@ -91,6 +91,22 @@ final class ProjectStore {
         displayName(ofPath: worktree.path)
     }
 
+    /// Where an agent works, for a title: project first, then worktree. A worktree outside
+    /// every project, and the user's own board, have no project.
+    struct Place: Equatable {
+        var project: String?
+        var worktree: String
+
+        var title: String { [project, worktree].compactMap { $0 }.joined(separator: " - ") }
+    }
+
+    func place(ofPath path: String) -> Place {
+        let project = MyBoard.isBoard(path) ? nil : projects.first { project in
+            project.path == path || worktrees[project.id]?.contains { $0.path == path } == true
+        }
+        return Place(project: project?.name, worktree: displayName(ofPath: path))
+    }
+
     /// The same for a worktree that may not be in the shown organization (Needs you).
     func displayName(ofPath path: String) -> String {
         if MyBoard.isBoard(path) { return aliases[path] ?? MyBoard.defaultTitle }

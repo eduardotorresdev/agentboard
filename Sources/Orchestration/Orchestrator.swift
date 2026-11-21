@@ -94,6 +94,8 @@ public final class Orchestrator: CoreService {
         let lines = read({ try stored?.connections() }, []).filter { ids.contains($0.a) && ids.contains($0.b) }
         connectionsReadOnly = readFailed
         bus = MessageBus(graph: ConnectionGraph(lines))
+        bus.makers = (try? JSONDecoder().decode([UUID: UUID].self, from: Data(contentsOf: Self.makersFile(in: dataFolder)))) ?? [:]
+        for card in saved { if let owner = card.runner?.owner { bus.makers[card.id] = owner } }
         catalog = ToolCatalog([MessagingTools(bus: bus)])
         toolServer = ToolServer(catalog: catalog, secret: Self.toolSecret(in: dataFolder))
         if ProcessInfo.processInfo.environment["AGENTBOARD_CORE_VERBOSE"] == "1", let log = server.onLog {
@@ -119,6 +121,7 @@ public final class Orchestrator: CoreService {
         catalog.add(ProjectRelay(store: self))
         catalog.add(WorktreeTools(store: self))
         catalog.add(CardTools(store: self))
+        catalog.add(RemovalTools(store: self))
         bus.onGraphChange = { [weak self] graph in
             if self?.connectionsReadOnly == false { try? self?.database?.saveConnections(graph.connections) }
             self?.broadcast(.connections(graph.connections))
@@ -303,8 +306,8 @@ public final class Orchestrator: CoreService {
             agentEndpoints[id]?.prompt(text)
         case .deliverHeld(let id):
             agentEndpoints[id]?.deliverHeld()
-        case .deliver(let from, let text):
-            for peer in bus.peers(of: from) where peer is any MessageEndpoint {
+        case .deliver(let from, let text, let to):
+            for peer in bus.peers(of: from) where peer is any MessageEndpoint && (to == nil || peer.id == to) {
                 _ = try? bus.deliver(text, from: from, to: peer.id)
             }
         case .connect(let connection):
@@ -393,15 +396,21 @@ public final class Orchestrator: CoreService {
     func relay(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
         guard let board = boards.first else {
             let place = name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_") ? "Projects live"
-                : name.hasPrefix("simulator_") ? "Simulators run" : "Browsers run"
+                : name.hasPrefix("simulator_") ? "Simulators run" : name.hasPrefix("board_") ? "The user confirms removals" : "Browsers run"
             return .error("\(place) in the board, which isn't open right now. Ask the user to open it, then try again.")
         }
         let data = (try? JSONSerialization.data(withJSONObject: arguments)) ?? Data("{}".utf8)
         let call = UUID()
-        return await withCheckedContinuation { done in
+        let before = Set(elements.keys)
+        let result = await withCheckedContinuation { done in
             toolCalls[call] = (board, done)
             board.send(BoardEvent.toolCall(call: call, name: name, arguments: data, caller: caller).encoded)
         }
+        // What the board added for this call (a browser, a simulator) and connected to the caller is the caller's own.
+        if name.hasSuffix("_open"), !result.isError {
+            for id in elements.keys where !before.contains(id) && bus.graph.peers(of: caller).contains(id) { made(id, by: caller) }
+        }
+        return result
     }
 
     // MARK: Cards

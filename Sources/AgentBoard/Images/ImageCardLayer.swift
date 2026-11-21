@@ -29,6 +29,8 @@ final class ImageCardLayer: CALayer {
     private var handlesVisible = false
     private var hoveredHandle: Int?
     private var shownFile: String?
+    /// The annotations' footer hangs under the picture, which then ends square.
+    var footed = false
     /// Turns over the picture while it is on its way to the host.
     private var spinner: CAShapeLayer?
     /// The player, for a video card.
@@ -110,6 +112,7 @@ final class ImageCardLayer: CALayer {
                    detail: note, focused: focused, reserve: bounds.width - layout.title.maxX, scale: scale)
         CardFrame.closeButton(closeHover, closeGlyph, in: layout.close, hovered: closeHovered, scale: scale)
         picture.frame = layout.picture
+        picture.maskedCorners = footed ? [] : [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         showSending(sending, in: layout.picture)
 
         if !record.isVideo, let video {

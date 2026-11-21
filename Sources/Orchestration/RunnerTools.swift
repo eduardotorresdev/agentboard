@@ -118,12 +118,7 @@ final class RunnerTools: ToolProvider {
             session.send(Array(text.utf8) + ((arguments["enter"] as? Bool ?? true) ? [0x0D] : []))
             return .text("Typed into \(runner.name). Its output follows with runner_logs.")
         case "runner_close":
-            guard store.record(id)?.runner?.owner == caller else {
-                return .error("\(runner.name) was added by the user, so only they can remove it. Stop it with runner_stop instead.")
-            }
-            let name = runner.name
-            store.remove(id)
-            return .text("Stopped \(name) and removed its card.")
+            return await store.removeElements([id], for: caller)
         default:
             return .error("Unknown tool “\(name)”.")
         }

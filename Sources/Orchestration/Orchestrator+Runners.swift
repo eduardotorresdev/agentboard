@@ -23,7 +23,7 @@ extension Orchestrator {
                                  // Shown with the agent that started it.
                                  organization: owner.flatMap { self.record($0)?.organization })
         insert(record)
-        if let owner { bus.connect(owner, record.id) }
+        if let owner { made(record.id, by: owner); bus.connect(owner, record.id) }
         startRunner(record.id)
         return record
     }

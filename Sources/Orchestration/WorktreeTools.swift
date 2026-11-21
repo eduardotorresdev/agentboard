@@ -1,3 +1,4 @@
+import AgentRuntime
 import Connections
 import Foundation
 
@@ -9,6 +10,20 @@ final class WorktreeTools: ToolProvider {
 
     init(store: Orchestrator) {
         self.store = store
+    }
+
+    private static let titleHint = "Once you know what the work in this worktree is, title it with worktree_set_title."
+    /// The provider whose sessions get `context`; the others only read the instructions.
+    private static let hooked = ClaudeCode().id
+
+    func instructions(for caller: UUID) -> String? {
+        guard let agent = store.record(caller), agent.runner == nil, agent.providerID != Self.hooked else { return nil }
+        return Self.titleHint
+    }
+
+    /// When a session starts: new work may be coming, which the sidebar should name.
+    func context(for caller: UUID, event: String) -> String? {
+        event == "SessionStart" && store.record(caller)?.runner == nil ? Self.titleHint : nil
     }
 
     func tools(for caller: UUID) -> [ToolDefinition] {

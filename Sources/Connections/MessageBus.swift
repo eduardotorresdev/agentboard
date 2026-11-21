@@ -102,6 +102,8 @@ public final class MessageBus {
         didSet { if graph != oldValue { onGraphChange?(graph) } }
     }
     private var elements: [UUID: any BoardElement] = [:]
+    /// The agent that put each element on the board; one not here is the user's.
+    public var makers: [UUID: UUID] = [:]
 
     /// Called after every change to the connections (to persist them, redraw the lines).
     public var onGraphChange: ((ConnectionGraph) -> Void)?

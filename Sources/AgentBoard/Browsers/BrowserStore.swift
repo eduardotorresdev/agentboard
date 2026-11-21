@@ -299,6 +299,7 @@ final class BrowserStore {
         boards[host] = Board(store: agents)
         agents.browserTools = BrowserTools(store: self, agents: agents)
         agents.elementSources[ElementKind.browser.rawValue] = { [weak self] in self?.elementInfos(on: host) ?? [] }
+        agents.elementRemovers[ElementKind.browser.rawValue] = { [weak self] id in if self?.record(id) != nil { self?.remove(id) } }
         agents.elementsChanged()
     }
 

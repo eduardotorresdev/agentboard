@@ -198,6 +198,10 @@ impl Orchestrator {
 
         let bus_events: Arc<Mutex<Vec<BusEvent>>> = Arc::default();
         let mut bus = MessageBus::new(ConnectionGraph::new(lines));
+        // Kept as the Swift core writes it: a flat list, element then maker.
+        let makers: Vec<Uuid> = std::fs::read(data_folder.join("makers.json")).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default();
+        bus.makers = makers.chunks_exact(2).map(|pair| (pair[0], pair[1])).collect();
+        bus.makers.extend(saved.iter().filter_map(|card| Some((card.id, card.runner.as_ref()?.owner?))));
         let events = bus_events.clone();
         bus.on_graph_change = Some(Box::new(move |graph| events.lock().unwrap().push(BusEvent::Graph(graph.connections().to_vec()))));
         let events = bus_events.clone();
@@ -989,6 +993,13 @@ impl Turn<'_> {
         }
     }
 
+    /// Notes that `agent` put `element` on the board.
+    pub(crate) fn made(&mut self, element: Uuid, agent: Uuid) {
+        self.bus.makers.insert(element, agent);
+        let flat: Vec<Uuid> = self.bus.makers.iter().flat_map(|(element, agent)| [*element, *agent]).collect();
+        let _ = std::fs::write(self.data_folder.join("makers.json"), serde_json::to_vec(&flat).unwrap_or_default());
+    }
+
     /// Draws a line between two elements.
     pub(crate) fn connect(&mut self, x: Uuid, y: Uuid) {
         self.bus.connect(x, y, (None, None));
@@ -1028,8 +1039,8 @@ impl Turn<'_> {
             BoardRequest::RemoveCard(Unlabelled { value: id }) => self.remove(id, sender),
             BoardRequest::Prompt { id, text } => self.board.prompt(id, &text),
             BoardRequest::DeliverHeld(Unlabelled { value: id }) => self.board.deliver_held(id),
-            BoardRequest::Deliver { from, text } => {
-                for peer in self.bus.peers(from, &self.board).into_iter().filter(|peer| peer.endpoint.is_some()) {
+            BoardRequest::Deliver { from, text, to } => {
+                for peer in self.bus.peers(from, &self.board).into_iter().filter(|peer| peer.endpoint.is_some() && to.is_none_or(|to| to == peer.id)) {
                     let _ = self.deliver(&text, from, peer.id);
                 }
             }

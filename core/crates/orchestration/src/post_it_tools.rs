@@ -162,6 +162,7 @@ fn create(turn: &mut Turn, arguments: &Map<String, Value>, caller: Uuid, me: &st
     }
     let (id, name) = (record.id, record.name.clone());
     turn.insert_post_it(record, None);
+    turn.made(id, caller);
     turn.connect(caller, id);
     ToolResult::text(format!("Added post-it “{name}”, connected to you."))
 }

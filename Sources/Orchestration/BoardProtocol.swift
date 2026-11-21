@@ -46,8 +46,8 @@ public enum BoardRequest: Codable, Sendable {
     /// leaves them to the agent's terminal.
     case answerQuestions(id: UUID, answers: [String: String]?)
     /// The user sent `text` from one of the board's elements (a file tree's annotations) to
-    /// every agent connected to it.
-    case deliver(from: UUID, text: String)
+    /// every agent connected to it, or only to the connected agent `to` (an image's marks).
+    case deliver(from: UUID, text: String, to: UUID? = nil)
     /// The user sent `text` from the agent card's composer: typed into its terminal as a
     /// prompt, queued behind messages so neither interrupts the other.
     case prompt(id: UUID, text: String)

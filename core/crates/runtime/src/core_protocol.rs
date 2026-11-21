@@ -52,7 +52,9 @@ impl Versions {
 /// 7: `subscribeStatuses`, a board hearing every session's status.
 /// 8: hosts: `run` (a program on the core's machine, answered with `ran`) and `subscribeHost`.
 /// 9: decisions (`BoardEvent.decisions`, `BoardRequest.answerDecision`); the Swift core only, for now.
-pub const VERSION: i64 = 9;
+/// 10: nothing new on the wire: the tools changed (removing board elements, `image_read` with the user's marks), so an older core is
+/// replaced; `deliver` may name one agent (`to`).
+pub const VERSION: i64 = 10;
 pub const OLDEST: i64 = 2;
 pub const VERSIONS: Versions = Versions { version: VERSION, oldest: OLDEST };
 

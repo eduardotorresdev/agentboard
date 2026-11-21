@@ -126,6 +126,7 @@ final class SimulatorStore {
         boards[host] = Board(store: agents)
         agents.simulatorTools = SimulatorTools(store: self, agents: agents)
         agents.elementSources[ElementKind.simulator.rawValue] = { [weak self] in self?.elementInfos(on: host) ?? [] }
+        agents.elementRemovers[ElementKind.simulator.rawValue] = { [weak self] in self?.remove($0) }
         agents.elementsChanged()
     }
 

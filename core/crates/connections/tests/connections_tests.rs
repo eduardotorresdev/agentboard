@@ -357,7 +357,7 @@ fn serves_tools_to_token_holders() {
     assert_eq!(list["result"]["tools"][1]["inputSchema"]["required"], json!(["to", "message"]));
 
     let (_, peers) = post(port, token, json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_peers"}}));
-    assert_eq!(text(&peers), format!("You are “A”. On the board:\n- “B” (agent, id: {b}, connected: true)"));
+    assert_eq!(text(&peers), format!("You are “A”. On the board:\n- “B” (agent, id: {b}, made by: the user, connected: true)"));
 
     let (status, sent) = post(port, token, send_message(7, "B", "Hello"));
     assert_eq!((status, &sent["id"]), (200, &json!(7)));
@@ -606,8 +606,8 @@ fn lists_every_element_on_the_board_with_connected_flag() {
 
     let listed = call(&mut catalog(), &mut board, "tools/call", json!({"name": "list_peers"}), me);
     let listed = text(&listed);
-    assert!(listed.contains(&format!("- “Near” (postit, id: {near}, connected: true")));
-    assert!(listed.contains(&format!("- “Far” (postit, id: {far}, connected: false)")));
+    assert!(listed.contains(&format!("- “Near” (postit, id: {near}, made by: the user, connected: true")));
+    assert!(listed.contains(&format!("- “Far” (postit, id: {far}, made by: the user, connected: false)")));
     assert!(!listed.contains("Elsewhere") && !listed.contains("- “Me”"));
 }
 

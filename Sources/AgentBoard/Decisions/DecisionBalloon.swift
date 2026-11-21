@@ -8,8 +8,13 @@ import SwiftUI
 final class DecisionBalloonModel {
     var decision: Decision
     var agentName = ""
-    /// Other decisions the same agent has waiting behind this one.
-    var more = 0
+    /// Where this question is among the agent's: 2 of 3.
+    var position = 1
+    var total = 1
+    /// Project and worktree the agent works in.
+    var place = ProjectStore.Place(worktree: "")
+    /// On the canvas the balloon points at the agent's card; in the Needs You queue it stands alone.
+    var pointsAtCard = true
     /// The decision is gone: the balloon collapses into the terminal it points at.
     var leaving = false
     var height: CGFloat = 480
@@ -44,15 +49,18 @@ struct DecisionBalloon: View {
     @State private var card = 0
     @State private var picked: Int?
     @State private var text = ""
-    @State private var pending: Decision.Answer?
-    @State private var secondsLeft = 0
     @FocusState private var typing: Bool
 
     private var decision: Decision { model.decision }
     private var variants: [Decision.Variant] { decision.ask.variants }
     private var isChoice: Bool { !variants.isEmpty }
     private var typed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var answered: Decision.Answer? { pending ?? decision.answer }
+    /// The answer in its undo window: the store keeps it, so it is sent whatever happens to this view.
+    private var pending: AgentStore.PendingAnswer? {
+        store.pendingAnswers[decision.agent].flatMap { $0.decision == decision.id ? $0 : nil }
+    }
+    private var secondsLeft: Int { pending?.secondsLeft ?? 0 }
+    private var answered: Decision.Answer? { pending?.answer ?? decision.answer }
     /// The alternative a redirect is about: one is picked and there are words too.
     private var about: Decision.Variant? {
         guard !typed.isEmpty, let picked, picked < variants.count else { return nil }
@@ -72,9 +80,11 @@ struct DecisionBalloon: View {
             .frame(width: DecisionMetrics.width)
             .background(Theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.dialog))
-            Wedge().fill(Theme.deep)
-                .frame(width: DecisionMetrics.wedge.width, height: DecisionMetrics.wedge.height)
-                .padding(.top, DecisionMetrics.wedgeTop)
+            if model.pointsAtCard {
+                Wedge().fill(Theme.deep)
+                    .frame(width: DecisionMetrics.wedge.width, height: DecisionMetrics.wedge.height)
+                    .padding(.top, DecisionMetrics.wedgeTop)
+            }
         }
         .fixedSize(horizontal: false, vertical: true)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
@@ -90,9 +100,12 @@ struct DecisionBalloon: View {
         .focusable()
         .focusEffectDisabled()
         .onKeyPress(action: key)
-        .task(id: pending) { await countDown() }
-        // Leaving the screen confirms; only Undo cancels.
-        .onDisappear { if let pending, decision.answer == nil { store.send(.answerDecision(id: decision.id, answer: pending)) } }
+        // The next question starts clean.
+        .onChange(of: decision.id) {
+            card = 0
+            picked = nil
+            text = ""
+        }
     }
 
     // MARK: Header
@@ -104,15 +117,24 @@ struct DecisionBalloon: View {
                 .foregroundStyle(Theme.deep)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(Theme.accentTint, in: RoundedRectangle(cornerRadius: Theme.Radius.thumb))
-            Text(URL(fileURLWithPath: decision.worktree).lastPathComponent)
+            PlaceTitle(place: model.place)
                 .font(Theme.Font.label)
                 .foregroundStyle(Theme.onAccent)
-                .lineLimit(1)
-            Spacer()
-            Text(model.more > 0 ? L("\(model.agentName) - \(model.more) more waiting") : model.agentName)
+                .layoutPriority(1)
+            Text(model.agentName)
                 .font(Theme.Font.label.weight(.regular))
                 .foregroundStyle(Theme.accentTint)
                 .lineLimit(1)
+            Spacer()
+            if model.total > 1 {
+                Text(L("\(model.position) of \(model.total)"))
+                    .font(Theme.Font.label)
+                    .foregroundStyle(Theme.onAccent)
+                    .monospacedDigit()
+                    .contentTransition(.numericText(value: Double(model.position)))
+                    .animation(.snappy, value: model.position)
+                    .accessibilityLabel(L("Question \(model.position) of \(model.total)"))
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: DecisionMetrics.band)
@@ -334,7 +356,7 @@ struct DecisionBalloon: View {
                     }
                 }
                 Text(L("Sends in \(secondsLeft)s")).font(Theme.Font.label.weight(.regular)).foregroundStyle(Theme.inkMuted).monospacedDigit()
-                Button { pending = nil } label: {
+                Button { store.undoAnswer(of: decision.agent) } label: {
                     HStack(spacing: 6) {
                         Text(L("Undo"))
                         Keycap("⌘Z")
@@ -372,25 +394,16 @@ struct DecisionBalloon: View {
     /// Text wins: a redirect carries the picked alternative's letter and picks nothing.
     private func send() {
         guard canSend, answered == nil else { return }
+        let answer: Decision.Answer
         if !typed.isEmpty {
-            pending = .redirect(about.map { "About \($0.title): \(typed)" } ?? typed)
+            answer = .redirect(about.map { "About \($0.title): \(typed)" } ?? typed)
         } else if !isChoice {
-            pending = .ok
+            answer = .ok
         } else if let picked {
-            pending = picked == variants.count ? .useRecommended : .option(variants[picked].letter)
-        }
+            answer = picked == variants.count ? .useRecommended : .option(variants[picked].letter)
+        } else { return }
         typing = false
-        secondsLeft = DecisionMetrics.undoSeconds
-    }
-
-    /// The undo window, kept here only: the core hears the answer when it closes.
-    private func countDown() async {
-        guard let pending, decision.answer == nil else { return }
-        while secondsLeft > 0 {
-            guard (try? await Task.sleep(for: .seconds(1))) != nil else { return }
-            secondsLeft -= 1
-        }
-        store.send(.answerDecision(id: decision.id, answer: pending))
+        withAnimation(.snappy) { store.answer(decision, answer) }
     }
 
     private func key(_ press: KeyPress) -> KeyPress.Result {
@@ -404,6 +417,15 @@ struct DecisionBalloon: View {
             pick(number - 1)
         }
         return .handled
+    }
+}
+
+/// Where an agent works, the same on a balloon and on a Needs You card: project, then worktree.
+struct PlaceTitle: View {
+    let place: ProjectStore.Place
+
+    var body: some View {
+        Text(place.title).lineLimit(1).truncationMode(.middle)
     }
 }
 

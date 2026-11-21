@@ -124,6 +124,7 @@ final class PostItTools: ToolProvider {
                                   organization: agent.organization)
         if let text = arguments["text"] as? String, !text.isEmpty { record.write(text, by: caller, named: me) }
         store.insertPostIt(record)
+        store.made(record.id, by: caller)
         store.bus.connect(caller, record.id)
         return .text("Added post-it “\(record.name)”, connected to you.")
     }

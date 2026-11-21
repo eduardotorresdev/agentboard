@@ -135,6 +135,8 @@ pub type Listener<T> = Box<dyn FnMut(&T) + Send>;
 #[derive(Default)]
 pub struct MessageBus {
     graph: ConnectionGraph,
+    /// Who put each element on the board: element id to agent id. What isn't here is the user's.
+    pub makers: std::collections::HashMap<Uuid, Uuid>,
     /// Called after every change to the connections (to persist them, redraw the lines).
     pub on_graph_change: Option<Listener<ConnectionGraph>>,
     /// Called after each delivered message (to show it travel along its line).
@@ -143,7 +145,7 @@ pub struct MessageBus {
 
 impl MessageBus {
     pub fn new(graph: ConnectionGraph) -> Self {
-        Self { graph, on_graph_change: None, on_message: None }
+        Self { graph, makers: Default::default(), on_graph_change: None, on_message: None }
     }
 
     pub fn graph(&self) -> &ConnectionGraph {

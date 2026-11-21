@@ -395,8 +395,8 @@ struct BoardListingTests {
 
         let result = await MessagingTools(bus: bus).call("list_peers", arguments: [:], caller: me.id)
         guard case .text(let text) = result.content.first else { Issue.record("no text"); return }
-        #expect(text.contains("- “Near” (postit, id: \(near.id.uuidString), connected: true"))
-        #expect(text.contains("- “Far” (postit, id: \(far.id.uuidString), connected: false)"))
+        #expect(text.contains("- “Near” (postit, id: \(near.id.uuidString), made by: the user, connected: true"))
+        #expect(text.contains("- “Far” (postit, id: \(far.id.uuidString), made by: the user, connected: false)"))
         #expect(!text.contains("Elsewhere") && !text.contains("- “Me”"))
     }
 
