@@ -7,7 +7,7 @@ struct AgentCatalogTests {
         let codex = try #require(AgentCatalog.provider(id: "codex"))
         #expect(codex.executable == "codex")
         #expect(codex.installCommand == "npm install -g @openai/codex")
-        #expect(AgentCatalog.all.map(\.id) == ["claude", "codex", "copilot"])
+        #expect(AgentCatalog.all.map(\.id) == ["claude", "codex"])
     }
 
     @Test func locateSearchesPathThenFallbacks() throws {
@@ -34,16 +34,6 @@ struct AgentCatalogTests {
         // A conversation Codex never saved starts fresh.
         #expect(!arguments.contains("resume"))
         #expect(Codex().arguments(session: UUID(), tools: nil) == ["--dangerously-bypass-approvals-and-sandbox"])
-    }
-
-    @Test func copilotGetsTheBoardPerLaunch() throws {
-        let link = ToolServerLink(name: "board", url: URL(string: "http://127.0.0.1:9/mcp")!, token: "secret")
-        let session = UUID()
-        let arguments = Copilot().arguments(session: session, tools: link)
-        let config = #"{"mcpServers":{"board":{"headers":{"Authorization":"Bearer secret"},"tools":["*"],"type":"http","url":"http://127.0.0.1:9/mcp"}}}"#
-        #expect(arguments == ["--allow-all", "--additional-mcp-config", config, "--session-id", session.uuidString.lowercased()])
-        #expect(Copilot().arguments(session: session, tools: nil) == ["--allow-all", "--session-id", session.uuidString.lowercased()])
-        #expect(AgentCatalog.provider(id: "copilot")?.title == "Copilot")
     }
 
     @Test func nvmVersionsAreSearchedNewestFirst() throws {

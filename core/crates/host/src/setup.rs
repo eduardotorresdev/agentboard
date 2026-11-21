@@ -11,10 +11,9 @@ use crate::config;
 const PACKAGES: [&str; 8] = ["git", "curl", "ca-certificates", "build-essential", "unzip", "bubblewrap", "ffmpeg", "gh"];
 /// The catalog's agents and their install commands (`Sources/AgentRuntime/AgentProvider.swift`).
 /// The agent CLIs, and `uv`: many MCP servers start with `uvx`, as many do with `npx`.
-const AGENTS: [(&str, &str); 4] = [
+const AGENTS: [(&str, &str); 3] = [
     ("claude", "curl -fsSL https://claude.ai/install.sh | bash"),
     ("codex", "npm install -g @openai/codex"),
-    ("copilot", "npm install -g @github/copilot"),
     ("uv", "curl -LsSf https://astral.sh/uv/install.sh | sh"),
 ];
 const OOM_USER: &str = "/etc/systemd/system/user@.service.d";
@@ -171,7 +170,7 @@ fn inspect(home: &str, path: &str, sudo_user: Option<String>) -> Machine {
         apt: on_path("apt-get", path),
         architecture: std::env::consts::ARCH.into(),
         missing_packages: PACKAGES.into_iter().filter(|package| !output("dpkg-query", &["-W", "-f=${Status}", package]).is_some_and(|status| status.ends_with("ok installed"))).collect(),
-        programs: ["git", "curl", "node", "gh", "docker", "claude", "codex", "copilot", "uv"].into_iter().filter(|program| on_path(program, path)).collect(),
+        programs: ["git", "curl", "node", "gh", "docker", "claude", "codex", "uv"].into_iter().filter(|program| on_path(program, path)).collect(),
         docker_group: output("id", &["-nG", &group_of]).is_some_and(|groups| groups.split(' ').any(|group| group == "docker")),
         patient_oom: !std::path::Path::new("/usr/lib/systemd/systemd-oomd").exists() || [OOM_USER, OOM_DAEMON].iter().all(|folder| std::path::Path::new(&format!("{folder}/90-agentboard.conf")).exists()),
         sandbox: output("bwrap", &["--ro-bind", "/", "/", "/bin/true"]).is_some(),
@@ -267,7 +266,7 @@ mod tests {
     #[test]
     fn without_root_a_fresh_machine_gets_a_private_toolchain() {
         let steps = plan(&fresh());
-        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "micromamba", "git, curl, nodejs, gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "micromamba", "git, curl, nodejs, gh", "browser libraries", "claude", "codex", "uv", "Chromium", "~/.local/bin on PATH"]);
         assert_eq!(*action(&steps, "system packages"), Action::NeedsRoot("sudo apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "Docker"), Action::NeedsRoot("curl -fsSL https://get.docker.com | sudo sh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::NeedsRoot("sudo usermod -aG docker dev".into()));
@@ -282,7 +281,6 @@ mod tests {
         assert_eq!(*action(&steps, "browser libraries"), Action::NeedsRoot("sudo env \"PATH=$PATH\" npx -y playwright install-deps chromium".into()));
         assert_eq!(*action(&steps, "claude"), Action::Run("curl -fsSL https://claude.ai/install.sh | bash".into()));
         assert_eq!(*action(&steps, "codex"), Action::Run("npm install -g @openai/codex".into()));
-        assert_eq!(*action(&steps, "copilot"), Action::Run("npm install -g @github/copilot".into()));
         assert_eq!(*action(&steps, "Chromium"), Action::Run("npx -y playwright install chromium".into()));
         assert!(matches!(action(&steps, "~/.local/bin"), Action::Run(_)));
 
@@ -303,7 +301,7 @@ mod tests {
     #[test]
     fn with_sudo_the_system_installs_what_it_can_and_node_stays_private() {
         let steps = plan(&Machine { root: true, ..fresh() });
-        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "micromamba", "nodejs", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+        assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "micromamba", "nodejs", "browser libraries", "claude", "codex", "uv", "Chromium", "~/.local/bin on PATH"]);
         assert_eq!(*action(&steps, "system packages"), Action::Run("sudo -n apt-get update && sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y git curl ca-certificates build-essential unzip bubblewrap ffmpeg gh".into()));
         assert_eq!(*action(&steps, "Docker"), Action::Run("curl -fsSL https://get.docker.com | sudo -n sh".into()));
         assert_eq!(*action(&steps, "docker group"), Action::Run("sudo -n usermod -aG docker dev".into()));
@@ -324,7 +322,7 @@ mod tests {
 
         // Logged in as root itself: everything, and root needs no docker group.
         let root = plan(&Machine { root: true, superuser: true, user: "root".into(), ..fresh() });
-        assert_eq!(names(&root).len(), 14);
+        assert_eq!(names(&root).len(), 13);
         assert_eq!(*action(&root, "docker group"), Action::Ok);
     }
 
@@ -332,7 +330,7 @@ mod tests {
     fn a_machine_already_set_up_has_nothing_to_do() {
         let done = Machine {
             missing_packages: vec![],
-            programs: vec!["git", "curl", "node", "gh", "docker", "claude", "codex", "copilot", "uv"],
+            programs: vec!["git", "curl", "node", "gh", "docker", "claude", "codex", "uv"],
             docker_group: true,
             sandbox: true,
             patient_oom: true,
@@ -344,7 +342,7 @@ mod tests {
         for root in [false, true] {
             let steps = plan(&Machine { root, ..done.clone() });
             assert!(steps.iter().all(|step| step.action == Action::Ok), "{steps:?}");
-            assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "git, Node and gh", "browser libraries", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+            assert_eq!(names(&steps), ["system packages", "Docker", "docker group", "worktree sandbox", "memory pressure", "git, Node and gh", "browser libraries", "claude", "codex", "uv", "Chromium", "~/.local/bin on PATH"]);
         }
     }
 
@@ -352,6 +350,6 @@ mod tests {
     fn without_apt_the_user_level_setup_still_runs() {
         let steps = plan(&Machine { apt: false, ..fresh() });
         assert!(matches!(action(&steps, "system packages"), Action::Skip(_)));
-        assert_eq!(names(&steps), ["system packages", "micromamba", "git, curl, nodejs, gh", "claude", "codex", "copilot", "uv", "Chromium", "~/.local/bin on PATH"]);
+        assert_eq!(names(&steps), ["system packages", "micromamba", "git, curl, nodejs, gh", "claude", "codex", "uv", "Chromium", "~/.local/bin on PATH"]);
     }
 }

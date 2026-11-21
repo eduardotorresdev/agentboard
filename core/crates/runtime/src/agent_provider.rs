@@ -52,8 +52,8 @@ pub struct ToolServerLink {
 pub struct AgentCatalog;
 
 impl AgentCatalog {
-    pub fn all() -> [&'static dyn AgentProvider; 3] {
-        [&ClaudeCode, &Codex, &Copilot]
+    pub fn all() -> [&'static dyn AgentProvider; 2] {
+        [&ClaudeCode, &Codex]
     }
 
     pub fn provider(id: &str) -> Option<&'static dyn AgentProvider> {
@@ -343,49 +343,6 @@ fn toml(value: &str) -> String {
     Value::from(value).to_string()
 }
 
-/// GitHub's Copilot CLI. The board's server joins its MCP config for this launch only
-/// (`--additional-mcp-config`), never ~/.copilot/mcp-config.json.
-// shortcut: no "waiting for you" state; the CLI shows no hook or notify option in --help (v1.0.61). Add one when it does.
-pub struct Copilot;
-
-impl AgentProvider for Copilot {
-    fn id(&self) -> &'static str {
-        "copilot"
-    }
-    fn title(&self) -> &'static str {
-        "Copilot"
-    }
-    fn subtitle(&self) -> &'static str {
-        "GitHub's Copilot CLI"
-    }
-    fn executable(&self) -> &'static str {
-        "copilot"
-    }
-    fn install_command(&self) -> Option<&'static str> {
-        Some("npm install -g @github/copilot")
-    }
-
-    fn arguments(&self, session: Uuid, tools: Option<&ToolServerLink>) -> Vec<String> {
-        // Agents run unattended on the board: they never stop to ask for a permission.
-        let mut arguments = vec!["--allow-all".to_string()];
-        if let Some(tools) = tools {
-            arguments.extend(["--additional-mcp-config".to_string(), Self::mcp_config(tools)]);
-        }
-        // `--session-id` starts a session with this id, or resumes it when it exists.
-        arguments.extend(["--session-id".to_string(), session.lowercased()]);
-        arguments
-    }
-}
-
-impl Copilot {
-    /// The board's server in the shape `copilot mcp add --transport http` writes. Keys are
-    /// written in order, so the text doesn't depend on how serde_json keeps its maps.
-    fn mcp_config(tools: &ToolServerLink) -> String {
-        let server = json!({"headers": {"Authorization": format!("Bearer {}", tools.token)}, "tools": ["*"], "type": "http", "url": tools.url});
-        json!({"mcpServers": {tools.name.as_str(): server}}).to_string()
-    }
-}
-
 /// What an agent's hook forwards (see `ClaudeCode::attention_hook`): Claude Code's hook
 /// input, of which only these fields matter.
 #[derive(Clone, Debug, Deserialize)]
@@ -425,8 +382,7 @@ mod tests {
         let codex = AgentCatalog::provider("codex").unwrap();
         assert_eq!(codex.executable(), "codex");
         assert_eq!(codex.install_command(), Some("npm install -g @openai/codex"));
-        assert_eq!(AgentCatalog::all().map(|provider| provider.id()), ["claude", "codex", "copilot"]);
-        assert_eq!(AgentCatalog::provider("copilot").unwrap().title(), "Copilot");
+        assert_eq!(AgentCatalog::all().map(|provider| provider.id()), ["claude", "codex"]);
     }
 
     #[test]
@@ -468,14 +424,6 @@ mod tests {
         assert!(Codex::conversation_exists("abc", &home));
         assert!(!Codex::conversation_exists("abd", &home));
         std::fs::remove_dir_all(&home).unwrap();
-    }
-
-    #[test]
-    fn copilot_gets_the_board_per_launch() {
-        let session = Uuid::new();
-        let config = r#"{"mcpServers":{"board":{"headers":{"Authorization":"Bearer secret"},"tools":["*"],"type":"http","url":"http://127.0.0.1:9/mcp"}}}"#;
-        assert_eq!(Copilot.arguments(session, Some(&link())), ["--allow-all", "--additional-mcp-config", config, "--session-id", &session.lowercased()]);
-        assert_eq!(Copilot.arguments(session, None), ["--allow-all", "--session-id", &session.lowercased()]);
     }
 
     #[test]

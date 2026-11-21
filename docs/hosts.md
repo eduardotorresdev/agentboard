@@ -38,7 +38,7 @@ same gate (`GOAL.md`); the Rust core ships on Linux first.
   the versions it has here through a small `sh` that finds the host's `synced-pins`, a Mac
   binary stays here); its git identity; and `gh`'s login when `gh` is signed in. Not kept:
   `settings.json` (its hooks run programs of this Mac), project-scoped MCP servers, the other
-  agent programs' own settings (`~/.codex`, `~/.copilot`), transcripts, history. The Mac
+  agent programs' own settings (`~/.codex`), transcripts, history. The Mac
   writes when what it has changed (it remembers, sealed in `vault.base` of its data folder,
   its own entries at the last write, and merges its changes since into what the server
   holds), then hands each host it reaches the key and runs `agentboard vault pull` there; the
