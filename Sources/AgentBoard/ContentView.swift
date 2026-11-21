@@ -78,10 +78,10 @@ struct ContentView: View {
         .toolbar {
             if #available(macOS 26, *) {
                 // The button is its own capsule: no toolbar glass around it.
-                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, isOpen: $isNeedsYouOpen) }
+                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, projects: store, isOpen: $isNeedsYouOpen) }
                     .sharedBackgroundVisibility(.hidden)
             } else {
-                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, isOpen: $isNeedsYouOpen) }
+                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, projects: store, isOpen: $isNeedsYouOpen) }
             }
             if !boardController.isZen {
                 // With projects, the account is at the foot of the sidebar.

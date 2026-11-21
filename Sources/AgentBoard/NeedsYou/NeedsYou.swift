@@ -5,10 +5,21 @@ import SwiftUI
 /// The count of agents waiting on the developer, centered in the toolbar. Opens the deck.
 struct NeedsYouButton: View {
     let hosts: HostStores
+    let projects: ProjectStore
     @Binding var isOpen: Bool
     @State private var isHovered = false
 
+    private var waiting: [AgentRecord] { hosts.attention.compactMap { hosts.store(of: $0.id)?.record($0.id) } }
     private var count: Int { hosts.attention.count { hosts.store(of: $0.id) != nil } }
+
+    /// How many projects have an agent waiting; a worktree outside every project counts as its own.
+    private var projectCount: Int {
+        Set(waiting.map { record in
+            projects.projects.first { project in
+                project.path == record.worktree || projects.worktrees[project.id]?.contains { $0.path == record.worktree } == true
+            }?.path ?? record.worktree
+        }).count
+    }
 
     var body: some View {
         Button {
@@ -16,38 +27,33 @@ struct NeedsYouButton: View {
         } label: {
             if count == 0 && !isOpen {
                 // Quiet while nothing waits.
-                Text(L("All clear"))
+                Label(L("All clear"), systemImage: "checkmark")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Theme.inkMuted)
                     .padding(.horizontal, 12)
-                    .frame(height: 30)
+                    .frame(height: 32)
             } else {
-            HStack(spacing: 8) {
-                Text(L("Needs you"))
-                    .font(.system(size: 13, weight: .semibold))
-                Group {
-                    // Open, the badge closes the screen; the cards show how many wait.
-                    if isOpen {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .heavy))
-                            .transition(.scale(scale: 0.5).combined(with: .opacity))
-                    } else {
-                        Text(count, format: .number)
-                            .font(.system(size: 12, weight: .bold).monospacedDigit())
-                            .contentTransition(.numericText(value: Double(count)))
-                            .transition(.scale(scale: 0.5).combined(with: .opacity))
-                    }
+            HStack(spacing: 6) {
+                Label(L("Needs you"), systemImage: "bell.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .padding(.trailing, 4)
+                // Open, the badge closes the screen; the cards show how many wait.
+                if isOpen {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .heavy))
+                        .modifier(Tally(isLit: count > 0))
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
+                } else {
+                    tally("folder.fill", projectCount, L("Projects with an agent waiting"))
+                    tally("sparkles", count, L("Agents waiting"))
                 }
-                    .padding(.horizontal, 7)
-                    .frame(minWidth: 22, minHeight: 20)
-                    .background(count > 0 ? .white : Theme.line.opacity(0.08), in: .rect(cornerRadius: Theme.Radius.control))
-                    .foregroundStyle(count > 0 ? Theme.accent : Theme.inkMuted)
             }
-            .padding(.leading, 14)
+            .padding(.leading, 12)
             .padding(.trailing, 5)
-            .frame(height: 30)
-            .foregroundStyle(count > 0 ? .white : Theme.inkMuted)
-            .background(count > 0 ? Theme.accent.opacity(isHovered ? 0.88 : 1) : Theme.line.opacity(isHovered ? 0.07 : 0.04),
+            .frame(height: 32)
+            .foregroundStyle(count > 0 ? Theme.onAccent : Theme.inkMuted)
+            // Deep blue: the "waiting for you" color.
+            .background(count > 0 ? Theme.deep.opacity(isHovered ? 0.88 : 1) : Theme.line.opacity(isHovered ? 0.07 : 0.04),
                         in: .rect(cornerRadius: Theme.Radius.control))
             .contentShape(.rect(cornerRadius: Theme.Radius.control))
             .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -60,7 +66,35 @@ struct NeedsYouButton: View {
         .help(isOpen ? L("Back to the board (Esc)") : L("Agents waiting on you, across every organization"))
         .animation(.bouncy(duration: 0.4), value: count == 0)
         .animation(.snappy(duration: 0.3), value: count)
+        .animation(.snappy(duration: 0.3), value: projectCount)
         .animation(.snappy(duration: 0.2), value: isHovered)
+    }
+
+    /// An icon and how many of it wait.
+    private func tally(_ symbol: String, _ value: Int, _ meaning: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).font(.system(size: 10, weight: .bold))
+            Text(value, format: .number)
+                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                .contentTransition(.numericText(value: Double(value)))
+        }
+        .modifier(Tally(isLit: count > 0))
+        .transition(.scale(scale: 0.5).combined(with: .opacity))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(meaning): \(value)")
+    }
+
+    /// A white block on the button's fill.
+    private struct Tally: ViewModifier {
+        let isLit: Bool
+
+        func body(content: Content) -> some View {
+            content
+                .padding(.horizontal, 7)
+                .frame(minWidth: 22, minHeight: 22)
+                .foregroundStyle(isLit ? Theme.deep : Theme.inkMuted)
+                .background(isLit ? Theme.surface : Theme.line.opacity(0.08), in: .rect(cornerRadius: Theme.Radius.thumb))
+        }
     }
 }
 
