@@ -150,7 +150,9 @@ extension AgentStore {
     func cardStatus(_ record: AgentRecord) -> CardStatus {
         record.runner != nil
             ? CardStatus.runner(statuses[record.id], running: runningRunners.contains(record.id))
-            : CardStatus.agent(statuses[record.id], waiting: attention.contains { $0.id == record.id && $0.needsUser })
+            : CardStatus.agent(statuses[record.id], waiting: attention.contains { $0.id == record.id && $0.needsUser }
+                // A provisional decision leaves the agent working; only a blocking one waits.
+                || decisions.contains { $0.agent == record.id && $0.blocking && $0.state == .open })
     }
 
     /// The most pressing state among `organization`'s cards; nil when it has none.

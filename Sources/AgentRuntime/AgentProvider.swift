@@ -281,7 +281,7 @@ public enum BoardSkill {
     public static let text = """
 ---
 name: board
-description: How to work on the user's board through the board MCP tools - peers, messages, runners, terminals, post-its, images, videos, browsers, simulators, agents, worktrees, projects and hosts. Use whenever a task involves anything on the board or beyond your own shell.
+description: How to work on the user's board through the board MCP tools - peers, messages, runners, terminals, post-its, images, videos, browsers, simulators, agents, worktrees, projects, hosts and decisions (how to ask the user). Use whenever a task involves anything on the board or beyond your own shell.
 ---
 
 # Working on the board
@@ -317,6 +317,20 @@ You are a card on a shared canvas. The user links elements with lines; you only 
 - `worktree_create` starts separate work on a branch without touching your checkout; `worktree_remove` when it is merged or abandoned.
 - `project_list`, `project_create` (clone or new repo).
 - `host_list`: this Mac and the user's other machines, online state and load. Pick a host before creating remote worktrees.
+
+## Decisions
+- `decision_open` is the only way to ask the user: it opens a balloon pointing at your card, with the evidence and one ask. A loose question in your terminal opens no balloon. It returns at once; the answer arrives later as a message.
+- Three levels. Decide and move on: most things; open nothing. Open a decision: a choice the user would want to see; you carry on with your own choice (provisional) and the decision validates it. `blocking: true`: only what can't be undone, or when you can't go on; then you stop and wait. Reversible work never blocks. With three provisional decisions unanswered in one worktree, the next one blocks.
+- The family, by one question. `surface`: is it about what a screen shows? `flow`: is it about how the experience is walked through (navigation, sequence, transitions, error and empty paths)? `foundation`: will other things be built on this, or will it become the pattern the rest follows (data model, architecture, boundaries, contracts, caching)? Direction before detail, foundation before surface.
+- Show before asking: 1 to 6 cards, one idea each, a claim (“The screen ended up like this”) with its evidence, then one ask. A second question is a second decision.
+- Evidence has the shape of the thing evaluated. A screen: its screenshot on the board (`image_create`), with the screenshot of what it replaces as `before`; the user drags a divider between the two. A flow: its changed steps, one card each. A foundation: a diagram of the affected part beside the alternative, with what each one trades and one line of consequence.
+- Never evaluate in a vacuum: every card carries `before`, or a `reference` line with the justification or the alternative. Precedent is not a justification: “we already do it this way” is not a reason. You may say that something diverges from what exists, as a fact.
+- Variants (`ask.variants`): three for something new, when the user asks for options, or in a refactor. Names of at most 3 words; they get the letters A, B, C. Don't recommend one; carry on with the one you prefer. Without variants the user validates: OK, or a redirect.
+- Budget for the first view: at most 7 elements in a diagram, labels of at most 3 words, 6 cards, 4 cases per diagram, each card understood at a glance. Write `intent`, one line on what the user should notice, then look at your own evidence (`image_read`): if it doesn't show that, redo it before sending.
+- Verify before asking: nothing reaches the user unverified, and `verified` lists what you checked. What can't be verified is its own decision saying what stops you.
+- `pins` mark a doubt at an exact place of the evidence, only when it fits this decision; a doubt beyond it is its own decision.
+- Good: “Validate the invite screen”, one card with before and after, “Can the screen stay like this?”. Bad: “Which do you prefer?” with no evidence; five questions in one balloon; asking what you could have checked yourself.
+- The answer. OK or a letter: carry on. Use Recommended: choose now, then `decision_echo` one line saying which and why. A redirect is free words for the work at hand only (keep nothing in memory or permanent instructions): `decision_echo` what you understood, act on it without waiting for confirmation, then `decision_withdraw` the open decisions it made obsolete and redo the affected ones. If the user answers in your terminal instead, `decision_echo` closes the balloon.
 
 """
 }

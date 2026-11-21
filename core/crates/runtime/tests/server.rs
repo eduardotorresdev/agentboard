@@ -237,10 +237,10 @@ fn hello_agrees_on_a_version_or_says_which_the_core_speaks() {
     // The build before: it doesn't say which versions it still speaks.
     assert_eq!(welcome(2, None), (2, Some(2)));
     // A newer board that still speaks ours.
-    assert_eq!(welcome(11, Some(7)), (8, Some(2)));
+    assert_eq!(welcome(11, Some(7)), (9, Some(2)));
     // No version in common, either way: the core's own versions, and nothing else.
-    assert_eq!(welcome(11, Some(9)), (8, Some(2)));
-    assert_eq!(welcome(1, None), (8, Some(2)));
+    assert_eq!(welcome(11, Some(10)), (9, Some(2)));
+    assert_eq!(welcome(1, None), (9, Some(2)));
 
     // A core of another build answers a board of this one the same way.
     let newer = Fixture::<()>::with(60.0, |handle| handle.post(|_, server| server.versions = runtime::Versions { version: 11, oldest: 10 }));

@@ -43,7 +43,8 @@ public enum CoreProtocol {
     /// 6: the composer's `prompt`, and messages `held` behind the user's terminal line (`deliverHeld`).
     /// 7: `subscribeStatuses`, a board hearing every session's status.
     /// 8: hosts: `run` (a program on the core's machine, answered with `ran`) and `subscribeHost`.
-    public static let version = 8
+    /// 9: decisions (`BoardEvent.decisions`, `BoardRequest.answerDecision`).
+    public static let version = 9
     public static let oldest = 2
     public static let versions = Versions(version: version, oldest: oldest)
 

@@ -22,6 +22,8 @@ public final class Orchestrator: CoreService {
     private(set) var images: [ImageRecord] = []
     /// The agents waiting on the developer, oldest first (see Attention.swift).
     var attention: [AttentionRequest] = [] { didSet { releaseHeldMessages() } }
+    /// What agents asked the developer and still wait on (see Decision.swift).
+    var decisions: [Decision] = []
     /// Agents whose questions hook waits on the developer's answers (see Attention.swift).
     var pendingQuestions: [UUID: PendingQuestions] = [:] { didSet { releaseHeldMessages() } }
     /// Agent endpoints, so messages held while an agent waits on the developer go out once it's answered.
@@ -102,6 +104,8 @@ public final class Orchestrator: CoreService {
         postIts = savedPostIts.map { var note = $0; note.name = BoardName.named(note.name, else: "Post-it"); return note }
         images = savedImages.map { var image = $0; image.name = BoardName.named(image.name, else: "Image"); return image }
         catalog.add(RunnerTools(store: self))
+        // Early, so an agent that cuts its instructions short still learns how to ask.
+        catalog.add(DecisionTools(store: self))
         catalog.add(PostItTools(store: self))
         catalog.add(ImageTools(store: self))
         catalog.add(ImageTools(store: self, medium: .video))
@@ -126,6 +130,7 @@ public final class Orchestrator: CoreService {
         let inherited = inheriting.flatMap { try? JSONDecoder().decode(Inherited.self, from: $0) }
         if let inherited {
             attention = (inherited.attention ?? []).filter { id in cards.contains { $0.id == id.id } }
+            decisions = (inherited.decisions ?? []).filter { decision in cards.contains { $0.id == decision.agent } }
             runnerStarts = inherited.runnerStarts.filter { server.session($0.key)?.processID != nil }
             if !runnerStarts.isEmpty { startMonitoring() }
         }
@@ -159,7 +164,10 @@ public final class Orchestrator: CoreService {
         tidyMedia()
         // An agent whose program ended can't answer: it leaves Needs you.
         server.onSessionStatus = { [weak self] id, status in
-            MainActor.assumeIsolated { self?.agentEndpoints[id]?.sessionChanged(status) }
+            MainActor.assumeIsolated {
+                self?.agentEndpoints[id]?.sessionChanged(status)
+                if status.state == .running { self?.deliverAnswers(to: id) }
+            }
             guard status.processID == nil, status.state != .starting else { return }
             MainActor.assumeIsolated { self?.dismissAttention(id) }
         }
@@ -221,6 +229,8 @@ public final class Orchestrator: CoreService {
         var toolStreams: [Int]?
         /// Nil from a core that predates the attention queue.
         var attention: [AttentionRequest]?
+        /// Nil from a core that predates decisions.
+        var decisions: [Decision]?
     }
 
     /// The tool server's socket and connections, until the newer core has them.
@@ -238,7 +248,7 @@ public final class Orchestrator: CoreService {
         let state = try? JSONEncoder().encode(Inherited(runnerStarts: runnerStarts,
                                                         toolConnections: connections.map(\.pending) + streams.map { _ in Data() },
                                                         toolStreams: streams.indices.map { connections.count + $0 },
-                                                        attention: attention))
+                                                        attention: attention, decisions: decisions))
         return (state, releasedTools.map { [$0.listener] + connections.map(\.fd) + streams } ?? [])
     }
 
@@ -260,7 +270,7 @@ public final class Orchestrator: CoreService {
     public func boardConnected(_ board: CoreBoard) -> Data? {
         boards.insert(board)
         return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
-                          attention: attention, images: images).encoded
+                          attention: attention, images: images, decisions: decisions).encoded
     }
 
     public func input(_ bytes: [UInt8], to id: UUID) -> [UInt8] {
@@ -369,6 +379,8 @@ public final class Orchestrator: CoreService {
             dismissAttention(id)
         case .answerQuestions(let id, let answers):
             answerQuestions(id, answers)
+        case .answerDecision(let id, let answer):
+            answerDecision(id, answer)
         }
     }
 
@@ -421,6 +433,12 @@ public final class Orchestrator: CoreService {
         try? database?.deleteAgent(id: id)
         broadcast(.cardRemoved(id), except: sender)
         dismissAttention(id)
+        withdrawDecisions { $0.agent == id }
+    }
+
+    /// A note from the board typed into the agent's terminal, queued like a message.
+    func tell(_ id: UUID, _ text: String, answering decision: UUID? = nil) {
+        agentEndpoints[id]?.notice(text, answering: decision)
     }
 
     // MARK: Post-its
@@ -599,6 +617,8 @@ final class AgentEndpoint: MessageEndpoint {
         let sender: UUID?
         /// The sending agent's name, quoted; `text` is then what it said, without a header.
         var from: String? = nil
+        /// The decision whose answer this carries: the store hears when it reaches the terminal.
+        var decision: UUID? = nil
 
         /// The prompt for agents' messages delivered together, in the order they came.
         static func prompt(_ messages: [(name: String, text: String)]) -> String {
@@ -696,10 +716,14 @@ final class AgentEndpoint: MessageEndpoint {
     }
 
     /// A note from the board itself (a message of theirs that couldn't be delivered).
-    func notice(_ text: String) {
-        guard programReason == nil else { return }
-        outbox.append(Queued(text: text, fromUser: false, sender: nil))
+    /// False when its program can't take it. A decision's answer is queued once.
+    @discardableResult
+    func notice(_ text: String, answering decision: UUID? = nil) -> Bool {
+        guard programReason == nil else { return false }
+        if let decision, outbox.contains(where: { $0.decision == decision }) { return true }
+        outbox.append(Queued(text: text, fromUser: false, sender: nil, decision: decision))
         deliverNext()
+        return true
     }
 
     private func giveBack(_ text: String, _ reason: String) {
@@ -765,6 +789,7 @@ final class AgentEndpoint: MessageEndpoint {
         line = TerminalLine()
         delivering = true
         var next = outbox.removeFirst()
+        if let decision = next.decision { store.answerDelivered(decision) }
         if let name = next.from {
             var messages = [(name: name, text: next.text)]
             while let more = outbox.first, let name = more.from {

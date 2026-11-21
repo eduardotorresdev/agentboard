@@ -39,6 +39,12 @@ final class AgentStore {
     @ObservationIgnored var onConnect: (() -> Void)?
     /// Agents waiting on the developer, in every organization, oldest first.
     private(set) var attention: [AttentionRequest] = []
+    /// What agents asked the developer, oldest first. One the agent closed with an echo stays
+    /// a while as `closed`, so the echo can be read.
+    private(set) var decisions: [Decision] = [] { didSet { onDecisionsChange?() } }
+    @ObservationIgnored var onDecisionsChange: (() -> Void)?
+    /// How long a closed decision's echo stays on the board.
+    static let echoLinger: TimeInterval = 8
     /// Messages held behind the text the user typed in an agent's terminal, by agent.
     var heldMessages: [UUID: Int] = [:]
     /// Why the core gave a composer prompt back, by agent: shown in its composer.
@@ -245,6 +251,7 @@ final class AgentStore {
         postIts = state.postIts ?? []
         images = state.images ?? []
         attention = state.attention ?? []
+        decisions = state.decisions ?? []
         connections = state.connections
         runnerReport = state.runners
         isLoaded = true
@@ -343,6 +350,14 @@ final class AgentStore {
             connections.removeAll { $0.touches(id) }
         case .attention(let list):
             attention = list
+        case .decisions(let list):
+            let lingering = decisions.filter { old in old.state == .closed && !list.contains { $0.id == old.id } }
+            decisions = lingering + list.filter { $0.state != .closed || $0.echo != nil }
+            for closed in list where closed.state == .closed && closed.echo != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.echoLinger) { [weak self] in
+                    self?.decisions.removeAll { $0.id == closed.id }
+                }
+            }
         case .held(let id, let count):
             heldMessages[id] = count == 0 ? nil : count
         case .promptReturned(let id, let text, let reason):
@@ -418,6 +433,7 @@ final class AgentStore {
         if sessions.removeValue(forKey: id) != nil { core?.unregister(id) }
         viewers[id] = nil
         attention.removeAll { $0.id == id }
+        decisions.removeAll { $0.agent == id }
         statuses[id] = nil
         hosted[id] = nil
         runnersToStart.remove(id)

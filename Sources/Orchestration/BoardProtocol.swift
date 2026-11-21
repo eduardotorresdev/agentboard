@@ -53,6 +53,8 @@ public enum BoardRequest: Codable, Sendable {
     case prompt(id: UUID, text: String)
     /// Delivers the messages held while the user had text on the agent's terminal line.
     case deliverHeld(UUID)
+    /// The developer answered the agent's decision (after the board's undo window).
+    case answerDecision(id: UUID, answer: Decision.Answer)
 }
 
 /// Core → board.
@@ -82,6 +84,9 @@ public enum BoardEvent: Codable, Sendable {
     /// A composer prompt agent `id` couldn't take (it stopped, or waits on the developer):
     /// back to the composer with why.
     case promptReturned(id: UUID, text: String, reason: String)
+    /// Every decision, oldest first, after any change. One that closed comes once more, as
+    /// `closed` with the agent's echo, and is gone from the next list.
+    case decisions([Decision])
 }
 
 /// What a board gets with its welcome.
@@ -95,15 +100,18 @@ public struct BoardState: Codable, Sendable {
     public var attention: [AttentionRequest]?
     /// The images; nil from a core that predates them.
     public var images: [ImageRecord]?
+    /// The decisions waiting on the developer; nil when there are none or from a core that predates them.
+    public var decisions: [Decision]?
 
     public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = [],
-                attention: [AttentionRequest] = [], images: [ImageRecord] = []) {
+                attention: [AttentionRequest] = [], images: [ImageRecord] = [], decisions: [Decision] = []) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
         self.postIts = postIts
         self.attention = attention
         self.images = images
+        self.decisions = decisions.isEmpty ? nil : decisions
     }
 }
 

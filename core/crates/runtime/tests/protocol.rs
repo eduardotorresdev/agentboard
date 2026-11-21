@@ -73,10 +73,10 @@ fn what_only_a_peer_writes_still_decodes() {
 #[test]
 fn builds_agree_on_the_newest_version_both_speak() {
     let this = core_protocol::VERSIONS;
-    assert_eq!((this.version, this.oldest), (8, 2));
+    assert_eq!((this.version, this.oldest), (9, 2));
     assert_eq!(this.agreed(Versions { version: 8, oldest: 2 }), Some(8));
     assert_eq!(this.agreed(Versions { version: 2, oldest: 2 }), Some(2));
-    assert_eq!(this.agreed(Versions { version: 11, oldest: 7 }), Some(8));
-    assert_eq!(this.agreed(Versions { version: 11, oldest: 9 }), None);
+    assert_eq!(this.agreed(Versions { version: 11, oldest: 7 }), Some(9));
+    assert_eq!(this.agreed(Versions { version: 11, oldest: 10 }), None);
     assert_eq!(this.agreed(Versions { version: 1, oldest: 1 }), None);
 }

@@ -219,6 +219,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var runnerChrome: [UUID: RunnerChromeLayer] = [:]
     /// Each agent card's composer, below the card.
     private var composers: [UUID: NSView] = [:]
+    /// Decision balloons, by decision.
+    private var balloons: [UUID: (view: NSView, model: DecisionBalloonModel)] = [:]
     /// The runner control under the pointer.
     private var hoveredRunnerControl: (card: UUID, control: RunnerControl)?
     private var browserCards: [UUID: BrowserCardLayer] = [:]
@@ -383,6 +385,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         simulators.onScreenChange = { [weak self] _ in self?.syncLayers() }
         store.onMediaChange = { [weak self] file in self?.mediaChanged(file) }
         store.onMediaNote = { [weak self] _ in self?.syncLayers() }
+        store.onDecisionsChange = { [weak self] in self?.syncLayers() }
         registerForDraggedTypes([.fileURL])
     }
 
@@ -760,6 +763,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         syncFileTrees(scale: renderScale)
         syncLinks(scale: renderScale)
         syncSelection()
+        syncDecisions(records)
         // Terminals that got a new place in the surface are drawn there before they show again.
         if let surface { dirty.formUnion(surface.arrange(sizes)) }
         observe(visible)
@@ -780,6 +784,49 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         view.frame = screen(rect)
         view.setBoundsSize(rect.size)
         view.subviews.first?.frame = view.bounds
+    }
+
+    /// One balloon per agent with a decision waiting, its oldest, left of the card and pointing
+    /// at it. A balloon whose decision is gone collapses before it leaves.
+    private func syncDecisions(_ records: [AgentRecord]) {
+        var shown = Set<UUID>()
+        for record in records where record.runner == nil {
+            let waiting = store.decisions.filter { $0.agent == record.id }
+            guard let decision = waiting.first else { continue }
+            shown.insert(decision.id)
+            let balloon = balloons[decision.id] ?? {
+                let model = DecisionBalloonModel(decision: decision)
+                let view = NSView()
+                view.addSubview(NSHostingView(rootView: DecisionBalloon(store: store, model: model)))
+                model.onHeight = { [weak self] in DispatchQueue.main.async { self?.placeBalloon(decision.id) } }
+                balloons[decision.id] = (view, model)
+                addSubview(view)
+                return (view, model)
+            }()
+            let model = balloon.model
+            if model.decision != decision { model.decision = decision }
+            if model.agentName != record.name { model.agentName = record.name }
+            if model.more != waiting.count - 1 { model.more = waiting.count - 1 }
+            model.origin = CGPoint(x: record.frame.minX - DecisionMetrics.gap - DecisionMetrics.outerWidth, y: record.frame.minY)
+        }
+        for (id, balloon) in balloons {
+            if !shown.contains(id), !balloon.model.leaving {
+                balloon.model.leaving = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    balloon.view.removeFromSuperview()
+                    self?.balloons[id] = nil
+                }
+            }
+            placeBalloon(id)
+        }
+    }
+
+    private func placeBalloon(_ id: UUID) {
+        guard let balloon = balloons[id] else { return }
+        let rect = CGRect(origin: balloon.model.origin, size: CGSize(width: DecisionMetrics.outerWidth, height: balloon.model.height))
+        balloon.view.frame = screen(rect)
+        balloon.view.setBoundsSize(rect.size)
+        balloon.view.subviews.first?.frame = balloon.view.bounds
     }
 
     /// Browser cards sit above the agents, in their own stacking order.

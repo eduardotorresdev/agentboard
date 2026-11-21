@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 @testable import Orchestration
 
 /// A picture `width`×`height` encoded as `type`.
-private func picture(_ width: Int, _ height: Int, as type: UTType = .png) -> Data {
+func picture(_ width: Int, _ height: Int, as type: UTType = .png) -> Data {
     let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     context.setFillColor(CGColor(red: 0.5, green: 0.2, blue: 0.9, alpha: 1))
