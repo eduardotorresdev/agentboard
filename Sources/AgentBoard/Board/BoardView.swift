@@ -66,6 +66,7 @@ final class BoardController {
 
     func add(_ provider: any AgentProvider) { view?.addAgent(provider) }
     func add(_ device: BrowserDevice) { view?.addBrowser(device) }
+    func addSimulator(_ platform: SimulatorPlatform) { view?.addSimulator(platform) }
     func addPostIt() { view?.addPostIt() }
     /// The style at the cursor of the post-it being written as rich text; nil when none is.
     fileprivate(set) var postItFormat: PostItFormat?
@@ -132,12 +133,13 @@ struct DeviceRequest: Identifiable {
 struct Board: NSViewRepresentable {
     let store: AgentStore
     let browsers: BrowserStore
+    let simulators: SimulatorStore
     let fileTrees: FileTreeStore
     let worktree: String
     let controller: BoardController
 
     func makeNSView(context: Context) -> BoardView {
-        let view = BoardView(store: store, browsers: browsers, fileTrees: fileTrees)
+        let view = BoardView(store: store, browsers: browsers, simulators: simulators, fileTrees: fileTrees)
         controller.view = view
         view.controller = controller
         return view
@@ -176,6 +178,12 @@ struct Board: NSViewRepresentable {
 final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private let store: AgentStore
     private let browsers: BrowserStore
+    fileprivate let simulators: SimulatorStore
+    fileprivate var simulatorCards: [UUID: SimulatorCardLayer] = [:]
+    /// The simulator control under the pointer.
+    fileprivate var hoveredSimulatorControl: (card: UUID, control: SimulatorCardLayer.Control)?
+    /// Simulator card the finger is on while a button is held.
+    fileprivate var touchCapture: UUID?
     fileprivate let fileTrees: FileTreeStore
     fileprivate var fileTreeCards: [UUID: FileTreeCardLayer] = [:]
     /// The SwiftUI files and file of each file tree card, over its content, and the bar that
@@ -338,9 +346,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         var group: [UUID: CGRect]?
     }
 
-    init(store: AgentStore, browsers: BrowserStore, fileTrees: FileTreeStore) {
+    init(store: AgentStore, browsers: BrowserStore, simulators: SimulatorStore, fileTrees: FileTreeStore) {
         self.store = store
         self.browsers = browsers
+        self.simulators = simulators
         self.fileTrees = fileTrees
         presenter = MTLCreateSystemDefaultDevice().flatMap { TerminalPresenter(device: $0) }
         surface = presenter.map { SharedSurface(device: $0.device) }
@@ -371,6 +380,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             self?.closeStaleForwards()
         }
         browsers.onPageChange = { [weak self] _ in self?.syncLayers() }
+        simulators.onScreenChange = { [weak self] _ in self?.syncLayers() }
         store.onMediaChange = { [weak self] file in self?.mediaChanged(file) }
         store.onMediaNote = { [weak self] _ in self?.syncLayers() }
         registerForDraggedTypes([.fileURL])
@@ -456,6 +466,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         cards.values.forEach { $0.detachTerminal() }
         // Hidden, minimized or gone: no video keeps playing behind it.
         imageCards.values.forEach { $0.video?.pause() }
+        // Nor does an emulator's screen stream.
+        simulatorCards.keys.forEach { simulators.hide($0) }
         surface?.release()
         displayLink?.isPaused = true
     }
@@ -524,6 +536,17 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         window?.makeFirstResponder(self)
         syncLayers()
         beginAddressEditing(record.id)
+    }
+
+    func addSimulator(_ platform: SimulatorPlatform) {
+        let screen = platform.defaultSize
+        let size = SimulatorStore.frame(for: screen, at: .zero, scale: SimulatorStore.initialScale(for: screen)).size
+        let record = simulators.add(platform, to: worktree, on: store.host?.id, at: newCardOrigin(for: size))
+        appearing.insert(record.id)
+        bringIntoView(record.frame)
+        focusedID = record.id
+        window?.makeFirstResponder(self)
+        syncLayers()
     }
 
     func addPostIt() {
@@ -733,6 +756,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         syncPostIts(scale: renderScale)
         syncImages(scale: renderScale)
         syncBrowsers(onScreen: onScreen, scale: renderScale)
+        syncSimulators(onScreen: onScreen, scale: renderScale)
         syncFileTrees(scale: renderScale)
         syncLinks(scale: renderScale)
         syncSelection()
@@ -797,12 +821,14 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var itemFrames: [(id: UUID, frame: CGRect)] {
         store.agents(in: worktree).map { ($0.id, $0.frame) } + store.postIts(in: worktree).map { ($0.id, $0.frame) }
             + store.images(in: worktree).map { ($0.id, $0.frame) }
-            + browsers.browsers(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) } + fileTrees.trees(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) }
+            + browsers.browsers(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) } + localSimulators.map { ($0.id, $0.frame) }
+            + fileTrees.trees(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) }
     }
 
     /// The lines of this worktree, between any of its cards.
     private var worktreeConnections: [Connection] {
-        store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree, on: store.host?.id).map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)))
+        store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree, on: store.host?.id).map(\.id))
+            .union(localSimulators.map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)))
     }
 
     /// Ties each line of this worktree to its cards' handles, and the one being drawn to the
@@ -1215,13 +1241,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// The topmost agent card under a world point, unless a browser or post-it covers it.
     private func card(at point: CGPoint) -> AgentRecord? {
-        guard browser(at: point) == nil, postIt(at: point) == nil, image(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, simulator(at: point) == nil, postIt(at: point) == nil, image(at: point) == nil, fileTree(at: point) == nil else { return nil }
         return store.agents(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost browser card under a world point.
     private func browser(at point: CGPoint) -> BrowserRecord? {
-        guard fileTree(at: point) == nil else { return nil }
+        guard fileTree(at: point) == nil, simulator(at: point) == nil else { return nil }
         return browsers.browsers(in: worktree, on: store.host?.id).last { $0.frame.contains(point) }
     }
 
@@ -1232,23 +1258,23 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// The topmost post-it under a world point, unless a browser card covers it.
     fileprivate func postIt(at point: CGPoint) -> PostItRecord? {
-        guard browser(at: point) == nil, fileTree(at: point) == nil, image(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, simulator(at: point) == nil, fileTree(at: point) == nil, image(at: point) == nil else { return nil }
         return store.postIts(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost image under a world point; images sit above post-its, below browsers.
     fileprivate func image(at point: CGPoint) -> ImageRecord? {
-        guard browser(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, simulator(at: point) == nil, fileTree(at: point) == nil else { return nil }
         return store.images(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost card of any kind under a world point.
     private func item(at point: CGPoint) -> UUID? {
-        fileTree(at: point)?.id ?? browser(at: point)?.id ?? image(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
+        fileTree(at: point)?.id ?? simulator(at: point)?.id ?? browser(at: point)?.id ?? image(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
     }
 
     private func frame(of id: UUID) -> CGRect? {
-        record(id)?.frame ?? store.postIt(id)?.frame ?? store.image(id)?.frame ?? browsers.record(id)?.frame ?? fileTrees.record(id)?.frame
+        record(id)?.frame ?? store.postIt(id)?.frame ?? store.image(id)?.frame ?? browsers.record(id)?.frame ?? simulators.record(id)?.frame ?? fileTrees.record(id)?.frame
     }
 
     private func record(_ id: UUID) -> AgentRecord? {
@@ -1358,6 +1384,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             syncLayers()
             return
         }
+        if let simulator = simulator(at: location) {
+            endAddressEditing()
+            endPostItEditing()
+            simulatorMouseDown(simulator, at: location, event: event)
+            syncLayers()
+            return
+        }
         if let browser = browser(at: location) {
             endAddressEditing()
             endPostItEditing()
@@ -1443,6 +1476,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             browsers.input(id, ["kind": "move", "x": page.x, "y": page.y])
             return
         }
+        if let id = touchCapture, let record = simulators.record(id) {
+            simulators.touch(id, "move", at: devicePoint(world(point), in: record))
+            return
+        }
         if panDrag != nil { return continuePanDrag(to: point) }
         if var box = marquee {
             box.current = world(point)
@@ -1492,6 +1529,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 frame = ImageResize.frame(resizing: frame, edges: interaction.edges, by: CGSize(width: dx, height: dy), pixelSize: record.pixelSize)
             } else if let record = browsers.record(interaction.id) {
                 frame = Self.browserFrame(resizing: frame, by: CGSize(width: dx, height: dy), device: record.device)
+            } else if simulators.record(interaction.id) != nil {
+                frame = Self.simulatorFrame(resizing: frame, by: CGSize(width: dx, height: dy), screen: simulators.screenSize(of: interaction.id))
             } else {
                 frame.size.width = max(CardMetrics.minimumSize.width, frame.width + dx)
                 frame.size.height = max(CardMetrics.minimumSize.height, frame.height + dy)
@@ -1505,6 +1544,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let id = mouseCapture {
             mouseCapture = nil
             if let record = record(id) { report(.release, at: world(convert(event.locationInWindow, from: nil)), to: record, event: event) }
+            return
+        }
+        if let id = touchCapture {
+            touchCapture = nil
+            if let record = simulators.record(id) {
+                simulators.touch(id, "up", at: devicePoint(world(convert(event.locationInWindow, from: nil)), in: record))
+            }
             return
         }
         if let id = pageCapture {
@@ -1598,6 +1644,12 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             let page = pagePoint(point, in: browser)
             browsers.input(browser.id, ["kind": "move", "x": page.x, "y": page.y])
         }
+        let simulator = simulator(at: point)
+        let simulatorControl = simulator.flatMap { record in Self.control(at: point, in: record, zoom: zoom).map { (card: record.id, control: $0) } }
+        if simulatorControl?.card != hoveredSimulatorControl?.card || simulatorControl?.control != hoveredSimulatorControl?.control {
+            hoveredSimulatorControl = simulatorControl
+            syncLayers()
+        }
         let postIt = postIt(at: point)
         let postItHover = postIt.map { record in
             (card: record.id, control: PostItCardLayout(size: record.frame.size).control(at: local(point, in: record.frame), zoom: zoom))
@@ -1607,7 +1659,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             syncLayers()
         }
         let handle = handle(at: point)
-        let showing = handle?.card ?? tree?.id ?? browser?.id ?? image?.id ?? postIt?.id ?? card?.id
+        let showing = handle?.card ?? tree?.id ?? simulator?.id ?? browser?.id ?? image?.id ?? postIt?.id ?? card?.id
         if control?.0 != hoveredControl?.card || control?.1 != hoveredControl?.control {
             hoveredControl = control.map { (card: $0.0, control: $0.1) }
             syncLayers()
@@ -1658,6 +1710,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             let factor = (event.hasPreciseScrollingDeltas ? 1 : 10) / pageScale(of: record)
             browsers.input(id, ["kind": "wheel", "x": page.x, "y": page.y,
                                 "dx": -event.scrollingDeltaX * factor, "dy": -event.scrollingDeltaY * factor])
+            return
+        }
+        if let id = focusedID, let record = simulators.record(id), simulator(at: location)?.id == id,
+           SimulatorCardLayout(frame: record.frame, record: record).content.contains(location) {
+            // Line-based wheels move in steps; trackpads give points already.
+            let zoom = simulators.zoom(of: record)
+            let factor = (event.hasPreciseScrollingDeltas ? 1 : 10) / max(zoom, 0.01)
+            simulators.scroll(id, at: devicePoint(location, in: record),
+                              by: CGSize(width: event.scrollingDeltaX * factor, height: event.scrollingDeltaY * factor))
             return
         }
         if let postIt = postIt(at: location), scrollPostIt(postIt, by: event) { return }
@@ -1734,6 +1795,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 store.removeImage(id)
             } else if browsers.record(id) != nil {
                 browsers.remove(id)
+            } else if simulators.record(id) != nil {
+                simulators.remove(id)
             } else if fileTrees.record(id) != nil {
                 fileTrees.remove(id)
             }
@@ -1768,6 +1831,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             }
         }
         if let id = focusedBrowser { return browserKeyDown(event, to: id) }
+        if let id = focusedSimulator {
+            interacted()
+            if let usage = SimulatorKeys.usage(forKeyCode: event.keyCode) { simulators.key(id, usage: usage, down: true, characters: event.characters) }
+            return
+        }
         if let id = focusedID, let video = imageCards[id]?.video, video.handleKey(event) { return }
         guard let session = focusedSession else { return super.keyDown(with: event) }
         interacted()
@@ -1789,6 +1857,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         if let id = focusedBrowser, window?.firstResponder === self, browserKeyEquivalent(event, to: id) { return true }
+        if let id = focusedSimulator, window?.firstResponder === self, flags == .command, event.charactersIgnoringModifiers == "v" {
+            // Pasting types the Mac's clipboard into the device's focused field.
+            if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty { simulators.type(id, text) }
+            return true
+        }
         if flags == .command, event.charactersIgnoringModifiers == "v", focusedSession != nil, window?.firstResponder === self {
             paste(nil)
             return true
@@ -1939,6 +2012,7 @@ extension BoardView {
         cards += browsers.browsers(in: worktree, on: host).map {
             ($0.id, Card(kind: .browser, name: $0.name, frame: $0.frame, device: $0.device.stored, url: $0.url, profile: $0.profile))
         }
+        cards += localSimulators.map { ($0.id, Card(kind: .simulator, name: $0.name, frame: $0.frame, device: $0.deviceType)) }
         cards += fileTrees.trees(in: worktree, on: host).map { ($0.id, Card(kind: .fileTree, name: $0.name, frame: $0.frame)) }
         return CanvasTemplate(cards: cards.map(\.1), lines: CanvasTemplate.lines(worktreeConnections, among: cards.map(\.0)))
     }
@@ -1968,6 +2042,12 @@ extension BoardView {
                 // A profile deleted since falls back to the default one.
                 return browsers.add(device, to: worktree, on: host, at: card.frame.origin, named: card.name, url: card.url ?? "",
                                     profile: browsers.profile(card.profile ?? BrowserProfile.defaultID).id, frame: card.frame).id
+            case .simulator:
+                let android = AndroidEmulators.deviceTypes.contains { $0.name == card.device }
+                // A host's board has only Android emulators: an iOS card is left out.
+                guard host == nil || android else { return UUID() }
+                return simulators.add(android ? .android : .ios, deviceType: card.device, to: worktree, on: host, at: card.frame.origin,
+                                      named: card.name, frame: card.frame).id
             case .fileTree:
                 let record = fileTrees.add(to: worktree, on: host, at: card.frame.origin)
                 fileTrees.setFrame(card.frame, for: record.id, persist: true)
@@ -2057,6 +2137,170 @@ extension BoardView {
     }
 }
 
+// MARK: Simulators
+
+extension BoardView {
+    /// The board's simulator cards: on a host's, its Android emulators.
+    fileprivate var localSimulators: [SimulatorRecord] {
+        simulators.simulators(in: worktree, on: store.host?.id)
+    }
+
+    fileprivate var focusedSimulator: UUID? {
+        focusedID.flatMap { simulators.record($0)?.id }
+    }
+
+    /// The topmost simulator card under a world point; they sit above browsers.
+    fileprivate func simulator(at point: CGPoint) -> SimulatorRecord? {
+        guard fileTree(at: point) == nil else { return nil }
+        return localSimulators.last { $0.frame.contains(point) }
+    }
+
+    /// A world point as a point on the card's device screen.
+    fileprivate func devicePoint(_ point: CGPoint, in record: SimulatorRecord) -> CGPoint {
+        SimulatorStore.devicePoint(point, content: CardMetrics.content(of: record.frame), screen: simulators.screenSize(of: record.id))
+    }
+
+    /// Resizing keeps the screen's proportions: the card always shows the whole screen.
+    fileprivate static func simulatorFrame(resizing frame: CGRect, by delta: CGSize, screen: CGSize) -> CGRect {
+        let chrome = CGSize(width: CardMetrics.inset * 2, height: CardMetrics.titleHeight + CardMetrics.inset)
+        let ratio = screen.height / max(1, screen.width)
+        let width = max(160, frame.width - chrome.width + max(delta.width, delta.height / ratio))
+        return CGRect(x: frame.minX, y: frame.minY, width: width + chrome.width, height: (width * ratio).rounded() + chrome.height)
+    }
+
+    fileprivate static func control(at point: CGPoint, in record: SimulatorRecord, zoom: CGFloat) -> SimulatorCardLayer.Control? {
+        let layout = SimulatorCardLayout(frame: record.frame, record: record)
+        if layout.device.contains(point) { return .device }
+        if layout.home.contains(point) { return .home }
+        if layout.close.target(zoom: zoom).contains(point) { return .close }
+        return nil
+    }
+
+    /// Simulator cards sit above the browsers, in their own stacking order.
+    fileprivate func syncSimulators(onScreen: Bool, scale: CGFloat) {
+        let records = localSimulators
+        let ids = Set(records.map(\.id))
+        for (id, card) in simulatorCards where !ids.contains(id) {
+            card.removeFromSuperlayer()
+            simulatorCards[id] = nil
+            simulators.hide(id)
+        }
+        let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count + store.images(in: worktree).count
+            + browsers.browsers(in: worktree, on: store.host?.id).count)
+        for (index, record) in records.enumerated() {
+            if onScreen { simulators.show(record.id) }
+            let card = simulatorCards[record.id] ?? {
+                let card = SimulatorCardLayer()
+                simulatorCards[record.id] = card
+                cardsLayer.addSublayer(card)
+                if appearing.remove(record.id) != nil { card.animateAppearance() }
+                return card
+            }()
+            card.zPosition = below + CGFloat(index)
+            card.update(frame: record.frame, record: record, screen: simulators.screens[record.id], status: simulators.status(of: record.id),
+                        focused: highlighted(record.id),
+                        hovered: hoveredSimulatorControl?.card == record.id ? hoveredSimulatorControl?.control : nil, scale: scale)
+            let showsHandles = linkDrag != nil || record.id == hoveredCard
+            let lit: Int? = if let linkDrag {
+                linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
+            } else {
+                record.id == hoveredCard ? hoveredHandle : nil
+            }
+            card.updateHandles(visible: showsHandles, hovered: lit, linkTarget: linkDrag?.target == record.id)
+        }
+    }
+
+    fileprivate func simulatorMouseDown(_ record: SimulatorRecord, at location: CGPoint, event: NSEvent) {
+        let frame = record.frame
+        let layout = SimulatorCardLayout(frame: frame, record: record)
+        focusedID = record.id
+        simulators.raise(record.id)
+        let handle = CardMetrics.resizeHandle / zoom
+        switch Self.control(at: location, in: record, zoom: zoom) {
+        case .close:
+            simulators.remove(record.id)
+            focusedID = nil
+            hoveredSimulatorControl = nil
+        case .device: showSimulatorMenu(for: record, below: layout.device)
+        case .home: simulators.button(record.id, "home")
+        case nil:
+            if location.x > frame.maxX - handle && location.y > frame.maxY - handle {
+                interaction = Interaction(id: record.id, kind: .resize, start: convert(event.locationInWindow, from: nil), frame: frame)
+            } else if location.y < frame.minY + CardMetrics.titleHeight || !layout.content.contains(location) {
+                interaction = Interaction(id: record.id, kind: .move, start: convert(event.locationInWindow, from: nil), frame: frame)
+            } else {
+                switch simulators.screens[record.id]?.phase {
+                case .failed, .noXcode, .lowMemory, .unreachable: simulators.reopen(record.id)
+                case .noRuntime: simulators.downloadRuntime()
+                case .noSDK: simulators.installAndroidSDK(for: record.id)
+                case .noAcceleration: break
+                default:
+                    simulators.touch(record.id, "down", at: devicePoint(location, in: record))
+                    touchCapture = record.id
+                }
+            }
+        }
+    }
+
+    /// The device types the installed runtime supports, the card's checked.
+    fileprivate func showSimulatorMenu(for record: SimulatorRecord, below chip: CGRect) {
+        Task { @MainActor in
+            let offered = await simulators.deviceTypes(for: record)
+            let menu = NSMenu()
+            let types = offered.isEmpty ? [record.deviceType] : offered
+            for type in types {
+                let item = NSMenuItem(title: type, action: #selector(chooseSimulatorDevice(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = SimulatorDeviceChoice(card: record.id, deviceType: type)
+                item.state = type == record.deviceType ? .on : .off
+                menu.addItem(item)
+            }
+            guard let current = simulators.record(record.id) else { return }
+            let anchor = screen(SimulatorCardLayout(frame: current.frame, record: current).device)
+            menu.popUp(positioning: nil, at: CGPoint(x: anchor.minX, y: anchor.maxY + 4), in: self)
+        }
+    }
+
+    @objc fileprivate func chooseSimulatorDevice(_ item: NSMenuItem) {
+        guard let choice = item.representedObject as? SimulatorDeviceChoice else { return }
+        simulators.setDeviceType(choice.deviceType, for: choice.card)
+        syncLayers()
+    }
+
+    override func keyUp(with event: NSEvent) {
+        guard let id = focusedSimulator, let usage = SimulatorKeys.usage(forKeyCode: event.keyCode) else { return super.keyUp(with: event) }
+        simulators.key(id, usage: usage, down: false)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        guard let id = focusedSimulator, let usage = SimulatorKeys.modifiers[event.keyCode] else { return super.flagsChanged(with: event) }
+        let flag: NSEvent.ModifierFlags = switch usage {
+        case 0xe1, 0xe5: .shift
+        case 0xe0, 0xe4: .control
+        case 0xe2, 0xe6: .option
+        case 0x39: .capsLock
+        default: .command
+        }
+        if usage == 0x39 {
+            simulators.key(id, usage: usage, down: true)
+            simulators.key(id, usage: usage, down: false)
+        } else {
+            simulators.key(id, usage: usage, down: event.modifierFlags.contains(flag))
+        }
+    }
+}
+
+/// A device type picked from a simulator card's menu.
+private final class SimulatorDeviceChoice: NSObject {
+    let card: UUID
+    let deviceType: String
+
+    init(card: UUID, deviceType: String) {
+        self.card = card
+        self.deviceType = deviceType
+    }
+}
+
 // MARK: Browsers
 
 extension BoardView {
@@ -2071,6 +2315,8 @@ extension BoardView {
             fileTrees.setFrame(frame, for: id, persist: persist)
         } else if browsers.record(id) != nil {
             browsers.setFrame(frame, for: id, persist: persist)
+        } else if simulators.record(id) != nil {
+            simulators.setFrame(frame, for: id, persist: persist)
         } else if store.postIt(id) != nil {
             store.setPostItFrame(frame, for: id, persist: persist)
         } else {
@@ -3036,7 +3282,7 @@ extension BoardView {
             fileTreeViews[id] = nil
         }
         let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count + store.images(in: worktree).count
-            + browsers.browsers(in: worktree, on: store.host?.id).count)
+            + browsers.browsers(in: worktree, on: store.host?.id).count + localSimulators.count)
         for (index, record) in records.enumerated() {
             let card = fileTreeCards[record.id] ?? {
                 let card = FileTreeCardLayer()
@@ -3232,6 +3478,12 @@ extension BoardView {
             elements.append(button(L("Forward"), layout.forward) { [weak self] in self?.browsers.go("forward", on: id) })
             elements.append(button(L("Reload"), layout.reload) { [weak self] in self?.browsers.go("reload", on: id) })
             elements.append(button(L("Close \(record.name)"), layout.close) { [weak self] in self?.browsers.remove(id) })
+        }
+        for record in localSimulators {
+            let id = record.id
+            let layout = SimulatorCardLayout(frame: record.frame, record: record)
+            elements.append(button(L("Home"), layout.home) { [weak self] in self?.simulators.button(id, "home") })
+            elements.append(button(L("Close \(record.name)"), layout.close) { [weak self] in self?.simulators.remove(id) })
         }
         return elements
     }

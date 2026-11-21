@@ -898,12 +898,28 @@ fn browser_calls_go_to_the_board() {
     board.send(BoardRequest::ToolResult { call: id, result: WireToolResult::new(&ToolResult::text("clicked for Ada")) });
     assert_eq!(answered.join().unwrap(), ("clicked for Ada".to_string(), false));
 
+    // Simulators live in the board too.
+    let tapped = call("simulator_tap", json!({"target": "e3"}));
+    board.wait("the simulator call", |events| relayed(events, "simulator_tap").is_some());
+    let (id, arguments, _) = relayed(&board.events, "simulator_tap").unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&arguments).unwrap(), json!({"target": "e3"}));
+    board.send(BoardRequest::ToolResult { call: id, result: WireToolResult::new(&ToolResult::text("tapped")) });
+    assert_eq!(tapped.join().unwrap(), ("tapped".to_string(), false));
+    // The platform reaches the board as the agent gave it; whether it may run there is the board's call.
+    let opened = call("simulator_open", json!({"platform": "android", "device": "tablet"}));
+    board.wait("the open call", |events| relayed(events, "simulator_open").is_some());
+    let (id, arguments, _) = relayed(&board.events, "simulator_open").unwrap();
+    assert_eq!(serde_json::from_slice::<Value>(&arguments).unwrap(), json!({"platform": "android", "device": "tablet"}));
+    board.send(BoardRequest::ToolResult { call: id, result: WireToolResult::new(&ToolResult::text("opened")) });
+    assert_eq!(opened.join().unwrap(), ("opened".to_string(), false));
+
     let unanswered = call("worktree_set_title", json!({"title": "Hosts"}));
     board.wait("the second call", |events| relayed(events, "worktree_set_title").is_some());
     board.disconnect();
     assert_eq!(unanswered.join().unwrap(), ("The board closed before the browser answered. Try again once it is open.".to_string(), true));
 
     assert_eq!(core.call("browser_list", json!({}), a.id), ("Browsers run in the board, which isn't open right now. Ask the user to open it, then try again.".to_string(), true));
+    assert_eq!(core.call("simulator_list", json!({}), a.id), ("Simulators run in the board, which isn't open right now. Ask the user to open it, then try again.".to_string(), true));
     for tool in ["project_list", "host_list", "worktree_create", "worktree_remove"] {
         assert_eq!(core.call(tool, json!({"branch": "x"}), a.id), ("Projects live in the board, which isn't open right now. Ask the user to open it, then try again.".to_string(), true));
     }
@@ -921,18 +937,22 @@ fn the_tools_are_listed_with_their_instructions() {
     let rpc = |method: &str| serde_json::from_slice::<Value>(&core.post("", a.id, &json!({"jsonrpc": "2.0", "id": 1, "method": method}))).unwrap()["result"].clone();
     let instructions = rpc("initialize")["instructions"].as_str().unwrap().to_string();
     let parts: Vec<&str> = instructions.split("\n\n").collect();
-    assert_eq!(parts.len(), 6, "{instructions}");
-    for (part, start) in parts.iter().zip(["You are “Ada”, one of several coding agents", "Runners are terminal cards", "Post-its are markdown notes", "Images are pictures", "Videos are clips on the user's board (MP4, MOV or M4V)", "Browser cards connected to you"]) {
+    assert_eq!(parts.len(), 7, "{instructions}");
+    for (part, start) in parts.iter().zip(["You are “Ada”, one of several coding agents", "Runners are terminal cards", "Post-its are markdown notes", "Images are pictures", "Videos are clips on the user's board (MP4, MOV or M4V)", "Browser cards connected to you", "Simulator cards connected to you"]) {
         assert!(part.starts_with(start) && !part.contains("  "), "{part}");
     }
     assert!(parts[4].contains("video_read gives its size, length and 4 frames sampled evenly through it."));
+    assert!(parts[6].contains("an iOS Simulator (on this Mac) or an Android emulator") && parts[6].contains("adb -s"), "{}", parts[6]);
     let tools = rpc("tools/list")["tools"].clone();
     let names: Vec<&str> = tools.as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap()).collect();
     let expected = "list_peers send_message runner_start runner_list runner_logs runner_stop runner_restart runner_input runner_close postit_create postit_read postit_write postit_edit \
                     image_create image_read image_replace image_remove video_create video_read video_replace video_remove browser_open browser_list browser_navigate browser_snapshot \
-                    browser_screenshot browser_click browser_type browser_press browser_scroll browser_evaluate browser_console browser_wait project_list project_create \
+                    browser_screenshot browser_click browser_type browser_press browser_scroll browser_evaluate browser_console browser_wait simulator_open simulator_list \
+                    simulator_snapshot simulator_screenshot simulator_tap simulator_swipe simulator_type simulator_press simulator_wait simulator_close project_list project_create \
                     worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove browser_close";
     assert_eq!(names, expected.split_whitespace().collect::<Vec<_>>());
+    let open = tools.as_array().unwrap().iter().find(|tool| tool["name"] == "simulator_open").unwrap();
+    assert_eq!(open["inputSchema"]["properties"]["platform"]["enum"], json!(["ios", "android"]));
     let start = &tools[2]["inputSchema"];
     assert_eq!(start["required"], json!(["command"]));
     assert_eq!(start["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["command", "directory", "name", "timeout", "wait"]);

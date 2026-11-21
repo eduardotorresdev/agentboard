@@ -111,6 +111,7 @@ public final class Orchestrator: CoreService {
             Task { @MainActor in self?.sessionNotified(caller, [notification]) }
         }
         catalog.add(BrowserRelay(store: self))
+        catalog.add(SimulatorRelay(store: self))
         catalog.add(ProjectRelay(store: self))
         catalog.add(WorktreeTools(store: self))
         catalog.add(CardTools(store: self))
@@ -379,7 +380,9 @@ public final class Orchestrator: CoreService {
     /// Runs a tool only a board can (a browser's) on a connected one.
     func relay(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
         guard let board = boards.first else {
-            return .error(name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_") ? "Projects live in the board, which isn't open right now. Ask the user to open it, then try again." : "Browsers run in the board, which isn't open right now. Ask the user to open it, then try again.")
+            let place = name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_") ? "Projects live"
+                : name.hasPrefix("simulator_") ? "Simulators run" : "Browsers run"
+            return .error("\(place) in the board, which isn't open right now. Ask the user to open it, then try again.")
         }
         let data = (try? JSONSerialization.data(withJSONObject: arguments)) ?? Data("{}".utf8)
         let call = UUID()

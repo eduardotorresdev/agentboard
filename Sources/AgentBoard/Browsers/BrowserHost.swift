@@ -127,7 +127,7 @@ final class BrowserHost {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = stderr
-        let lines = LineBuffer()
+        let lines = SidecarLines()
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
@@ -296,13 +296,13 @@ final class BrowserHost {
     }
 }
 
-/// JSON from the sidecar, handed from the reading thread to the main actor.
-private struct UncheckedMessage: @unchecked Sendable {
+/// JSON from a sidecar, handed from the reading thread to the main actor.
+struct UncheckedMessage: @unchecked Sendable {
     let value: [String: Any]
 }
 
-/// Splits the sidecar's output into lines; only its pipe's reading thread touches it.
-private final class LineBuffer: @unchecked Sendable {
+/// Splits a sidecar's output into lines; only its pipe's reading thread touches it.
+final class SidecarLines: @unchecked Sendable {
     private var pending = Data()
 
     func append(_ chunk: Data) -> [Data] {

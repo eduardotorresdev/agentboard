@@ -7,7 +7,7 @@ import Foundation
 /// to the cards that hold them.
 struct CanvasTemplate: Identifiable, Codable, Equatable {
     struct Card: Codable, Equatable {
-        enum Kind: String, Codable { case agent, runner, postIt, browser, fileTree }
+        enum Kind: String, Codable { case agent, runner, postIt, browser, simulator, fileTree }
 
         var kind: Kind
         var name: String
@@ -21,6 +21,7 @@ struct CanvasTemplate: Identifiable, Codable, Equatable {
         /// Post-its: what is written on them.
         var text: String?
         /// Browsers: the screen they emulate (`BrowserDevice.stored`), their page and profile.
+        /// Simulators: their device type.
         var device: String?
         var url: String?
         var profile: UUID?
@@ -67,6 +68,7 @@ struct CanvasTemplate: Identifiable, Codable, Equatable {
             ("play.circle", count(.runner), L("1 runner"), L("\(count(.runner)) runners")),
             ("note.text", count(.postIt), L("1 post-it"), L("\(count(.postIt)) post-its")),
             ("globe", count(.browser), L("1 browser"), L("\(count(.browser)) browsers")),
+            ("iphone", count(.simulator), L("1 simulator"), L("\(count(.simulator)) simulators")),
             ("folder", count(.fileTree), L("1 file tree"), L("\(count(.fileTree)) file trees")),
         ]
         return parts.filter { $0.1 > 0 }.map { ($0.0, $0.1, $0.1 == 1 ? $0.2 : $0.3) }

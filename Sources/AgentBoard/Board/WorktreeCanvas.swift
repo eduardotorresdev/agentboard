@@ -6,6 +6,7 @@ import SwiftUI
 struct WorktreeCanvas: View {
     let agents: AgentStore
     let browsers: BrowserStore
+    let simulators: SimulatorStore
     let fileTrees: FileTreeStore
     let worktree: Worktree
     let board: BoardController
@@ -20,7 +21,7 @@ struct WorktreeCanvas: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             SkyCanvas()
-            Board(store: agents, browsers: browsers, fileTrees: fileTrees, worktree: worktree.path, controller: board)
+            Board(store: agents, browsers: browsers, simulators: simulators, fileTrees: fileTrees, worktree: worktree.path, controller: board)
             if let notice {
                 EmptyCanvas(symbol: "exclamationmark.triangle", title: L("Your agents can't be shown"), message: notice) { EmptyView() }
                     .padding(.leading, board.leadingInset)
@@ -48,8 +49,8 @@ struct WorktreeCanvas: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 ViewThatFits(in: .horizontal) {
-                    CanvasToolbar(board: board, hasFiles: title == nil)
-                    ScrollView(.horizontal, showsIndicators: false) { CanvasToolbar(board: board, hasFiles: title == nil) }
+                    CanvasToolbar(board: board, hasFiles: title == nil, onHost: worktree.host != nil)
+                    ScrollView(.horizontal, showsIndicators: false) { CanvasToolbar(board: board, hasFiles: title == nil, onHost: worktree.host != nil) }
                 }
                 .layoutPriority(1)
                 VStack(alignment: .trailing, spacing: 8) {
@@ -128,6 +129,7 @@ struct WorktreeCanvas: View {
         agents.isLoaded && agents.agents(in: worktree.path).isEmpty && agents.postIts(in: worktree.path).isEmpty
             && agents.images(in: worktree.path).isEmpty
             && browsers.browsers(in: worktree.path, on: worktree.host).isEmpty
+            && simulators.simulators(in: worktree.path, on: worktree.host).isEmpty
             && fileTrees.trees(in: worktree.path, on: worktree.host).isEmpty
     }
 }
@@ -136,6 +138,8 @@ struct WorktreeCanvas: View {
 private struct CanvasToolbar: View {
     let board: BoardController
     var hasFiles = true
+    /// On a host's worktree: iOS Simulators run on this Mac only, so only Android is offered.
+    var onHost = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -147,6 +151,10 @@ private struct CanvasToolbar: View {
                 .buttonStyle(ToolbarButtonStyle(icon: true))
                 .fixedSize()
                 .accessibilityLabel(L("Add browser"))
+            addSimulator
+                .buttonStyle(ToolbarButtonStyle(icon: true))
+                .fixedSize()
+                .accessibilityLabel(L("Add simulator"))
             // A command kept running on the board: a dev server, a watcher, a worker.
             addRunner
                 .buttonStyle(ToolbarButtonStyle(icon: true))
@@ -174,6 +182,28 @@ private struct CanvasToolbar: View {
         .font(.system(size: 18, weight: .medium))
         .padding(5)
         .modifier(GlassCapsule())
+    }
+
+    /// An iOS Simulator or an Android emulator; a host's worktree only runs Android.
+    @ViewBuilder private var addSimulator: some View {
+        let android = L("An Android emulator on the worktree's machine, which you and the connected agents can use.")
+        if onHost {
+            Button { board.addSimulator(.android) } label: { Image(systemName: "iphone") }
+                .help(android)
+        } else {
+            Menu {
+                Button { board.addSimulator(.ios) } label: {
+                    Text(L("iOS Simulator"))
+                    Text(L("An iOS Simulator device you and the connected agents can use."))
+                }
+                Button { board.addSimulator(.android) } label: {
+                    Text(L("Android emulator"))
+                    Text(android)
+                }
+            } label: { Image(systemName: "iphone") }
+                .menuIndicator(.hidden)
+                .help(L("Add a phone or tablet: an iOS Simulator or an Android emulator."))
+        }
     }
 
     /// A browser emulates one screen; the menu says what each gives.

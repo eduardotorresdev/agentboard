@@ -591,3 +591,31 @@
 "Couldn't attach %@." = "Não foi possível anexar %@.";
 "the picture" = "a imagem";
 "Sending to %@… %lld%%" = "Enviando para %@… %lld%%";
+
+/* Simulator cards */
+"Add simulator" = "Adicionar simulador";
+"An iOS Simulator device you and the connected agents can use." = "Um dispositivo do iOS Simulator que você e os agentes conectados podem usar.";
+"Simulator" = "Simulador";
+"1 simulator" = "1 simulador";
+"%lld simulators" = "%lld simuladores";
+"Starting the simulator…" = "Iniciando o simulador…";
+"Install Xcode from the App Store to run simulators." = "Instale o Xcode pela App Store para rodar simuladores.";
+"No iOS runtime is installed. Click to download it (about 8 GB)." = "Nenhum runtime do iOS está instalado. Clique para baixá-lo (cerca de 8 GB).";
+"Downloading iOS…" = "Baixando o iOS…";
+"Downloading iOS… %@" = "Baixando o iOS… %@";
+"The iOS download failed (status %lld). Click to try again." = "O download do iOS falhou (status %lld). Clique para tentar de novo.";
+"The simulator helper is missing from the app." = "O auxiliar do simulador não está no app.";
+"The simulator helper stopped (status %lld). Click to start it again." = "O auxiliar do simulador parou (status %lld). Clique para iniciá-lo de novo.";
+"iOS Simulator" = "iOS Simulator";
+"Android emulator" = "Emulador Android";
+"An Android emulator on the worktree's machine, which you and the connected agents can use." = "Um emulador Android na máquina da worktree, que você e os agentes conectados podem usar.";
+"Add a phone or tablet: an iOS Simulator or an Android emulator." = "Adicione um celular ou tablet: um iOS Simulator ou um emulador Android.";
+"Starting the emulator…" = "Iniciando o emulador…";
+"The Android SDK isn't on this machine. Click to install it (about 4 GB)." = "O SDK do Android não está nesta máquina. Clique para instalá-lo (cerca de 4 GB).";
+"The emulator needs access to /dev/kvm on this machine: add your user to the kvm group, then reopen the card." = "O emulador precisa de acesso a /dev/kvm nesta máquina: adicione seu usuário ao grupo kvm e reabra o card.";
+"This machine can't run the emulator: it has no hardware virtualization (/dev/kvm)." = "Esta máquina não consegue rodar o emulador: ela não tem virtualização por hardware (/dev/kvm).";
+"Not enough free memory on this machine to start the emulator. Click to try again." = "Não há memória livre suficiente nesta máquina para iniciar o emulador. Clique para tentar de novo.";
+"The host can't be reached. Click to try again." = "Não foi possível alcançar o host. Clique para tentar de novo.";
+"Installing the Android SDK…" = "Instalando o SDK do Android…";
+"Installing the Android SDK failed: %@. Click to try again." = "A instalação do SDK do Android falhou: %@. Clique para tentar de novo.";
+"Home" = "Início";

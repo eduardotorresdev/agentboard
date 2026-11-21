@@ -219,7 +219,7 @@ private struct TemplateThumbnail: View {
                 case .agent: Theme.accent
                 case .runner: Theme.deep
                 case .postIt: Theme.color(Theme.Hex.blueLight)
-                case .browser, .fileTree: Theme.inkMuted
+                case .browser, .simulator, .fileTree: Theme.inkMuted
                 }
                 context.fill(Path(roundedRect: frame, cornerRadius: 2), with: .color(color))
             }

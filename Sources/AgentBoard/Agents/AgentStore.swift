@@ -81,6 +81,8 @@ final class AgentStore {
     @ObservationIgnored private var replacedCore = false
     /// Runs the browser tools agents call through the core.
     @ObservationIgnored var browserTools: BrowserTools?
+    /// Runs the simulator tools agents call through the core.
+    @ObservationIgnored var simulatorTools: SimulatorTools?
     @ObservationIgnored var projectTools: ProjectTools?
     /// Where the board's other elements come from (browsers, file trees), by family; the core
     /// keeps lines to them.
@@ -351,6 +353,7 @@ final class AgentStore {
             Task {
                 let result: ToolResult? = name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_")
                     ? await projectTools?.call(name, arguments: parsed, caller: caller)
+                    : name.hasPrefix("simulator_") ? await simulatorTools?.call(name, arguments: parsed, caller: caller)
                     : await browserTools?.call(name, arguments: parsed, caller: caller)
                 link.send(.toolResult(call: call, result: WireToolResult(result
                     ?? .error("This board can't run “\(name)”."))))

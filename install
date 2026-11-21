@@ -26,7 +26,7 @@ trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/AgentBoard.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Assets/AppIcon.icns "$APP/Contents/Resources/"
-cp "$BIN/AgentBoard" "$BIN/AgentBoardCore" "$BIN/libBrowserInjection.dylib" "$APP/Contents/MacOS/"
+cp "$BIN/AgentBoard" "$BIN/AgentBoardCore" "$BIN/libBrowserInjection.dylib" "$BIN/simulator-host" "$APP/Contents/MacOS/"
 # Where SwiftPM's resource accessors look: the bundle's root.
 cp -R "$BIN"/AgentBoard_*.bundle "$APP/"
 VERSION=$(date +%Y.%m.%d)

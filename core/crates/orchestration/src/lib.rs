@@ -33,6 +33,7 @@ mod post_it_tools;
 mod process_inspector;
 mod project_relay;
 mod runner_tools;
+mod simulator_relay;
 mod sandbox;
 mod transcript_context;
 mod video_files;

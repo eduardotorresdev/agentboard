@@ -31,6 +31,7 @@ struct ContentView: View {
     let store: ProjectStore
     let hosts: HostStores
     let browsers: BrowserStore
+    let simulators: SimulatorStore
     let fileTrees: FileTreeStore
     @State private var selection: WorktreeSelection?
     @State private var renaming: Worktree?
@@ -219,7 +220,7 @@ struct ContentView: View {
     @ViewBuilder
     private var detail: some View {
         if let selection, let agents = hosts[selection.worktree.host] {
-            WorktreeCanvas(agents: agents, browsers: browsers, fileTrees: fileTrees, worktree: selection.worktree, board: boardController,
+            WorktreeCanvas(agents: agents, browsers: browsers, simulators: simulators, fileTrees: fileTrees, worktree: selection.worktree, board: boardController,
                            title: selection.projectID == nil ? store.displayName(of: selection.worktree) : nil,
                            database: store.database,
                            // The user's own board keeps its templates under its own folder.

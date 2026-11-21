@@ -27,6 +27,7 @@ struct BoardMention: Hashable {
         case "image": L("Image")
         case "video": L("Video")
         case "browser": L("Browser")
+        case "simulator": L("Simulator")
         case "filetree": L("File tree")
         default: type.capitalized
         }

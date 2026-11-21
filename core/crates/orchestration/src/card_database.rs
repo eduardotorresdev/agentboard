@@ -291,12 +291,12 @@ impl CardDatabase {
         self.db.execute_batch("DROP TABLE notes")
     }
 
-    /// Ids of the elements the board stored (browsers, file trees), so lines to them survive
+    /// Ids of the elements the board stored (browsers, simulators, file trees), so lines to them survive
     /// loading before any board has said which elements it has.
     /// Fails when a table that exists can't be read; one the app hasn't created yet is empty.
     pub fn browser_ids(&self) -> Result<HashSet<Uuid>> {
         let mut result = HashSet::new();
-        for table in ["browsers", "file_trees"] {
+        for table in ["browsers", "simulators", "file_trees"] {
             if !self.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")?.exists([table])? {
                 continue;
             }

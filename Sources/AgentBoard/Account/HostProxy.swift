@@ -418,7 +418,12 @@ extension HostProxy {
     /// The proxy the app's browser cards use: each connection to a host's loopback is a channel
     /// of its own to that host of `account`, carrying `tcp:<port>`.
     @MainActor convenience init(account: AccountStore) {
-        self.init { [weak account] host, port in
+        self.init(open: Self.opener(account: account))
+    }
+
+    /// Opens a channel to a port on a host of `account`. Never call it on the main thread.
+    @MainActor static func opener(account: AccountStore) -> Open {
+        { [weak account] host, port in
             // Read at each connection: the token and the host's key and presence change.
             let target = DispatchQueue.main.sync { MainActor.assumeIsolated { account?.channel(to: host) } }
             return target.flatMap {

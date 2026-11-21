@@ -25,7 +25,7 @@ enum DatabaseError: Error {
     case sqlite(String)
 }
 
-/// Thin wrapper over the system SQLite library: projects, worktree names and browsers. The
+/// Thin wrapper over the system SQLite library: projects, worktree names, browsers and simulators. The
 /// cards and the lines between elements are in the same file, kept by the core (`CardDatabase`).
 final class Database {
     private var db: OpaquePointer?
@@ -79,6 +79,16 @@ final class Database {
                 url TEXT NOT NULL,
                 x REAL NOT NULL, y REAL NOT NULL,
                 width REAL NOT NULL, height REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS simulators (
+                id TEXT PRIMARY KEY,
+                worktree TEXT NOT NULL,
+                name TEXT NOT NULL,
+                udid TEXT,
+                device_type TEXT NOT NULL,
+                x REAL NOT NULL, y REAL NOT NULL,
+                width REAL NOT NULL, height REAL NOT NULL,
+                organization TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS browser_profiles (
                 id TEXT PRIMARY KEY,
@@ -138,6 +148,9 @@ final class Database {
         // The host a card's worktree is on (see docs/hosts.md); null is this Mac.
         try addColumn("browsers", "host TEXT")
         try addColumn("file_trees", "host TEXT")
+        // "ios" or "android"; an Android card's host is the machine its emulator runs on.
+        try addColumn("simulators", "platform TEXT NOT NULL DEFAULT 'ios'")
+        try addColumn("simulators", "host TEXT")
     }
 
     /// Adds a column unless it is there. Another process adding it at the same moment (both
@@ -415,6 +428,51 @@ final class Database {
 
     func deleteFileTree(id: UUID) throws {
         let stmt = try prepare("DELETE FROM file_trees WHERE id = ?")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func simulators() throws -> [SimulatorRecord] {
+        let stmt = try prepare("SELECT id, worktree, name, udid, device_type, x, y, width, height, organization, platform, host FROM simulators ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [SimulatorRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let id = UUID(uuidString: String(cString: sqlite3_column_text(stmt, 0))) else { continue }
+            result.append(SimulatorRecord(
+                id: id,
+                worktree: String(cString: sqlite3_column_text(stmt, 1)),
+                name: String(cString: sqlite3_column_text(stmt, 2)),
+                udid: sqlite3_column_text(stmt, 3).map { String(cString: $0) },
+                deviceType: String(cString: sqlite3_column_text(stmt, 4)),
+                frame: CGRect(x: sqlite3_column_double(stmt, 5), y: sqlite3_column_double(stmt, 6),
+                              width: sqlite3_column_double(stmt, 7), height: sqlite3_column_double(stmt, 8)),
+                organization: UUID(uuidString: String(cString: sqlite3_column_text(stmt, 9))) ?? OrganizationHome.defaultID,
+                platform: sqlite3_column_text(stmt, 10).flatMap { SimulatorPlatform(rawValue: String(cString: $0)) } ?? .ios,
+                host: sqlite3_column_text(stmt, 11).flatMap { UUID(uuidString: String(cString: $0)) }))
+        }
+        return result
+    }
+
+    func saveSimulator(_ simulator: SimulatorRecord) throws {
+        let stmt = try prepare("INSERT OR REPLACE INTO simulators (id, worktree, name, udid, device_type, x, y, width, height, organization, platform, host) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, simulator.id.uuidString)
+        bind(stmt, 2, simulator.worktree)
+        bind(stmt, 3, simulator.name)
+        if let udid = simulator.udid { bind(stmt, 4, udid) } else { sqlite3_bind_null(stmt, 4) }
+        bind(stmt, 5, simulator.deviceType)
+        for (index, value) in [simulator.frame.minX, simulator.frame.minY, simulator.frame.width, simulator.frame.height].enumerated() {
+            sqlite3_bind_double(stmt, Int32(index + 6), value)
+        }
+        bind(stmt, 10, simulator.organization.uuidString)
+        bind(stmt, 11, simulator.platform.rawValue)
+        if let host = simulator.host { bind(stmt, 12, host.uuidString) } else { sqlite3_bind_null(stmt, 12) }
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func deleteSimulator(id: UUID) throws {
+        let stmt = try prepare("DELETE FROM simulators WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }

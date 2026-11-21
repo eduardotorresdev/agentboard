@@ -8,6 +8,7 @@ public struct ElementKind: RawRepresentable, Hashable, Sendable {
     public static let agent = ElementKind(rawValue: "agent")
     public static let browser = ElementKind(rawValue: "browser")
     public static let runner = ElementKind(rawValue: "runner")
+    public static let simulator = ElementKind(rawValue: "simulator")
     public static let postIt = ElementKind(rawValue: "postit")
     public static let fileTree = ElementKind(rawValue: "filetree")
     public static let image = ElementKind(rawValue: "image")

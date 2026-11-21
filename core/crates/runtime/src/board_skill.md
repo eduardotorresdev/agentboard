@@ -1,6 +1,6 @@
 ---
 name: board
-description: How to work on the user's board through the board MCP tools - peers, messages, runners, terminals, post-its, images, videos, browsers, agents, worktrees, projects and hosts. Use whenever a task involves anything on the board or beyond your own shell.
+description: How to work on the user's board through the board MCP tools - peers, messages, runners, terminals, post-its, images, videos, browsers, simulators, agents, worktrees, projects and hosts. Use whenever a task involves anything on the board or beyond your own shell.
 ---
 
 # Working on the board
@@ -22,6 +22,11 @@ You are a card on a shared canvas. The user links elements with lines; you only 
 
 ## Browsers
 - `browser_open`, then `browser_snapshot` for element refs, then `browser_click`, `browser_type`, `browser_press`, `browser_scroll`, `browser_wait`. Take a new snapshot after the page changes. `browser_screenshot` checks the visuals, `browser_console` shows errors.
+
+## Simulators
+- Phones and tablets: an iOS Simulator (this Mac only) or an Android emulator (on your worktree's machine, host included). `simulator_open` (`platform`, `device`: phone or tablet), then `simulator_snapshot` for element refs, then `simulator_tap`, `simulator_swipe` (also scrolls), `simulator_type`, `simulator_press` (Android: `back`, `recents`), `simulator_wait`. `simulator_screenshot` checks the visuals.
+- iOS: install, launch, open URLs, permissions, location, push with `xcrun simctl <verb> <udid>`, the UDID from `simulator_list`; build with `xcodebuild -destination id=<udid>`.
+- Android: `adb -s <serial>` with the serial from `simulator_list`: `install app.apk`, `shell am start -n <package>/<activity>`, `logcat`.
 
 ## Agents
 - `agent_start` adds a helper next to you, connected to you; brief it with `send_message`. `agent_close` when it is done.

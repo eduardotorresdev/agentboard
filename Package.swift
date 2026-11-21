@@ -35,6 +35,9 @@ let package = Package(
         .target(name: "Orchestration", dependencies: ["AgentRuntime", "Connections"], resources: [.process("Resources")]),
         // The process that owns the agents' PTYs, cards and tools, so they outlive the board
         // (see CoreServer and Orchestrator).
+        // Runs every simulator card's device: the only code that loads Apple's private simulator
+        // frameworks, so the app links nothing private (see SimulatorHost).
+        .executableTarget(name: "simulator-host", linkerSettings: [.linkedFramework("Cocoa"), .linkedFramework("QuartzCore")]),
         .executableTarget(name: "AgentBoardCore", dependencies: ["AgentRuntime", "Orchestration"]),
         .executableTarget(
             name: "AgentBoard",
@@ -46,6 +49,6 @@ let package = Package(
         .testTarget(name: "ConnectionsTests", dependencies: ["Connections"]),
         .testTarget(name: "OrchestrationTests", dependencies: ["Orchestration", "AgentRuntime", "Connections"]),
         .testTarget(name: "TerminalRendererTests", dependencies: ["TerminalRenderer", "TerminalCore"]),
-        .testTarget(name: "AgentBoardTests", dependencies: ["AgentBoard", "AgentRuntime", "Orchestration"]),
+        .testTarget(name: "AgentBoardTests", dependencies: ["AgentBoard", "AgentRuntime", "Orchestration", "simulator-host"]),
     ]
 )

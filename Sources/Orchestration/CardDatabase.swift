@@ -276,12 +276,12 @@ final class CardDatabase {
         try execute("DROP TABLE notes")
     }
 
-    /// Ids of the elements the board stored (browsers, file trees), so lines to them survive
+    /// Ids of the elements the board stored (browsers, simulators, file trees), so lines to them survive
     /// loading before any board has said which elements it has.
     /// Throws when a table that exists can't be read; one the app hasn't created yet is empty.
     func browserIDs() throws -> Set<UUID> {
         var result = Set<UUID>()
-        for table in ["browsers", "file_trees"] {
+        for table in ["browsers", "simulators", "file_trees"] {
             let exists = try prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '\(table)'")
             let found = sqlite3_step(exists) == SQLITE_ROW
             sqlite3_finalize(exists)

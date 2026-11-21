@@ -13,6 +13,7 @@ impl ElementKind {
     pub fn agent() -> Self { Self("agent".into()) }
     pub fn browser() -> Self { Self("browser".into()) }
     pub fn runner() -> Self { Self("runner".into()) }
+    pub fn simulator() -> Self { Self("simulator".into()) }
     pub fn post_it() -> Self { Self("postit".into()) }
     pub fn file_tree() -> Self { Self("filetree".into()) }
     pub fn image() -> Self { Self("image".into()) }

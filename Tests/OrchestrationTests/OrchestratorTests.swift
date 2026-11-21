@@ -459,16 +459,26 @@ struct OrchestratorTests {
         client.send(.addCard(a))
         try await waitUntil { core.card(named: "Ada") != nil }
         client.onService { data in
-            guard case .toolCall(let call, let name, _, let caller)? = BoardEvent(data) else { return }
-            client.send(.toolResult(call: call, result: WireToolResult(.text("\(name) for \(caller == a.id ? "Ada" : "someone")"))))
+            guard case .toolCall(let call, let name, let arguments, let caller)? = BoardEvent(data) else { return }
+            let platform = (try? JSONSerialization.jsonObject(with: arguments) as? [String: Any])?["platform"] as? String
+            client.send(.toolResult(call: call, result: WireToolResult(.text("\(name) for \(caller == a.id ? "Ada" : "someone")\(platform.map { " on \($0)" } ?? "")"))))
         }
         let answered = try await call("browser_list", as: a.id, on: core)
         #expect(answered.text == "browser_list for Ada")
+        // Simulators live in the board too.
+        let tapped = try await call("simulator_tap", as: a.id, on: core)
+        #expect(tapped.text == "simulator_tap for Ada")
+        // The platform reaches the board as the agent gave it; whether it may run there is the board's call.
+        let opened = try await call("simulator_open", ["platform": "android", "device": "tablet"], as: a.id, on: core)
+        #expect(opened.text == "simulator_open for Ada on android")
         client.disconnect()
         try await Task.sleep(for: .milliseconds(100))
         let alone = try await call("browser_list", as: a.id, on: core)
         #expect(alone.isError)
         #expect(alone.text.contains("board"))
+        let noSimulator = try await call("simulator_list", as: a.id, on: core)
+        #expect(noSimulator.isError)
+        #expect(noSimulator.text == "Simulators run in the board, which isn't open right now. Ask the user to open it, then try again.")
     }
 
     /// Cards and lines are kept on disk by the core, and a new core loads them.

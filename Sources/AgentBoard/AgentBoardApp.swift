@@ -8,6 +8,7 @@ struct AgentBoardApp: App {
     @State private var store: ProjectStore
     @State private var hosts: HostStores
     @State private var browsers: BrowserStore
+    @State private var simulators: SimulatorStore
     @State private var fileTrees: FileTreeStore
 
     init() {
@@ -17,6 +18,9 @@ struct AgentBoardApp: App {
         // A core in this process keeps the cards in the same file as the projects (a bench run's own).
         let agents = AgentStore(database: try? Database.defaultURL())
         browsers.attach(to: agents)
+        let simulators = SimulatorStore(database: store.database)
+        simulators.attach(to: agents)
+        _simulators = State(initialValue: simulators)
         let fileTrees = FileTreeStore(database: store.database)
         fileTrees.attach(to: agents)
         _fileTrees = State(initialValue: fileTrees)
@@ -26,6 +30,7 @@ struct AgentBoardApp: App {
             // Another host's store gets the board's browsers and file trees as this Mac's did above.
             if $0.host != nil {
                 browsers.attach(to: $0)
+                simulators.attach(to: $0)
                 fileTrees.attach(to: $0)
             }
         }
@@ -35,6 +40,7 @@ struct AgentBoardApp: App {
         hosts.githubLogin = { HostSync.githubLogin() }
         let account = hosts.account
         browsers.makeProxy = { HostProxy(account: account) }
+        simulators.openStream = HostProxy.opener(account: account)
         hosts.prepare?(agents)
         store.hosts = hosts
         AppDelegate.agents = agents
@@ -44,7 +50,7 @@ struct AgentBoardApp: App {
 
     var body: some Scene {
         WindowGroup("AgentBoard") {
-            ContentView(store: store, hosts: hosts, browsers: browsers, fileTrees: fileTrees)
+            ContentView(store: store, hosts: hosts, browsers: browsers, simulators: simulators, fileTrees: fileTrees)
                 .preferredColorScheme(.light)
                 .tint(Theme.accent)
         }

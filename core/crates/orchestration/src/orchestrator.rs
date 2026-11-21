@@ -25,7 +25,7 @@ use crate::l10n::l;
 use crate::post_it::PostItRecord;
 use crate::process_inspector::{RunnerStats, Sample};
 use crate::video_files::VideoTools;
-use crate::{browser_relay::BrowserRelay, card_tools::CardTools, image_tools::ImageTools, post_it_tools::PostItTools, project_relay::ProjectRelay, runner_tools::RunnerTools, worktree_tools::WorktreeTools};
+use crate::{browser_relay::BrowserRelay, simulator_relay::SimulatorRelay, card_tools::CardTools, image_tools::ImageTools, post_it_tools::PostItTools, project_relay::ProjectRelay, runner_tools::RunnerTools, worktree_tools::WorktreeTools};
 
 /// The board's cards, the lines between elements and the agents' tools, kept by the core so
 /// they work while no board runs: agents message each other, start runners and read their logs
@@ -955,6 +955,7 @@ impl Turn<'_> {
         catalog.add(ImageTools::IMAGE);
         catalog.add(ImageTools::VIDEO);
         catalog.add(BrowserRelay);
+        catalog.add(SimulatorRelay);
         catalog.add(ProjectRelay);
         catalog.add(WorktreeTools);
         catalog.add(CardTools);
@@ -1118,11 +1119,14 @@ impl Turn<'_> {
     pub(crate) fn relay(&mut self, name: &str, arguments: &Map<String, Value>, caller: Uuid, reply: Reply) {
         let Some(board) = self.boards.first().cloned() else {
             let lives_in_sidebar = ["project_", "worktree_", "host_"].iter().any(|prefix| name.starts_with(prefix));
-            return reply.send(ToolResult::error(if lives_in_sidebar {
-                "Projects live in the board, which isn't open right now. Ask the user to open it, then try again."
+            let place = if lives_in_sidebar {
+                "Projects live"
+            } else if name.starts_with("simulator_") {
+                "Simulators run"
             } else {
-                "Browsers run in the board, which isn't open right now. Ask the user to open it, then try again."
-            }));
+                "Browsers run"
+            };
+            return reply.send(ToolResult::error(format!("{place} in the board, which isn't open right now. Ask the user to open it, then try again.")));
         };
         let call = Uuid::new();
         let arguments = Data(serde_json::to_vec(arguments).unwrap_or_else(|_| b"{}".to_vec()));
