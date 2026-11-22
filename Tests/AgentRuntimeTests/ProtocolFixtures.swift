@@ -7,6 +7,22 @@ import Testing
 struct ProtocolFixtures {
     private static let ids = (1...3).map { UUID(uuidString: "0000000\($0)-ABCD-4EF0-8A1B-00000000000\($0)")! }
 
+    /// The JSON with every `[uuid, value, uuid, value]` array sorted by its keys, for comparing.
+    static func canonical(_ data: Data) -> NSObject? {
+        func sorted(_ value: Any) -> Any {
+            if let object = value as? [String: Any] { return object.mapValues(sorted) }
+            guard let array = value as? [Any] else { return value }
+            let items = array.map(sorted)
+            let keys = stride(from: 0, to: items.count, by: 2).compactMap { items[$0] as? String }
+            guard items.count % 2 == 0, keys.count == items.count / 2, keys.allSatisfy({ UUID(uuidString: $0) != nil }) else { return items }
+            let pairs: [(String, Any)] = keys.indices.map { (keys[$0], items[$0 * 2 + 1]) }
+            var out: [Any] = []
+            for (key, item) in pairs.sorted(by: { $0.0 < $1.0 }) { out.append(key); out.append(item) }
+            return out
+        }
+        return (try? JSONSerialization.jsonObject(with: data)).map(sorted) as? NSObject
+    }
+
     @Test func writesWireSamples() throws {
         let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("core/fixtures/runtime")
@@ -14,7 +30,11 @@ struct ProtocolFixtures {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
         func write(_ value: some Encodable, _ name: String) throws {
-            try encoder.encode(value).write(to: folder.appendingPathComponent(name + ".json"))
+            let url = folder.appendingPathComponent(name + ".json")
+            let data = try encoder.encode(value)
+            // A UUID-keyed dictionary encodes in hash order, which changes every run: keep the file when only that order differs.
+            if let old = try? Data(contentsOf: url), let before: NSObject = Self.canonical(old), before.isEqual(Self.canonical(data)) { return }
+            try data.write(to: url)
         }
         let ids = Self.ids
         let spec = LaunchSpec(executable: "/bin/sh", arguments: ["-c", "echo \"hi\""], environment: ["TERM": "xterm-256color"], directory: "/tmp")
