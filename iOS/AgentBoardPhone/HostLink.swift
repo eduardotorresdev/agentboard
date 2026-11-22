@@ -177,6 +177,32 @@ import UIKit
                                 text: text, organization: organization(in: worktree)), as: "postItAdded")
     }
 
+    #if DEBUG
+    /// A picture card for a phone-test board: a small PNG drawn here, written into the host's
+    /// images folder, then added as the Mac adds a pasted picture.
+    func debugAddImage(to worktree: String) async {
+        if dataFolder == nil, let ran = await run("agentboard", ["data-folder"]), ran.status == 0 {
+            let path = String(decoding: ran.output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            if path.hasPrefix("/") { dataFolder = path }
+        }
+        guard let folder = dataFolder else { return }
+        let size = CGSize(width: 480, height: 320)
+        let png = UIGraphicsImageRenderer(size: size, format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }()).pngData { context in
+            UIColor(Theme.blueLight).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor(Theme.accent).setFill()
+            context.fill(CGRect(x: 40, y: 40, width: 400, height: 240))
+        }
+        let file = "phone-test-\(UUID().uuidString.prefix(8)).png"
+        let write = "printf %s \"$1\" | base64 -d > \"$2\""
+        guard let ran = await run("sh", ["-c", write, "sh", png.base64EncodedString(), folder + "/images/" + file]), ran.status == 0 else { return }
+        let record: [String: Any] = ["id": UUID().uuidString, "worktree": worktree, "name": "Picture", "file": file,
+                                     "frame": BoardSay.rect(CGRect(origin: freeSpot(in: worktree), size: CGSize(width: 480, height: 320 + 32))),
+                                     "pixelSize": [480, 320]]
+        add(BoardSay.json(["addImage": ["_0": record]]), as: "imageAdded")
+    }
+    #endif
+
     /// `base`, or `base 2`, `base 3`…, as `AgentRecord.uniqueName` picks.
     nonisolated static func unique(_ base: String, among names: [String]) -> String {
         let taken = Set(names.map { $0.lowercased() })

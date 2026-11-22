@@ -11,6 +11,9 @@ import SwiftUI
     private var frames = 0
     private var since = CACurrentMediaTime()
     private let log = Logger(subsystem: "dev.agentboard.phone", category: "perf")
+    /// Work done since the last tick, by name (canvas bodies, terminal draws), to find what keeps a still board busy.
+    nonisolated(unsafe) static var counts: [String: Int] = [:]
+    static func count(_ name: String) { counts[name, default: 0] += 1 }
 
     func start() {
         guard link == nil, UserDefaults.standard.bool(forKey: "perf") else { return }
@@ -30,7 +33,9 @@ import SwiftUI
         if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("perf.txt"),
            let handle = (try? FileHandle(forWritingTo: url)) ?? { FileManager.default.createFile(atPath: url.path, contents: nil); return try? FileHandle(forWritingTo: url) }() {
             handle.seekToEndOfFile()
-            handle.write(Data("fps \(fps)\n".utf8))
+            let work = Self.counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+            Self.counts = [:]
+            handle.write(Data("fps \(fps) \(work)\n".utf8))
             try? handle.close()
         }
         frames = 0

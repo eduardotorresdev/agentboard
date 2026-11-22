@@ -106,6 +106,9 @@ final class MetalTerminalView: UIView {
     private func draw() {
         guard let presenter = Self.presenter, let session, window != nil, bounds.width > 0, bounds.height > 0,
               let glyphs = glyphs(), !session.isMidUpdate else { return }
+        #if DEBUG
+        DebugPerf.count("draw")
+        #endif
         let state = layerState ?? TerminalLayer(device: presenter.device)
         layerState = state
         presenter.beginFrame()

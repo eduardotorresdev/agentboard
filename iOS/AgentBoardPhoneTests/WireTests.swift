@@ -91,4 +91,14 @@ final class WireTests: XCTestCase {
         let object = try JSONSerialization.jsonObject(with: BoardSay.removeCard(id)) as? [String: [String: String]]
         XCTAssertEqual(object, ["removeCard": ["_0": id.uuidString]])
     }
+
+    /// The core tells every board but the sender about an add, so the phone shows its own at once.
+    @MainActor func testAddedCardsShowWithoutTheCoresEcho() throws {
+        let link = HostLink(host: Host(id: UUID().uuidString, name: "h", platform: nil, public_key: "", online: true, addresses: nil))
+        link.addAgent(try XCTUnwrap(AgentCatalog.all.first), to: "/w")
+        link.addRunner("npm run dev", to: "/w")
+        link.addPostIt("plan", to: "/w")
+        XCTAssertEqual(link.cards(in: "/w").map { $0.runner == nil }, [true, false])
+        XCTAssertEqual(link.postIts.map(\.text), ["plan"])
+    }
 }

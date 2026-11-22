@@ -39,6 +39,9 @@ struct CanvasView: View {
     enum Adding: Identifiable { case postIt, runner; var id: Self { self } }
 
     var body: some View {
+        #if DEBUG
+        let _ = DebugPerf.count("canvas")
+        #endif
         let cards = link.cards(in: worktree.path)
         let notes = link.postIts.filter { $0.worktree == worktree.path }
         let media = link.media.filter { $0.worktree == worktree.path }
@@ -46,9 +49,9 @@ struct CanvasView: View {
         GeometryReader { geometry in
             let bounds = (cards.map(\.frame) + Array(others.values)).reduce(CGRect.null) { $0.union($1) }
             let board = bounds.isNull ? CGRect(x: 0, y: 0, width: 1, height: 1) : bounds.insetBy(dx: -40, dy: -40)
-            // Starts with the terminal cards in view (the whole board when there are none): a
+            // Starts with the terminal cards and post-its in view (the whole board when there are none): a
             // long column of screenshots shouldn't shrink the agents to specks.
-            let cardBounds = cards.map(\.frame).reduce(CGRect.null) { $0.union($1) }
+            let cardBounds = (cards.map(\.frame) + notes.map(\.frame)).reduce(CGRect.null) { $0.union($1) }
             let focus = cardBounds.isNull ? board : cardBounds.insetBy(dx: -40, dy: -40)
             let fit = min(1, geometry.size.width / focus.width, geometry.size.height / focus.height)
             let scale = zoom == 0 ? fit : zoom
@@ -211,10 +214,15 @@ extension CanvasView {
         let path = worktree.path
         guard (path as NSString).lastPathComponent.hasPrefix("phone-test-") else { return }
         let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: "testAgent") || defaults.bool(forKey: "testRunner") || defaults.bool(forKey: "removeTest") else { return }
+        guard ["testAgent", "testRunner", "testBoard", "removeTest"].contains(where: defaults.bool(forKey:)) else { return }
         while link.phase != .connected { try? await Task.sleep(nanoseconds: 300_000_000) }
+        // Read-only: which phone-test folders the host still has.
+        let left = await link.run("sh", ["-c", "ls -d \"$HOME\"/agentboard/projects/phone-test-* 2>/dev/null; true"])
+        DebugTerm.log("test: folders left: \(String(decoding: left?.output ?? Data(), as: UTF8.self).split(separator: "\n"))")
         if defaults.bool(forKey: "removeTest") {
             for card in link.cards(in: path) { link.send(BoardSay.removeCard(card.id)) }
+            for note in link.postIts where note.worktree == path { link.send(BoardSay.json(["removePostIt": ["_0": note.id.uuidString]])) }
+            for item in link.media where item.worktree == path { link.send(BoardSay.json(["removeImage": ["_0": item.id.uuidString]])) }
             _ = await link.run("rm", ["-rf", path])
             return
         }
@@ -222,6 +230,13 @@ extension CanvasView {
         DebugTerm.log("test: setting up \(path)")
         let ran = await link.run("sh", ["-c", setup, "sh", path])
         DebugTerm.log("test: setup status \(ran?.status ?? -1), agents \(link.cards(in: path).count), provider \(AgentCatalog.all.first?.id ?? "none")")
+        // `-testBoard YES`: an agent, a post-it and a picture, left closed, to compare with the Mac.
+        if defaults.bool(forKey: "testBoard") {
+            if !link.cards(in: path).contains(where: { $0.runner == nil }), let provider = AgentCatalog.all.first { link.addAgent(provider, to: path) }
+            if !link.postIts.contains(where: { $0.worktree == path }) { link.addPostIt("# Plan\n- one\n- two", to: path) }
+            if !link.media.contains(where: { $0.worktree == path }) { await link.debugAddImage(to: path) }
+            return
+        }
         // `-testRunner YES`: a shell runner instead, for typing into a plain prompt.
         let runner = defaults.bool(forKey: "testRunner")
         let wanted = { (card: Card) in (card.runner != nil) == runner }
@@ -309,7 +324,12 @@ struct CardView: View {
     let zoom: CGFloat
     let onDrag: (CGSize, Bool) -> Void
 
-    var body: some View { content }
+    var body: some View {
+        #if DEBUG
+        let _ = DebugPerf.count("card")
+        #endif
+        content
+    }
 
     private var content: some View {
         let waiting = link.attention.contains { $0.id == card.id }
