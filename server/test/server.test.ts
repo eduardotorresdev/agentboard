@@ -758,3 +758,60 @@ it("holds batches of chunks to their limits", async () => {
   await env.DB.prepare("UPDATE vault_chunks SET size = ? WHERE account_id = ? AND id = ?").bind(512 * 1024 * 1024 - 7 * 1_100_000, account, ids[0]).run();
   expect(await refusal(await putChunks(token, framed([[chunkId(99), new Uint8Array(1)]])))).toEqual([413, { error: "vault_full" }, null]);
 });
+
+async function catalogCall(method: "GET" | "PUT", token: string, body?: unknown): Promise<[number, unknown]> {
+  const response = await call(method, "/v1/catalog", { token, body });
+  return [response.status, await response.json()];
+}
+
+it("keeps the catalog with a version, refusing a stale write", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const other = await signIn(account, "owner");
+  expect(await catalogCall("GET", token)).toEqual([404, { error: "no_catalog" }]);
+  expect(await catalogCall("PUT", token, { version: 0, document: btoa("a") })).toEqual([200, { version: 1 }]);
+  // A second board that read nothing, or read version 1 after it moved on, gets `stale`.
+  expect(await catalogCall("PUT", other, { version: 0, document: btoa("b") })).toEqual([409, { error: "stale" }]);
+  expect(await catalogCall("PUT", other, { version: 1, document: btoa("b") })).toEqual([200, { version: 2 }]);
+  expect(await catalogCall("PUT", token, { version: 1, document: btoa("c") })).toEqual([409, { error: "stale" }]);
+  expect(await catalogCall("GET", token)).toEqual([200, { version: 2, document: btoa("b") }]);
+  expect((await catalogCall("PUT", token, { version: 2, document: "" }))[0]).toBe(400);
+  expect((await catalogCall("PUT", token, { version: -1, document: btoa("x") }))[0]).toBe(400);
+  expect((await catalogCall("PUT", token, { version: 2, document: btoa("x".repeat(1_000_001)) }))[0]).toBe(413);
+  expect(await catalogCall("GET", await signIn(account + 1, "other"))).toEqual([404, { error: "no_catalog" }]);
+});
+
+it("lets a host's session read the catalog but not write it", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const { hostToken } = await register(account, "owner");
+  expect(await catalogCall("PUT", token, { version: 0, document: btoa("a") })).toEqual([200, { version: 1 }]);
+  expect(await catalogCall("GET", hostToken)).toEqual([200, { version: 1, document: btoa("a") }]);
+  expect(await catalogCall("PUT", hostToken, { version: 1, document: btoa("x") })).toEqual([403, { error: "wrong_session" }]);
+  expect((await call("GET", "/v1/catalog")).status).toBe(401);
+});
+
+it("keeps an avatar per organization, versioned on its own", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const { hostToken } = await register(account, "owner");
+  const org = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
+  const path = `/v1/catalog/avatars/${org}`;
+  const ask = async (method: string, who: string, body?: unknown): Promise<[number, unknown]> => {
+    const response = await call(method, path, { token: who, body });
+    return [response.status, await response.json()];
+  };
+  expect(await ask("GET", token)).toEqual([404, { error: "no_avatar" }]);
+  expect(await ask("PUT", token, { version: 0, image: btoa("png") })).toEqual([200, { version: 1 }]);
+  expect(await ask("PUT", token, { version: 0, image: btoa("other") })).toEqual([409, { error: "stale" }]);
+  expect(await ask("GET", hostToken)).toEqual([200, { version: 1, image: btoa("png") }]);
+  expect(await ask("PUT", hostToken, { version: 1, image: btoa("x") })).toEqual([403, { error: "wrong_session" }]);
+  expect((await ask("PUT", token, { version: 1, image: btoa("x".repeat(64 * 1024 + 1)) }))[0]).toBe(413);
+  expect((await ask("PUT", token, { version: 1, image: 5 }))[0]).toBe(400);
+  // Removed: the version stays, so a writer behind can't bring the old image back.
+  expect(await ask("PUT", token, { version: 1, image: null })).toEqual([200, { version: 2 }]);
+  expect(await ask("GET", token)).toEqual([200, { version: 2, image: null }]);
+  const listed = await call("GET", "/v1/catalog/avatars", { token });
+  expect(await listed.json()).toEqual([{ organization: org.toLowerCase(), version: 2 }]);
+  expect(await (await call("GET", "/v1/catalog/avatars", { token: await signIn(account + 1, "other") })).json()).toEqual([]);
+});
