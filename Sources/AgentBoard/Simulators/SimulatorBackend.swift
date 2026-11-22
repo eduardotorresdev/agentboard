@@ -65,6 +65,8 @@ final class IOSSimulators: SimulatorBackend {
     let host = SimulatorHost()
     private var cards: Set<UUID> = []
     private var types: [String] = []
+    /// Card streams (StreamServer) watching each card.
+    let taps = StreamTaps()
 
     init() {
         host.onEvent = { [weak self] event in self?.received(event) }
@@ -140,10 +142,26 @@ final class IOSSimulators: SimulatorBackend {
 
     func quit() {}
 
+    /// Sends the card's screen to a card stream: H.264 from the sidecar, input in points.
+    func stream(_ card: UUID, to sink: @escaping StreamTaps.Sink) -> (() -> Void)? {
+        guard cards.contains(card) else { return nil }
+        let id = taps.add(card, sink)
+        host.post("stream", ["card": card.uuidString, "on": true])
+        return { [weak self] in
+            guard let self, self.taps.remove(card, id) else { return }
+            self.host.post("stream", ["card": card.uuidString, "on": false])
+        }
+    }
+
     private func received(_ event: [String: Any]) {
-        guard event["event"] as? String == "surface", let card = (event["card"] as? String).flatMap(UUID.init(uuidString:)),
-              let context = (event["contextID"] as? NSNumber)?.uint32Value else { return }
+        guard let card = (event["card"] as? String).flatMap(UUID.init(uuidString:)) else { return }
+        if event["event"] as? String == "video" {
+            if let data = (event["data"] as? String).flatMap({ Data(base64Encoded: $0) }) { taps.send(card, .video(data)) }
+            return
+        }
+        guard event["event"] as? String == "surface", let context = (event["contextID"] as? NSNumber)?.uint32Value else { return }
         let size = (event["width"] as? Double).flatMap { width in (event["height"] as? Double).map { CGSize(width: width, height: $0) } }
+        if let size { taps.send(card, .header(.init(kind: "h264", width: size.width, height: size.height, units: "points"))) }
         onScreen?(card, .context(context), size)
     }
 }

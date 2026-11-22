@@ -40,6 +40,10 @@ final class AndroidEmulators: SimulatorBackend {
     private var sessions: [UUID: Session] = [:]
     /// The card size (in pixels on this Mac's screen) each stream is encoded near.
     private var wanted: [UUID: Int] = [:]
+    /// Card streams (StreamServer) watching each card.
+    let taps = StreamTaps()
+    /// Cards the board hides while a stream watches them: their video stops when it ends.
+    private var hidden: Set<UUID> = []
 
     struct DeviceType {
         let name: String
@@ -90,6 +94,7 @@ final class AndroidEmulators: SimulatorBackend {
 
     /// Shows the card's screen again (after `hide`, or when the stream ended).
     func show(_ card: UUID) {
+        hidden.remove(card)
         guard let session = sessions[card], session.stream == nil, !session.starting else { return }
         Task { try? await startStream(card) }
     }
@@ -105,6 +110,12 @@ final class AndroidEmulators: SimulatorBackend {
 
     /// Stops the card's video while nobody sees it; the emulator keeps running.
     func hide(_ card: UUID) {
+        hidden.insert(card)
+        guard !taps.watched(card) else { return }
+        stopStream(card)
+    }
+
+    private func stopStream(_ card: UUID) {
         guard let session = sessions[card], let stream = session.stream else { return }
         session.stream = nil
         stream.onEnd = nil
@@ -117,6 +128,7 @@ final class AndroidEmulators: SimulatorBackend {
         session.starting = true
         defer { session.starting = false }
         let stream = ScrcpyStream(adb: session.adb, serial: session.serial)
+        stream.onVideo = { [taps] in taps.send(card, .video($0)) }
         let long = min(Int(max(session.screen.width, session.screen.height)), max(480, wanted[card] ?? 1280))
         stream.onEnd = { [weak self] error in
             Task { @MainActor in
@@ -130,6 +142,24 @@ final class AndroidEmulators: SimulatorBackend {
         guard sessions[card] === session else { return stream.stop() }
         session.stream = stream
         onScreen?(card, .layer(stream.layer), session.screen)
+    }
+
+    /// Sends the card's screen to a card stream: H.264 as scrcpy encodes it, input in display pixels.
+    func stream(_ card: UUID, to sink: @escaping StreamTaps.Sink) -> (() -> Void)? {
+        guard let session = sessions[card] else { return nil }
+        taps.send(card, .header(.init(kind: "h264", width: session.screen.width, height: session.screen.height, units: "pixels")))
+        let id = taps.add(card, sink)
+        // A new watcher needs the configuration and a keyframe: a reset sends both.
+        if let stream = session.stream {
+            stream.send(ScrcpyStream.resetVideo())
+        } else {
+            show(card)
+            hidden.insert(card)
+        }
+        return { [weak self] in
+            guard let self, self.taps.remove(card, id), self.hidden.contains(card) else { return }
+            self.stopStream(card)
+        }
     }
 
     func close(_ record: SimulatorRecord, deleting: Bool) async {

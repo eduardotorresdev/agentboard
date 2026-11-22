@@ -19,6 +19,9 @@ final class ScrcpyStream: @unchecked Sendable {
     /// Called (on the video thread) when the video size changes, and when the stream ends.
     var onSize: ((CGSize) -> Void)?
     var onEnd: ((Error?) -> Void)?
+    /// Called (on the video thread) with each H.264 unit as it came, Annex B: the codec
+    /// configuration, then frames. What a card stream passes through (StreamServer).
+    var onVideo: ((Data) -> Void)?
 
     private let adb: AdbClient
     private let serial: String
@@ -98,9 +101,12 @@ final class ScrcpyStream: @unchecked Sendable {
                         self.send(Self.resetVideo())
                     }
                 case .config(let size):
-                    format = Self.formatDescription(fromConfig: try video.read(size))
+                    let config = try video.read(size)
+                    format = Self.formatDescription(fromConfig: config)
+                    onVideo?(config)
                 case .frame(let size, let key, _):
                     let payload = try video.read(size)
+                    onVideo?(payload)
                     guard let format, let sample = Self.sampleBuffer(annexB: payload, format: format, keyFrame: key) else { continue }
                     frames += 1
                     if layer.sampleBufferRenderer.status == .failed { layer.sampleBufferRenderer.flush() }

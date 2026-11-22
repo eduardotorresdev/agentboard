@@ -5,7 +5,8 @@
 // JSON lines on stdin/stdout, like the browser sidecar. Requests carry an `id` and get
 // `{id, result}` or `{id, error, code}`; input (`touch`, `scroll`, `key`, `button`) comes
 // without an id and gets no answer. Events: `ready`, and `surface {card, contextID, width,
-// height, scale}` once a card's screen can be hosted with CALayerHost.
+// height, scale}` once a card's screen can be hosted with CALayerHost; `video {card, data, key}`
+// (H.264 Annex B, base64) for each frame while `stream {card, on}` has a card stream on.
 //
 // The method names say nothing about iOS, so another platform's backend can speak them.
 import AppKit
@@ -233,6 +234,8 @@ final class Screen {
     // Drags faster than ~60 Hz come back NULL from SimulatorKit: keep the newest and send it when allowed.
     private var pendingMove: CGPoint?
     private var moveTimer: DispatchWorkItem?
+    /// Set while a card stream watches this screen.
+    private var encoder: VideoEncoder?
 
     init(card: String, udid: String, device: AnyObject, hid: HIDClient, bootedHere: Bool) {
         self.card = card
@@ -270,6 +273,7 @@ final class Screen {
         self.context = context
         display?.registerScreenCallbacksWithUUID(callbacks, callbackQueue: .main, frameCallback: { [weak self] in
             self?.layer.perform(NSSelectorFromString("setContentsChanged"))
+            if let self, let encoder = self.encoder, let unmasked = self.unmasked { encoder.encode(unmasked) }
         }, surfacesChangedCallback: { [weak self] masked, unmasked in
             self?.show(masked ?? unmasked, unmasked: unmasked ?? masked)
         }, propertiesChangedCallback: { _ in })
@@ -289,7 +293,25 @@ final class Screen {
               "width": size.width, "height": size.height, "scale": scale])
     }
 
+    /// Starts or stops encoding the screen for card streams; on again asks for a keyframe now,
+    /// which a still screen would otherwise not send.
+    func stream(_ on: Bool) {
+        guard on else {
+            encoder?.invalidate()
+            encoder = nil
+            return
+        }
+        let card = card
+        let encoder = self.encoder ?? VideoEncoder { data, key in
+            DispatchQueue.main.async { emit(["event": "video", "card": card, "data": data.base64EncodedString(), "key": key]) }
+        }
+        self.encoder = encoder
+        encoder.requestKeyFrame()
+        if let unmasked { encoder.encode(unmasked) }
+    }
+
     func detach() {
+        stream(false)
         display?.unregisterScreenCallbacksWithUUID(callbacks)
         moveTimer?.cancel()
         context?.layer = nil
@@ -535,6 +557,7 @@ final class Host {
             case "scroll": screen.scroll(point, dx: params["dx"] as? Double ?? 0, dy: params["dy"] as? Double ?? 0, kit)
             case "key": screen.key(UInt32(params["usage"] as? Int ?? 0), down: params["down"] as? Bool ?? true, kit)
             case "button": try? screen.button(params["name"] as? String ?? "", kit)
+            case "stream": screen.stream(params["on"] as? Bool ?? false)
             default: break
             }
             return

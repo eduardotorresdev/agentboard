@@ -131,6 +131,8 @@ final class BrowserStore {
 
     @ObservationIgnored private let database: Database?
     @ObservationIgnored let host = BrowserHost()
+    /// Card streams (StreamServer) watching each page.
+    @ObservationIgnored let taps = StreamTaps()
     /// The stores the cards are on, by their worktree's host (nil: this Mac's).
     @ObservationIgnored private var boards: [UUID?: Board] = [:]
     /// Sends the pages of another host's worktrees through that host; without it every page
@@ -557,6 +559,12 @@ final class BrowserStore {
     private func received(_ event: [String: Any]) {
         guard let block = (event["block"] as? String).flatMap(UUID.init(uuidString:)), pages[block] != nil else { return }
         switch event["event"] as? String {
+        case "frame":
+            if let width = event["width"] as? Double, let height = event["height"] as? Double {
+                taps.send(block, .header(.init(kind: "jpeg", width: width, height: height, units: "points")))
+            }
+            if let data = (event["data"] as? String).flatMap({ Data(base64Encoded: $0) }) { taps.send(block, .jpeg(data)) }
+            return
         case "surface":
             pages[block]?.contextID = (event["contextID"] as? NSNumber)?.uint32Value
             if let width = event["width"] as? Double, let height = event["height"] as? Double {

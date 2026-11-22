@@ -429,6 +429,27 @@ const methods = {
     return {};
   },
 
+  // A card stream (StreamServer) watching the page: JPEG frames as the page draws, at the
+  // viewport's size in CSS pixels. Fire and forget.
+  async screencast(params) {
+    const entry = block(params);
+    const page = entry.page;
+    if (!params.on) {
+      entry.screencast = undefined;
+      await page.screencast.stop().catch(() => {});
+      return {};
+    }
+    if (entry.screencast === page) return {};
+    entry.screencast = page;
+    const size = page.viewportSize() ?? undefined;
+    await page.screencast.start({
+      size, quality: 70,
+      onFrame: ({ data, viewportWidth, viewportHeight }) =>
+        send({ event: 'frame', block: entry.id, data: data.toString('base64'), width: viewportWidth, height: viewportHeight }),
+    }).catch(error => { entry.screencast = undefined; log('screencast failed:', error.message); });
+    return {};
+  },
+
   async copySelection(params) {
     return { text: await block(params).page.evaluate(() => getSelection()?.toString() ?? '') };
   },

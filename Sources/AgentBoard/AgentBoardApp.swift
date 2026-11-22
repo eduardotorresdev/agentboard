@@ -46,6 +46,7 @@ struct AgentBoardApp: App {
         AppDelegate.agents = agents
         _hosts = State(initialValue: hosts)
         _browsers = State(initialValue: browsers)
+        StreamServer.launch(sources: [simulators, browsers])
     }
 
     var body: some Scene {
