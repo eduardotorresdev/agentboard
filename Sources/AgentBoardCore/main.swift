@@ -118,6 +118,8 @@ if lockFD < 0 || flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
 
 // A board that goes away mid-write must not kill the core.
 signal(SIGPIPE, SIG_IGN)
+// The board ignores SIGTERM (it handles it itself) and a spawned core inherits that: undo it.
+signal(SIGTERM, SIG_DFL)
 
 let server = CoreServer(socketPath: socketPath, queue: .main)
 server.lock = lockFD
