@@ -4,6 +4,7 @@
 #   2. the tests run inside a system sandbox that denies writes to the real data folders;
 #   3. the real folders and preferences are fingerprinted before and after; any change fails.
 # Usage: scripts/test-safe [--no-home] [swift-testing args, e.g. --filter X --no-parallel]
+#        scripts/test-safe --fingerprint-only   (prints the real data's fingerprint and exits)
 #   --no-home: leave AGENTBOARD_HOME unset (only to prove the app aborts; the sandbox still holds).
 # The keychain isn't covered by the sandbox: an isolated home uses in-memory credentials, and the
 # count of agent login items is part of the fingerprint.
@@ -35,9 +36,6 @@ fingerprint() {
 NO_HOME=false
 if [ "${1:-}" = "--no-home" ]; then NO_HOME=true; shift; fi
 
-# SwiftPM sandboxes its own manifest build and can't nest inside ours: build outside, run inside.
-swift build --build-tests --scratch-path "$SCRATCH" 2>&1 | grep -E "error:|Build complete" | sort -u
-[ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
 
 DEV=/Applications/Xcode.app/Contents/Developer
 HELPER="$DEV/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper"
@@ -56,6 +54,23 @@ installed_app_files() {
     printf '%s\n' ./agentboard.sqlite ./agentboard.sqlite-wal ./agentboard.sqlite-shm ./makers.json ./composer-drafts.json \
         ./workspace.json ./tools.port ./images/ ./attachments/ ./Browsers/ ./Simulators/
 }
+installed_app_files_only() { awk 'NR == FNR { owned[$0]; next }
+    { path = $0; sub(/^[0-9a-f]+  /, "", path); for (o in owned) if (path == o || (o ~ /\/$/ && index(path, o) == 1)) next; print }' "$WORK/installed" "$1"; }
+
+# --fingerprint-only: prints the same fingerprint this script compares (less the running installed
+# app's own files) and exits, to check the real data around a run made outside it.
+if [ "${1:-}" = "--fingerprint-only" ]; then
+    installed_app_files > "$WORK/installed"
+    fingerprint > "$WORK/now"
+    installed_app_files_only "$WORK/now" | shasum
+    rm -rf "$WORK"
+    exit 0
+fi
+
+# SwiftPM sandboxes its own manifest build and can't nest inside ours: build outside, run inside.
+swift build --build-tests --scratch-path "$SCRATCH" 2>&1 | grep -E "error:|Build complete" | sort -u
+[ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+
 installed_app_files > "$WORK/installed"
 fingerprint > "$WORK/before"
 ENVIRONMENT=(AGENTBOARD_TEST=1 "DYLD_FRAMEWORK_PATH=$DEV/Platforms/MacOSX.platform/Developer/Library/Frameworks:$DEV/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks"
@@ -77,8 +92,6 @@ if [ "${XCTEST:-1}" = 1 ] && [ -n "$SUITES" ]; then
 fi
 fingerprint > "$WORK/after"
 installed_app_files >> "$WORK/installed"
-installed_app_files_only() { awk 'NR == FNR { owned[$0]; next }
-    { path = $0; sub(/^[0-9a-f]+  /, "", path); for (o in owned) if (path == o || (o ~ /\/$/ && index(path, o) == 1)) next; print }' "$WORK/installed" "$1"; }
 
 if ! diff -q <(installed_app_files_only "$WORK/before") <(installed_app_files_only "$WORK/after") >/dev/null; then
     echo "test-safe: THE REAL DATA FOLDER OR PREFERENCES CHANGED. Stop and report:" >&2
