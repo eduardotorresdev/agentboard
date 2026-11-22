@@ -594,9 +594,13 @@ struct DecisionSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 16) {
             if !decision.framing.isEmpty {
                 Text(decision.framing).font(Theme.Font.label).foregroundStyle(Theme.inkMuted)
+            }
+            ForEach(Array(decision.cards.enumerated()), id: \.offset) { index, card in
+                DecisionCardView(link: link, number: index + 1, card: card)
             }
             Text(decision.ask.question).font(Theme.Font.title).foregroundStyle(Theme.ink)
             VStack(spacing: 10) {
@@ -612,13 +616,68 @@ struct DecisionSheet: View {
                     .accessibilityIdentifier("decisionAnswer-\(answer.value)")
                 }
             }
-            Spacer(minLength: 0)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .background(Theme.surface)
-        .presentationDetents([.medium])
+        .presentationDetents(decision.cards.isEmpty ? [.medium] : [.large, .medium])
         .presentationCornerRadius(Theme.Radius.dialog)
+    }
+}
+
+/// One card of a decision: its claim, its evidence at full width, and what it is compared against.
+struct DecisionCardView: View {
+    let link: HostLink
+    let number: Int
+    let card: Decision.Card
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(number). \(card.claim)").font(Theme.Font.heading).foregroundStyle(Theme.ink)
+            Group {
+                if let diagram = card.evidence.diagram {
+                    DiagramPicture(svg: diagram.svg)
+                } else if let picture = card.evidence.image, let item = link.media.first(where: { $0.id == picture.after }) {
+                    ZStack {
+                        Theme.surfaceDeep
+                        if let data = link.files[item.file], let image = UIImage(data: data) {
+                            Image(uiImage: image).resizable().scaledToFit()
+                        }
+                    }
+                    .frame(height: 260)
+                    .task { link.fetch(item.file) }
+                } else {
+                    Text("This evidence is shown on the Mac.").font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                        .frame(maxWidth: .infinity, minHeight: 60)
+                }
+            }
+            .padding(12)
+            .background(Theme.surfaceDeep, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            if let reference = card.reference {
+                Text(reference).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+            }
+        }
+    }
+}
+
+/// A decision's diagram, drawn from its vector at the screen's pixel density.
+struct DiagramPicture: View {
+    let svg: String
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
+        if let diagram = try? SVGDiagram(svg) {
+            GeometryReader { proxy in
+                if let image = diagram.image(size: proxy.size, scale: displayScale) {
+                    Image(uiImage: UIImage(cgImage: image, scale: displayScale, orientation: .up))
+                }
+            }
+            .aspectRatio(diagram.viewBox.width / diagram.viewBox.height, contentMode: .fit)
+            .accessibilityIdentifier("decisionDiagram")
+        } else {
+            Text("This diagram can't be drawn.").font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+        }
     }
 }
 

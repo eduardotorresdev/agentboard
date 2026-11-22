@@ -175,6 +175,37 @@ final class WireTests: XCTestCase {
         }
     }
 
+    /// A decision's cards come with it: a diagram's SVG, an image's ids, a reference; the
+    /// diagram draws on the phone with the shared renderer, arrowhead included.
+    func testDecisionCardsDecodeAndTheirDiagramDraws() throws {
+        let svg = try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../core/fixtures/diagrams/guide.svg"), encoding: .utf8)
+        let id = UUID(), after = UUID()
+        let json: [String: Any] = ["decisions": ["_0": [[
+            "id": id.uuidString, "agent": id.uuidString, "framing": "Validate", "state": "open",
+            "ask": ["validation": ["question": "Ship?"]],
+            "cards": [["claim": "Flow", "evidence": ["diagram": ["svg": svg]], "reference": "Why", "pins": []],
+                      ["claim": "Screen", "evidence": ["image": ["after": after.uuidString]], "pins": []],
+                      ["claim": "Page", "evidence": ["browser": ["id": after.uuidString]], "pins": []]],
+        ]]]]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        guard case .decisions(let list) = try JSONDecoder().decode(BoardUpdate.self, from: data) else { return XCTFail("not decisions") }
+        let cards = try XCTUnwrap(list.first?.cards)
+        XCTAssertEqual(cards.map(\.claim), ["Flow", "Screen", "Page"])
+        XCTAssertEqual(cards[0].evidence.diagram?.svg, svg)
+        XCTAssertEqual(cards[0].reference, "Why")
+        XCTAssertEqual(cards[1].evidence.image?.after, after)
+        XCTAssertNil(cards[2].evidence.image ?? nil)
+        XCTAssertNil(cards[2].evidence.diagram)
+
+        // Drawn at 3x on iOS: the arrowhead's dark pixels sit just before the right box.
+        let image = try XCTUnwrap(try SVGDiagram(svg).image(size: CGSize(width: 320, height: 120), scale: 3))
+        let pixels = try XCTUnwrap(image.dataProvider?.data as Data?)
+        let row = Int(57.5 * 3), column = 200 * 3, offset = row * image.bytesPerRow + column * 4
+        XCTAssertLessThan(Int(pixels[offset]), 80)
+        XCTAssertGreaterThan(Int(pixels[offset + 3]), 200)
+    }
+
     /// An agent is on the open board when its folder and host are the board's; any other board, or none, isn't.
     func testAnAgentIsOnTheOpenBoardOnlyWhenFolderAndHostMatch() {
         let board = Worktree(path: "/w/phone-test-a", host: "abc")

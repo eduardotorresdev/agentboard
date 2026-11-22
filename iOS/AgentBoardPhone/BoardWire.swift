@@ -92,11 +92,38 @@ struct Decision: Decodable, Identifiable, Equatable {
         var variants: [Variant] { if case .choice(_, let v) = self { v } else { [] } }
     }
     enum State: String, Decodable { case open, awaitingEcho, closed }
+    /// What a card shows: an image on the board or a diagram the agent drew; other kinds are
+    /// looked at on the Mac.
+    struct Evidence: Decodable, Equatable {
+        struct Picture: Decodable, Equatable { var before: UUID?; let after: UUID }
+        struct Drawing: Decodable, Equatable { let svg: String }
+        var image: Picture?
+        var diagram: Drawing?
+    }
+    struct Card: Decodable, Equatable {
+        let claim: String
+        let evidence: Evidence
+        var reference: String?
+    }
     let id: UUID
     let agent: UUID
     let framing: String
     let ask: Ask
     let state: State
+    var cards: [Card] = []
+
+    init(id: UUID, agent: UUID, framing: String, ask: Ask, state: State, cards: [Card] = []) {
+        (self.id, self.agent, self.framing, self.ask, self.state, self.cards) = (id, agent, framing, ask, state, cards)
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, agent, framing, ask, state, cards }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(UUID.self, forKey: .id), agent: try c.decode(UUID.self, forKey: .agent),
+                  framing: try c.decode(String.self, forKey: .framing), ask: try c.decode(Ask.self, forKey: .ask),
+                  state: try c.decode(State.self, forKey: .state), cards: try c.decodeIfPresent([Card].self, forKey: .cards) ?? [])
+    }
 }
 
 struct BoardSnapshot: Decodable {
