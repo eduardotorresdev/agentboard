@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import OSLog
 import Security
 
 /// The phone's own secrets, in the iOS Keychain (this device only).
@@ -103,6 +104,14 @@ struct AccountServer {
         Keychain.write("board.key", key.rawRepresentation)
         return key
     }()
+
+    #if DEBUG
+    /// For `agentboard trust <key>` without reading it off the screen:
+    /// `xcrun simctl spawn booted log show --predicate 'subsystem == "dev.agentboard.phone"'`.
+    func logKey() {
+        Logger(subsystem: "dev.agentboard.phone", category: "account").notice("board key \(self.publicKeyBase64, privacy: .public)")
+    }
+    #endif
 
     var server: AccountServer { AccountServer(token: token) }
     var fingerprint: String { HostChannel.fingerprint(of: boardKey.publicKey.rawRepresentation) }

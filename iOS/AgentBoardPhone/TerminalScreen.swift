@@ -120,6 +120,14 @@ struct TerminalPage: View {
         }
         .background(Theme.canvas)
         .navigationTitle(card.name)
+        #if DEBUG
+        // `-typeText <text>`: typed into the terminal once it showed, then Enter.
+        .task {
+            guard let text = DebugLaunch.value("typeText") else { return }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            link.type(Array(text.utf8) + terminal.encode(.enter), to: card.id)
+        }
+        #endif
         .navigationBarTitleDisplayMode(.inline)
     }
 
