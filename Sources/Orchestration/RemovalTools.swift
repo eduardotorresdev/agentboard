@@ -151,6 +151,7 @@ extension Orchestrator {
             if record(id) != nil { remove(id) }
             else if postIt(id) != nil { removePostIt(id) }
             else if image(id) != nil { removeImage(id) }
+            else if fileTree(id) != nil { removeFileTree(id) }
             else { onBoards.append(id) }
         }
         if !onBoards.isEmpty {

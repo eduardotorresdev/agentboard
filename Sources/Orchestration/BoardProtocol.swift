@@ -40,6 +40,10 @@ public enum BoardRequest: Codable, Sendable {
     case updateImage(ImageRecord)
     /// Forgets it and deletes its file.
     case removeImage(UUID)
+    case addFileTree(FileTreeRecord)
+    /// Its name or frame changed.
+    case updateFileTree(FileTreeRecord)
+    case removeFileTree(UUID)
     /// The developer dealt with the agent's attention request.
     case dismissAttention(UUID)
     /// The developer answered the questions the agent asked, keyed by question text; nil
@@ -77,6 +81,9 @@ public enum BoardEvent: Codable, Sendable {
     /// Its name, frame or picture (`file`, `pixelSize`) changed.
     case imageUpdated(ImageRecord)
     case imageRemoved(UUID)
+    case fileTreeAdded(FileTreeRecord)
+    case fileTreeUpdated(FileTreeRecord)
+    case fileTreeRemoved(UUID)
     /// Every attention request, oldest first, after any change.
     case attention([AttentionRequest])
     /// How many messages wait for the user to finish the line they typed in agent `id`'s terminal.
@@ -102,9 +109,12 @@ public struct BoardState: Codable, Sendable {
     public var images: [ImageRecord]?
     /// The decisions waiting on the developer; nil when there are none or from a core that predates them.
     public var decisions: [Decision]?
+    /// The file tree cards; nil from a core that predates them (the board then keeps its own).
+    public var fileTrees: [FileTreeRecord]?
 
     public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = [],
-                attention: [AttentionRequest] = [], images: [ImageRecord] = [], decisions: [Decision] = []) {
+                attention: [AttentionRequest] = [], images: [ImageRecord] = [], decisions: [Decision] = [],
+                fileTrees: [FileTreeRecord] = []) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
@@ -112,6 +122,7 @@ public struct BoardState: Codable, Sendable {
         self.attention = attention
         self.images = images
         self.decisions = decisions.isEmpty ? nil : decisions
+        self.fileTrees = fileTrees
     }
 }
 
@@ -208,6 +219,12 @@ extension BoardRequest {
         case .updateImage(var record):
             record.name = named(record.name, "")
             return .updateImage(record)
+        case .addFileTree(var record):
+            record.name = named(record.name, "Files")
+            return .addFileTree(record)
+        case .updateFileTree(var record):
+            record.name = named(record.name, "")
+            return .updateFileTree(record)
         case .elements(let list):
             return .elements(list.map { var info = $0; info.name = named(info.name, info.kind); return info })
         default:

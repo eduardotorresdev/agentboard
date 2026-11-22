@@ -93,6 +93,14 @@ fn video() -> ImageRecord {
     }
 }
 
+fn file_tree() -> FileTreeRecord {
+    FileTreeRecord { id: id(9), worktree: "/work/tree".into(), name: "Files".into(), frame: Rect::new(-1100.0, 0.5, 1040.0, 680.0), organization: Some(id(8)) }
+}
+
+fn bare_file_tree() -> FileTreeRecord {
+    FileTreeRecord { id: id(7), worktree: "/work/tree".into(), name: "Files 2".into(), frame: Rect::new(0.0, 800.0, 1040.0, 680.0), organization: None }
+}
+
 fn lines() -> Vec<Connection> {
     vec![Connection { id: id(8), a: id(1), b: id(2), a_side: Some(Side::Right), b_side: Some(Side::Left) }, Connection { id: id(9), a: id(1), b: id(4), a_side: None, b_side: None }]
 }
@@ -102,7 +110,7 @@ fn requests_encode_as_swift_does() {
     let names = [
         "addCard", "updateCard", "removeCard", "connect", "disconnect", "elements", "open", "restart", "restart_as_it_is", "startRunner", "stopRunner", "toolResult", "toolResult_error",
         "addPostIt", "updatePostIt", "removePostIt", "writePostIt", "addImage", "updateImage", "removeImage", "dismissAttention", "answerQuestions", "answerQuestions_in_the_terminal", "deliver",
-        "prompt", "deliverHeld", "deliver_to_one",
+        "prompt", "deliverHeld", "deliver_to_one", "addFileTree", "updateFileTree", "removeFileTree",
     ];
     let requests: Vec<BoardRequest> = names.iter().map(|name| round_trip(&format!("request_{name}"))).collect();
     assert_eq!(requests[0], BoardRequest::AddCard(only(agent())));
@@ -121,6 +129,9 @@ fn requests_encode_as_swift_does() {
     assert_eq!(requests[21], BoardRequest::AnswerQuestions { id: id(1), answers: Some([("Which layout?".to_string(), "Grid".to_string())].into()) });
     assert_eq!(requests[22], BoardRequest::AnswerQuestions { id: id(1), answers: None });
     assert_eq!(requests[25], BoardRequest::DeliverHeld(only(id(1))));
+    assert_eq!(requests[27], BoardRequest::AddFileTree(only(file_tree())));
+    assert_eq!(requests[28], BoardRequest::UpdateFileTree(only(bare_file_tree())));
+    assert_eq!(requests[29], BoardRequest::RemoveFileTree(only(id(9))));
     assert_eq!(requests[26], BoardRequest::Deliver { from: id(5), text: "1. Area 48, 486, 408, 132".into(), to: Some(id(1)) });
     // An absent optional may also come as null, and a request of a newer board is no request.
     let null = format!(r#"{{"restart":{{"id":"{}","command":null}}}}"#, id(2));
@@ -132,7 +143,7 @@ fn requests_encode_as_swift_does() {
 fn events_encode_as_swift_does() {
     let names = [
         "cardAdded", "cardUpdated", "cardRemoved", "connections", "message", "runners", "runners_none", "toolCall", "postItAdded", "postItUpdated", "postItRemoved", "imageAdded", "imageUpdated",
-        "imageRemoved", "attention", "held", "promptReturned",
+        "imageRemoved", "attention", "held", "promptReturned", "fileTreeAdded", "fileTreeUpdated", "fileTreeRemoved",
     ];
     let events: Vec<BoardEvent> = names.iter().map(|name| round_trip(&format!("event_{name}"))).collect();
     assert_eq!(events[0], BoardEvent::CardAdded(only(runner())));
@@ -153,6 +164,9 @@ fn events_encode_as_swift_does() {
     let questions = queue[2].questions.as_ref().unwrap();
     assert_eq!(questions[0], AgentQuestion { question: "Which layout?".into(), header: Some("Layout".into()), options: vec![QuestionOption { label: "Grid".into(), description: Some("Rows and columns".into()) }, QuestionOption { label: "List".into(), description: None }], multi_select: true });
     assert_eq!(events[15], BoardEvent::Held { id: id(1), count: 2 });
+    assert_eq!(events[17], BoardEvent::FileTreeAdded(only(file_tree())));
+    assert_eq!(events[18], BoardEvent::FileTreeUpdated(only(bare_file_tree())));
+    assert_eq!(events[19], BoardEvent::FileTreeRemoved(only(id(9))));
 }
 
 #[test]
@@ -162,9 +176,10 @@ fn the_state_encodes_as_swift_does() {
     assert_eq!(state.connections, lines());
     assert_eq!(state.post_its, Some(vec![post_it(), empty_post_it()]));
     assert_eq!(state.images, Some(vec![image(), video()]));
+    assert_eq!(state.file_trees, Some(vec![file_tree(), bare_file_tree()]));
     assert_eq!(state.attention.map(|queue| queue.len()), Some(3));
     let old: BoardState = round_trip("state_of_an_older_core");
-    assert_eq!((old.post_its, old.attention, old.images), (None, None, None));
+    assert_eq!((old.post_its, old.attention, old.images, old.file_trees), (None, None, None, None));
 }
 
 /// A data folder the Swift core used serves this one.
@@ -176,6 +191,7 @@ fn a_database_written_by_swift_reads() {
     assert_eq!(database.agents().unwrap(), [agent(), runner(), plain()]);
     assert_eq!(database.post_its().unwrap(), [post_it(), empty_post_it()]);
     assert_eq!(database.images().unwrap(), [image(), video()]);
+    assert_eq!(database.file_trees().unwrap(), [file_tree(), bare_file_tree()]);
     assert_eq!(database.connections().unwrap(), lines());
     assert!(database.browser_ids().unwrap().is_empty());
 }
@@ -191,12 +207,14 @@ fn a_database_round_trips() {
         [agent(), runner(), plain()].iter().for_each(|card| database.save_agent(card).unwrap());
         [post_it(), empty_post_it()].iter().for_each(|note| database.save_post_it(note).unwrap());
         [image(), video()].iter().for_each(|image| database.save_image(image).unwrap());
+        [file_tree(), bare_file_tree()].iter().for_each(|tree| database.save_file_tree(tree).unwrap());
         database.save_connections(&lines()).unwrap();
     }
     let mut database = CardDatabase::open(&path).unwrap();
     assert_eq!(database.agents().unwrap(), [agent(), runner(), plain()]);
     assert_eq!(database.post_its().unwrap(), [post_it(), empty_post_it()]);
     assert_eq!(database.images().unwrap(), [image(), video()]);
+    assert_eq!(database.file_trees().unwrap(), [file_tree(), bare_file_tree()]);
     assert_eq!(database.connections().unwrap(), lines());
 
     let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("scratch.sqlite");
@@ -205,6 +223,8 @@ fn a_database_round_trips() {
     database_copy.delete_agent(id(3)).unwrap();
     database_copy.delete_post_it(id(5)).unwrap();
     database_copy.delete_image(id(6)).unwrap();
+    database_copy.delete_file_tree(id(7)).unwrap();
+    assert_eq!(database_copy.file_trees().unwrap(), [file_tree()]);
     database_copy.save_connections(&lines()[1..]).unwrap();
     assert_eq!(database_copy.agents().unwrap(), [agent(), runner()]);
     assert_eq!(database_copy.post_its().unwrap(), [post_it()]);

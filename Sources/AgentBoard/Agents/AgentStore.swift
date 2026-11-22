@@ -21,6 +21,8 @@ final class AgentStore {
     var postIts: [PostItRecord] = []
     /// Images (see AgentStore+Images.swift).
     var images: [ImageRecord] = []
+    /// File tree cards (see FileTreeStore); nil while the core hasn't answered or predates them.
+    var fileTrees: [FileTreeRecord]?
     /// Where pictures are stored: the folder the core shares. For another host, this Mac's copy
     /// of that host's pictures (see AgentStore+Images.swift).
     @ObservationIgnored var dataFolder = DataFolder.url
@@ -41,6 +43,8 @@ final class AgentStore {
     @ObservationIgnored var onMediaNote: ((String) -> Void)?
     /// Called each time the host's core answers (see `HostStores`).
     @ObservationIgnored var onConnect: (() -> Void)?
+    /// Called each time the core answers, for the file tree cards (see `FileTreeStore`).
+    @ObservationIgnored var onWelcome: (() -> Void)?
     /// Agents waiting on the developer, in every organization, oldest first.
     private(set) var attention: [AttentionRequest] = []
     /// What agents asked the developer, oldest first. One the agent closed with an echo stays
@@ -292,6 +296,7 @@ final class AgentStore {
         agents = state.cards
         postIts = state.postIts ?? []
         images = state.images ?? []
+        fileTrees = state.fileTrees
         attention = state.attention ?? []
         decisions = state.decisions ?? []
         settleDecisions()
@@ -308,6 +313,7 @@ final class AgentStore {
         }
         if host != nil { client.subscribeToHost() }
         onConnect?()
+        onWelcome?()
         client.send(.elements(elements()))
         for (id, session) in sessions {
             guard let record = record(id) else {
@@ -392,6 +398,15 @@ final class AgentStore {
             imageMarks[id] = nil
             ImageMarks.forget(id)
             images.removeAll { $0.id == id }
+            connections.removeAll { $0.touches(id) }
+        case .fileTreeAdded(let record):
+            guard fileTrees?.contains(where: { $0.id == record.id }) == false else { return }
+            fileTrees?.append(record)
+        case .fileTreeUpdated(let record):
+            guard let index = fileTrees?.firstIndex(where: { $0.id == record.id }) else { return }
+            fileTrees?[index] = record
+        case .fileTreeRemoved(let id):
+            fileTrees?.removeAll { $0.id == id }
             connections.removeAll { $0.touches(id) }
         case .attention(let list):
             attention = list

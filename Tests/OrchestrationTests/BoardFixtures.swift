@@ -40,6 +40,12 @@ struct BoardFixtures {
         ImageRecord(id: ids[6], worktree: "/work/tree", name: "Signup flow", frame: CGRect(x: 1, y: 400, width: 480, height: 302),
                     file: "0000000B-ABCD-4EF0-8A1B-00000000000B.mp4", pixelSize: CGSize(width: 1920, height: 1080), duration: 12.25)
     }
+    private static var fileTree: FileTreeRecord {
+        FileTreeRecord(id: ids[8], worktree: "/work/tree", name: "Files", frame: CGRect(x: -1100, y: 0.5, width: 1040, height: 680), organization: ids[7])
+    }
+    private static var bareFileTree: FileTreeRecord {
+        FileTreeRecord(id: ids[6], worktree: "/work/tree", name: "Files 2", frame: CGRect(x: 0, y: 800, width: 1040, height: 680))
+    }
     private static var lines: [Connection] {
         [Connection(id: ids[7], a: ids[0], b: ids[1], aSide: .right, bSide: .left), Connection(id: ids[8], a: ids[0], b: ids[3])]
     }
@@ -105,6 +111,9 @@ struct BoardFixtures {
             ("prompt", .prompt(id: ids[0], text: "run the tests")),
             ("deliverHeld", .deliverHeld(ids[0])),
             ("deliver_to_one", .deliver(from: ids[4], text: "1. Area 48, 486, 408, 132", to: ids[0])),
+            ("addFileTree", .addFileTree(Self.fileTree)),
+            ("updateFileTree", .updateFileTree(Self.bareFileTree)),
+            ("removeFileTree", .removeFileTree(ids[8])),
         ]
         for (name, request) in requests { try write(request, "request_" + name) }
         let message = Message(id: ids[8], from: ids[0], to: ids[2], text: "Run the tests", date: Self.date)
@@ -126,16 +135,21 @@ struct BoardFixtures {
             ("attention", .attention(Self.attention)),
             ("held", .held(id: ids[0], count: 2)),
             ("promptReturned", .promptReturned(id: ids[0], text: "run the tests", reason: "it exited")),
+            ("fileTreeAdded", .fileTreeAdded(Self.fileTree)),
+            ("fileTreeUpdated", .fileTreeUpdated(Self.bareFileTree)),
+            ("fileTreeRemoved", .fileTreeRemoved(ids[8])),
         ]
         for (name, event) in events { try write(event, "event_" + name) }
         let state = BoardState(cards: [Self.agent, Self.runner, Self.plain], connections: Self.lines, runners: Self.runners,
-                               postIts: [Self.postIt, Self.emptyPostIt], attention: Self.attention, images: [Self.image, Self.video])
+                               postIts: [Self.postIt, Self.emptyPostIt], attention: Self.attention, images: [Self.image, Self.video],
+                               fileTrees: [Self.fileTree, Self.bareFileTree])
         try write(state, "state")
         // What a core that predates post-its, attention and images sends.
         var old = BoardState(cards: [Self.plain], connections: [], runners: RunnerReport())
         old.postIts = nil
         old.attention = nil
         old.images = nil
+        old.fileTrees = nil
         try write(old, "state_of_an_older_core")
     }
 
@@ -148,6 +162,7 @@ struct BoardFixtures {
         for card in [Self.agent, Self.runner, Self.plain] { try database.saveAgent(card) }
         for note in [Self.postIt, Self.emptyPostIt] { try database.savePostIt(note) }
         for image in [Self.image, Self.video] { try database.saveImage(image) }
+        for tree in [Self.fileTree, Self.bareFileTree] { try database.saveFileTree(tree) }
         try database.saveConnections(Self.lines)
     }
 
@@ -163,6 +178,7 @@ struct BoardFixtures {
         #expect(try database.agents() == [Self.agent, Self.runner, Self.plain])
         #expect(try database.postIts() == [Self.postIt, Self.emptyPostIt])
         #expect(try database.images() == [Self.image, Self.video])
+        #expect(try database.fileTrees() == [Self.fileTree, Self.bareFileTree])
         #expect(try database.connections() == Self.lines)
     }
 }

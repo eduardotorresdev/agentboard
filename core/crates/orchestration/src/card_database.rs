@@ -9,6 +9,7 @@ use connections::{Connection, Rect, Side, Size, Uuid};
 
 use crate::cards::{AgentRecord, RunnerSpec};
 use crate::image_card::ImageRecord;
+use crate::file_tree::FileTreeRecord;
 use crate::post_it::PostItRecord;
 
 pub type Result<T> = rusqlite::Result<T>;
@@ -90,6 +91,14 @@ impl CardDatabase {
                 width REAL NOT NULL, height REAL NOT NULL,
                 file TEXT NOT NULL,
                 pixel_width REAL NOT NULL, pixel_height REAL NOT NULL,
+                organization TEXT
+            );
+            CREATE TABLE IF NOT EXISTS filetrees (
+                id TEXT PRIMARY KEY,
+                worktree TEXT NOT NULL,
+                name TEXT NOT NULL,
+                x REAL NOT NULL, y REAL NOT NULL,
+                width REAL NOT NULL, height REAL NOT NULL,
                 organization TEXT
             )",
         )?;
@@ -225,6 +234,35 @@ impl CardDatabase {
 
     pub fn delete_post_it(&self, id: Uuid) -> Result<()> {
         self.db.execute("DELETE FROM postits WHERE id = ?", [id.to_string()]).map(|_| ())
+    }
+
+    /// File tree cards, in the order they were added.
+    pub fn file_trees(&self) -> Result<Vec<FileTreeRecord>> {
+        self.rows("SELECT id, worktree, name, x, y, width, height, organization FROM filetrees ORDER BY rowid", |row| {
+            Some(FileTreeRecord { id: uuid(row, 0)?, worktree: text(row, 1)?, name: text(row, 2)?, frame: frame(row, 3), organization: uuid(row, 7) })
+        })
+    }
+
+    pub fn save_file_tree(&self, tree: &FileTreeRecord) -> Result<()> {
+        self.db
+            .execute(
+                "INSERT OR REPLACE INTO filetrees (id, worktree, name, x, y, width, height, organization) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    tree.id.to_string(),
+                    tree.worktree,
+                    tree.name,
+                    tree.frame.min_x(),
+                    tree.frame.min_y(),
+                    tree.frame.width(),
+                    tree.frame.height(),
+                    tree.organization.map(|organization| organization.to_string()),
+                ],
+            )
+            .map(|_| ())
+    }
+
+    pub fn delete_file_tree(&self, id: Uuid) -> Result<()> {
+        self.db.execute("DELETE FROM filetrees WHERE id = ?", [id.to_string()]).map(|_| ())
     }
 
     /// Images, in the order they were added.

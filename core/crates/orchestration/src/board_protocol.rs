@@ -15,6 +15,7 @@ use runtime::Data;
 
 use crate::attention::AttentionRequest;
 use crate::cards::{AgentRecord, ElementInfo};
+use crate::file_tree::FileTreeRecord;
 use crate::image_card::ImageRecord;
 use crate::post_it::PostItRecord;
 use crate::process_inspector::RunnerStats;
@@ -59,6 +60,10 @@ pub enum BoardRequest {
     UpdateImage(Unlabelled<ImageRecord>),
     /// Forgets it and deletes its file.
     RemoveImage(Unlabelled<Uuid>),
+    AddFileTree(Unlabelled<FileTreeRecord>),
+    /// Its name or frame changed.
+    UpdateFileTree(Unlabelled<FileTreeRecord>),
+    RemoveFileTree(Unlabelled<Uuid>),
     /// The developer dealt with the agent's attention request.
     DismissAttention(Unlabelled<Uuid>),
     /// The developer answered the questions the agent asked, keyed by question text; none
@@ -105,6 +110,9 @@ pub enum BoardEvent {
     /// Its name, frame or picture (`file`, `pixelSize`) changed.
     ImageUpdated(Unlabelled<ImageRecord>),
     ImageRemoved(Unlabelled<Uuid>),
+    FileTreeAdded(Unlabelled<FileTreeRecord>),
+    FileTreeUpdated(Unlabelled<FileTreeRecord>),
+    FileTreeRemoved(Unlabelled<Uuid>),
     /// Every attention request, oldest first, after any change.
     Attention(Unlabelled<Vec<AttentionRequest>>),
     /// How many messages wait for the user to finish the line they typed in agent `id`'s terminal.
@@ -142,6 +150,9 @@ pub struct BoardState {
     /// The images; none from a core that predates them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<ImageRecord>>,
+    /// The file tree cards; none from a core that predates them (the board then keeps its own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_trees: Option<Vec<FileTreeRecord>>,
 }
 
 /// What the running runners serve and cost, and when each started.
@@ -231,6 +242,8 @@ impl BoardRequest {
                 named(&mut record.name, fallback)
             }
             Self::UpdateImage(record) => named(&mut record.value.name, ""),
+            Self::AddFileTree(record) => named(&mut record.value.name, "Files"),
+            Self::UpdateFileTree(record) => named(&mut record.value.name, ""),
             Self::Elements(list) => list.value.iter_mut().for_each(|info| info.name = BoardName::named(&info.name, &info.kind)),
             _ => {}
         }
