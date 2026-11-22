@@ -141,6 +141,8 @@ struct CanvasView: View {
             }
         }
         .navigationTitle(worktree.title)
+        .onAppear { WaitingBanner.board = worktree }
+        .onDisappear { if WaitingBanner.board == worktree { WaitingBanner.board = nil } }
         .toolbarBackground(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $opened) { card in TerminalPage(link: link, card: card) }
@@ -417,24 +419,32 @@ struct CardView: View {
     }
 }
 
-/// The agent's question, with its quick answers; the rest waits on the Mac.
+/// The agent's question, with its quick answers; the rest waits on the Mac. Tapping it opens
+/// the decision as a sheet at full size, for answering without zooming in.
 struct DecisionBalloon: View {
     let link: HostLink
     let decision: Decision
+    @State private var reading = false
 
     var body: some View {
+        balloon
+            .contentShape(Rectangle())
+            .onTapGesture { reading = true }
+            .sheet(isPresented: $reading) { DecisionSheet(link: link, decision: decision) }
+            #if DEBUG
+            // `-readDecision YES`: opens the sheet as a tap would, for screenshots.
+            .task { if UserDefaults.standard.bool(forKey: "readDecision") { reading = true } }
+            #endif
+    }
+
+    private var balloon: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(decision.ask.question).font(Theme.Font.heading).foregroundStyle(Theme.onAccent)
             if !decision.framing.isEmpty {
                 Text(decision.framing).font(Theme.Font.caption).foregroundStyle(Theme.onAccent).lineLimit(3)
             }
             HStack(spacing: 6) {
-                if decision.ask.variants.isEmpty {
-                    answer("OK", "ok")
-                } else {
-                    ForEach(decision.ask.variants, id: \.letter) { answer($0.letter, $0.letter) }
-                    answer("Use Recommended", "useRecommended")
-                }
+                ForEach(decision.answers, id: \.value) { answer($0.value == "useRecommended" || $0.value == "ok" ? $0.title : $0.value, $0.value) }
             }
         }
         .padding(12)
@@ -445,6 +455,49 @@ struct DecisionBalloon: View {
     private func answer(_ title: String, _ value: String) -> some View {
         Button(title) { link.send(BoardSay.answerDecision(decision.id, value)) }
             .buttonStyle(SolidButton(fill: Theme.surface, text: Theme.deep))
+    }
+}
+
+/// A decision at reading size: what it is about, the question, and each answer as a full-width button.
+struct DecisionSheet: View {
+    let link: HostLink
+    let decision: Decision
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if !decision.framing.isEmpty {
+                Text(decision.framing).font(Theme.Font.label).foregroundStyle(Theme.inkMuted)
+            }
+            Text(decision.ask.question).font(Theme.Font.title).foregroundStyle(Theme.ink)
+            VStack(spacing: 10) {
+                ForEach(decision.answers, id: \.value) { answer in
+                    Button {
+                        link.send(BoardSay.answerDecision(decision.id, answer.value))
+                        withAnimation(.snappy) { dismiss() }
+                    } label: {
+                        Text(answer.title).frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SolidButton(fill: answer.value == "useRecommended" ? Theme.surfaceDeep : Theme.accent,
+                                             text: answer.value == "useRecommended" ? Theme.ink : Theme.onAccent))
+                    .accessibilityIdentifier("decisionAnswer-\(answer.value)")
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface)
+        .presentationDetents([.medium])
+        .presentationCornerRadius(Theme.Radius.dialog)
+    }
+}
+
+extension Decision {
+    /// The answers it offers: OK for a validation; each variant, then Use Recommended, for a choice.
+    var answers: [(title: String, value: String)] {
+        ask.variants.isEmpty ? [("OK", "ok")]
+            : ask.variants.map { ("\($0.letter). \($0.name)", $0.letter) } + [("Use Recommended", "useRecommended")]
     }
 }
 

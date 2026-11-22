@@ -136,13 +136,33 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(groups.first?.projects.map(\.name), ["api", "app"])
     }
 
-    /// A banner for each agent that starts waiting, but not for one already waiting, nor for the
-    /// one whose terminal is on screen.
+    /// A banner for each agent that starts waiting, but not for one already waiting, nor for one
+    /// the user sees (its terminal or its board on screen).
     func testTheBannerIsForAgentsThatJustStartedWaitingElsewhere() {
         let a = UUID(), b = UUID(), c = UUID()
-        XCTAssertEqual(WaitingBanner.arrived(before: [a], now: [a, b], viewing: nil), [b])
-        XCTAssertEqual(WaitingBanner.arrived(before: [a], now: [a, b], viewing: b), [])
-        XCTAssertEqual(WaitingBanner.arrived(before: [a, b], now: [a], viewing: nil), [])
-        XCTAssertEqual(Set(WaitingBanner.arrived(before: [], now: [b, c], viewing: nil)), [b, c])
+        XCTAssertEqual(WaitingBanner.arrived(before: [a], now: [a, b], shown: []), [b])
+        XCTAssertEqual(WaitingBanner.arrived(before: [a], now: [a, b], shown: [b]), [])
+        XCTAssertEqual(WaitingBanner.arrived(before: [a, b], now: [a], shown: []), [])
+        XCTAssertEqual(Set(WaitingBanner.arrived(before: [], now: [b, c], shown: [c])), [b])
+    }
+
+    /// An agent is on the open board when its folder and host are the board's; any other board, or none, isn't.
+    func testAnAgentIsOnTheOpenBoardOnlyWhenFolderAndHostMatch() {
+        let board = Worktree(path: "/w/phone-test-a", host: "abc")
+        XCTAssertTrue(WaitingBanner.onBoard(card: "/w/phone-test-a", host: "ABC", board))
+        XCTAssertFalse(WaitingBanner.onBoard(card: "/w/phone-test-b", host: "abc", board))
+        XCTAssertFalse(WaitingBanner.onBoard(card: "/w/phone-test-a", host: "other", board))
+        XCTAssertFalse(WaitingBanner.onBoard(card: "/w/phone-test-a", host: "abc", nil))
+    }
+
+    /// Every answer a decision offers, as full-size buttons: OK for a validation, each variant
+    /// and Use Recommended for a choice.
+    func testADecisionOffersItsAnswers() {
+        let id = UUID()
+        let validation = Decision(id: id, agent: id, framing: "f", ask: .validation(question: "Ship?"), state: .open)
+        XCTAssertEqual(validation.answers.map(\.value), ["ok"])
+        let choice = Decision(id: id, agent: id, framing: "f", ask: .choice(question: "Which?", variants: [.init(letter: "A", name: "List"), .init(letter: "B", name: "Grid")]), state: .open)
+        XCTAssertEqual(choice.answers.map(\.value), ["A", "B", "useRecommended"])
+        XCTAssertEqual(choice.answers.map(\.title), ["A. List", "B. Grid", "Use Recommended"])
     }
 }

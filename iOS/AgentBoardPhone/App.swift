@@ -183,10 +183,23 @@ enum Route: Hashable { case hosts }
 enum WaitingBanner {
     /// The terminal on screen, if any: its agent waiting needs no banner.
     @MainActor static var viewing: UUID?
+    /// The board on screen, if any: its agents' balloons already show there.
+    @MainActor static var board: Worktree?
 
-    /// The agents that started waiting since `before`, but the one on screen.
-    static func arrived(before: Set<UUID>, now: Set<UUID>, viewing: UUID?) -> [UUID] {
-        now.subtracting(before).subtracting(viewing.map { [$0] } ?? []).sorted { $0.uuidString < $1.uuidString }
+    /// The agents that started waiting since `before`, but those on screen (`shown`).
+    static func arrived(before: Set<UUID>, now: Set<UUID>, shown: Set<UUID>) -> [UUID] {
+        now.subtracting(before).subtracting(shown).sorted { $0.uuidString < $1.uuidString }
+    }
+
+    /// Of `waiting`, the agents the user already sees: the open terminal's, and every one on the open board.
+    @MainActor static func shown(_ waiting: [(link: HostLink, card: Card)]) -> Set<UUID> {
+        Set(waiting.filter { $0.card.id == viewing || onBoard(card: $0.card.worktree, host: $0.link.host.id, board) }.map(\.card.id))
+    }
+
+    /// Whether a card in folder `card` on `host` belongs to `board`.
+    static func onBoard(card: String, host: String, _ board: Worktree?) -> Bool {
+        guard let board else { return false }
+        return board.path == card && board.host.lowercased() == host.lowercased()
     }
 }
 
@@ -279,7 +292,7 @@ struct BrowseView: View {
             }
         }
         .onChange(of: Set(hosts.waitingAgents.map(\.card.id))) { before, now in
-            let arrived = WaitingBanner.arrived(before: before, now: now, viewing: WaitingBanner.viewing)
+            let arrived = WaitingBanner.arrived(before: before, now: now, shown: WaitingBanner.shown(hosts.waitingAgents))
             guard let first = arrived.first, let found = hosts.waitingAgents.first(where: { $0.card.id == first }) else { return }
             withAnimation(.snappy) { banner = (found.card, found.link, arrived.count - 1) }
             Task {
