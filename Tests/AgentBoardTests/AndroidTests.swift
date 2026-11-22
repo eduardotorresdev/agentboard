@@ -163,8 +163,9 @@ private let androidSDK: String? = {
 }()
 
 /// An emulator on this Mac through the whole card path: boot, first frame, snapshot, typing,
-/// screenshot, close. Needs the Android SDK and an arm64 system image; skipped without them.
-@Suite(.enabled(if: androidSDK != nil, "No Android SDK with an arm64 system image."), .serialized)
+/// screenshot, close. Needs the Android SDK, an arm64 system image and AGENTBOARD_EMULATOR_TESTS=1.
+@Suite(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_EMULATOR_TESTS"] == "1", "Boots an emulator: set AGENTBOARD_EMULATOR_TESTS=1 to run it."),
+       .enabled(if: androidSDK != nil, "No Android SDK with an arm64 system image."), .serialized)
 @MainActor
 struct AndroidEmulatorTests {
     @Test(.timeLimit(.minutes(10))) func drivesAnEmulator() async throws {

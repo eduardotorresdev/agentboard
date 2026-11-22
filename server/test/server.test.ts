@@ -790,3 +790,28 @@ it("lets a host's session read the catalog but not write it", async () => {
   expect(await catalogCall("PUT", hostToken, { version: 1, document: btoa("x") })).toEqual([403, { error: "wrong_session" }]);
   expect((await call("GET", "/v1/catalog")).status).toBe(401);
 });
+
+it("keeps an avatar per organization, versioned on its own", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const { hostToken } = await register(account, "owner");
+  const org = "6F9619FF-8B86-D011-B42D-00C04FC964FF";
+  const path = `/v1/catalog/avatars/${org}`;
+  const ask = async (method: string, who: string, body?: unknown): Promise<[number, unknown]> => {
+    const response = await call(method, path, { token: who, body });
+    return [response.status, await response.json()];
+  };
+  expect(await ask("GET", token)).toEqual([404, { error: "no_avatar" }]);
+  expect(await ask("PUT", token, { version: 0, image: btoa("png") })).toEqual([200, { version: 1 }]);
+  expect(await ask("PUT", token, { version: 0, image: btoa("other") })).toEqual([409, { error: "stale" }]);
+  expect(await ask("GET", hostToken)).toEqual([200, { version: 1, image: btoa("png") }]);
+  expect(await ask("PUT", hostToken, { version: 1, image: btoa("x") })).toEqual([403, { error: "wrong_session" }]);
+  expect((await ask("PUT", token, { version: 1, image: btoa("x".repeat(64 * 1024 + 1)) }))[0]).toBe(413);
+  expect((await ask("PUT", token, { version: 1, image: 5 }))[0]).toBe(400);
+  // Removed: the version stays, so a writer behind can't bring the old image back.
+  expect(await ask("PUT", token, { version: 1, image: null })).toEqual([200, { version: 2 }]);
+  expect(await ask("GET", token)).toEqual([200, { version: 2, image: null }]);
+  const listed = await call("GET", "/v1/catalog/avatars", { token });
+  expect(await listed.json()).toEqual([{ organization: org.toLowerCase(), version: 2 }]);
+  expect(await (await call("GET", "/v1/catalog/avatars", { token: await signIn(account + 1, "other") })).json()).toEqual([]);
+});

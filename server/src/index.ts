@@ -18,6 +18,8 @@ const MAX_VAULT = 512 * 1024 * 1024;
 const MAX_MANIFEST_CHUNKS = 20_000;
 const MAX_HAVE = 5000;
 const MAX_CATALOG = 1_000_000; // no avatars in it (docs/catalog.md)
+const MAX_AVATAR = 64 * 1024;
+const AVATAR_PATH = new RegExp(`^/v1/catalog/avatars/(${UUID})$`);
 const MAX_BATCH = 8 * 1024 * 1024; // bytes of framed chunks in one request or reply
 const MAX_BATCH_GET = 200;
 const FRAME_HEAD = 68; // id (64 ASCII hex) then the length (u32 big-endian)
@@ -97,6 +99,10 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (request.method === "PUT" && hostSession) return fail(403, "wrong_session");
     return catalog(request, env, account.id);
   }
+  if (path === "/v1/catalog/avatars" || AVATAR_PATH.test(path)) {
+    if (request.method === "PUT" && hostSession) return fail(403, "wrong_session");
+    return avatars(request, env, account.id, AVATAR_PATH.exec(path)?.[1].toLowerCase());
+  }
 
   const match = HOST_PATH.exec(path);
   if (!match) return fail(404, "not_found");
@@ -154,6 +160,36 @@ async function catalog(request: Request, env: Env, account: number): Promise<Res
     : env.DB.prepare("UPDATE catalog SET version = version + 1, document = ? WHERE account_id = ? AND version = ?").bind(bytes, account, version)
   ).run();
   // A writer behind reads again, merges and repeats.
+  if (!written.meta.changes) return fail(409, "stale");
+  return json({ version: (version as number) + 1 });
+}
+
+// Avatars, one per organization, each with its own version: `GET /v1/catalog/avatars` lists the
+// versions, `GET …/<organization>` gives one, `PUT …/<organization>` `{version, image|null}` sets
+// or removes one (409 `stale` like the catalog). The image is opaque bytes, like the document.
+async function avatars(request: Request, env: Env, account: number, organization: string | undefined): Promise<Response> {
+  if (!organization) {
+    if (request.method !== "GET") return fail(404, "not_found");
+    const { results } = await env.DB.prepare("SELECT organization, version FROM catalog_avatars WHERE account_id = ? ORDER BY organization").bind(account).all();
+    return json(results);
+  }
+  if (request.method === "GET") {
+    const row = await env.DB.prepare("SELECT version, image FROM catalog_avatars WHERE account_id = ? AND organization = ?")
+      .bind(account, organization)
+      .first<{ version: number; image: ArrayBuffer | number[] | null }>();
+    if (!row) return fail(404, "no_avatar");
+    return json({ version: row.version, image: row.image ? base64(new Uint8Array(row.image)) : null });
+  }
+  if (request.method !== "PUT") return fail(404, "not_found");
+  const { version, image } = (await readJSON(request)) ?? {};
+  if (!Number.isSafeInteger(version) || (version as number) < 0) return fail(400, "invalid_version");
+  const bytes = image === null ? null : typeof image === "string" ? unbase64(image) : undefined;
+  if (bytes === undefined || (bytes && !bytes.length)) return fail(400, "invalid_image");
+  if (bytes && bytes.length > MAX_AVATAR) return fail(413, "too_large");
+  const written = await (version === 0
+    ? env.DB.prepare("INSERT INTO catalog_avatars (account_id, organization, version, image) VALUES (?, ?, 1, ?) ON CONFLICT DO NOTHING").bind(account, organization, bytes)
+    : env.DB.prepare("UPDATE catalog_avatars SET version = version + 1, image = ? WHERE account_id = ? AND organization = ? AND version = ?").bind(bytes, account, organization, version)
+  ).run();
   if (!written.meta.changes) return fail(409, "stale");
   return json({ version: (version as number) + 1 });
 }
