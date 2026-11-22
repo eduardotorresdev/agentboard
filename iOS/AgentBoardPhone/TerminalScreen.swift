@@ -66,6 +66,8 @@ struct TerminalPage: View {
             }
         }
         // The session's state isn't observable; a glance each second is enough for one button.
+        .onAppear { WaitingBanner.viewing = card.id }
+        .onDisappear { if WaitingBanner.viewing == card.id { WaitingBanner.viewing = nil } }
         .task {
             link.open(card.id)
             while !Task.isCancelled {
@@ -92,6 +94,11 @@ struct TerminalPage: View {
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
             }
             link.type(Array(text.utf8) + encode(.enter), to: card.id)
+            // `-leaveAfterTyping YES`: back to the board, so what the agent does next finds the user elsewhere.
+            if UserDefaults.standard.bool(forKey: "leaveAfterTyping") {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                dismiss()
+            }
         }
         #endif
         .navigationBarTitleDisplayMode(.inline)

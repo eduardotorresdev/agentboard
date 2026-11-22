@@ -143,6 +143,14 @@ struct Fingerprint: View {
         return link.cards.filter { agents.contains($0.id) && $0.worktree == worktree.path }.count
     }
 
+    /// Every agent waiting for the user now, on any host: in its terminal or on a decision.
+    var waitingAgents: [(link: HostLink, card: Card)] {
+        links.values.flatMap { link in
+            let ids = Set(link.attention.map(\.id) + link.decisions.filter { $0.state != .closed }.map(\.agent))
+            return link.cards.filter { ids.contains($0.id) }.map { (link: link, card: $0) }
+        }
+    }
+
     /// A link's phase, as the browsing screens see it.
     func phase(_ link: HostLink?) -> HostLink.Phase? {
         #if DEBUG
@@ -171,6 +179,17 @@ struct Fingerprint: View {
 
 enum Route: Hashable { case hosts }
 
+/// The in-app banner for an agent that starts waiting for the user while they look elsewhere.
+enum WaitingBanner {
+    /// The terminal on screen, if any: its agent waiting needs no banner.
+    @MainActor static var viewing: UUID?
+
+    /// The agents that started waiting since `before`, but the one on screen.
+    static func arrived(before: Set<UUID>, now: Set<UUID>, viewing: UUID?) -> [UUID] {
+        now.subtracting(before).subtracting(viewing.map { [$0] } ?? []).sorted { $0.uuidString < $1.uuidString }
+    }
+}
+
 /// The root, as the Mac's sidebar: an organization, its projects, each project's worktrees from
 /// any host.
 struct BrowseView: View {
@@ -179,6 +198,7 @@ struct BrowseView: View {
     @State private var groups: [OrganizationGroup] = []
     @State private var selected: String?
     @State private var path = NavigationPath()
+    @State private var banner: (card: Card, link: HostLink, more: Int)?
     @Environment(\.scenePhase) private var scenePhase
 
     private var current: OrganizationGroup? { groups.first { $0.id == selected } ?? groups.first }
@@ -256,6 +276,40 @@ struct BrowseView: View {
             .navigationDestination(for: Host.self) { host in WorktreesView(account: account, link: hosts.link(host), path: $path) }
             .navigationDestination(for: Worktree.self) { worktree in
                 if let link = hosts.link(id: worktree.host) { CanvasView(link: link, worktree: worktree) }
+            }
+        }
+        .onChange(of: Set(hosts.waitingAgents.map(\.card.id))) { before, now in
+            let arrived = WaitingBanner.arrived(before: before, now: now, viewing: WaitingBanner.viewing)
+            guard let first = arrived.first, let found = hosts.waitingAgents.first(where: { $0.card.id == first }) else { return }
+            withAnimation(.snappy) { banner = (found.card, found.link, arrived.count - 1) }
+            Task {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if banner?.card.id == first { withAnimation(.snappy) { banner = nil } }
+            }
+        }
+        .overlay(alignment: .top) {
+            if let banner {
+                Button {
+                    path.append(Worktree(path: banner.card.worktree, host: banner.link.host.id.lowercased()))
+                    withAnimation(.snappy) { self.banner = nil }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "hand.raised.fill").font(Theme.Font.label)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(banner.card.name) is waiting for you").font(Theme.Font.heading)
+                            Text(banner.more == 0 ? "Tap to open its board." : "And \(banner.more) more. Tap to open its board.")
+                                .font(Theme.Font.caption)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.onAccent)
+                    .padding(14)
+                    .background(Theme.deep, in: RoundedRectangle(cornerRadius: Theme.Radius.dialog, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityIdentifier("waitingBanner")
             }
         }
     }

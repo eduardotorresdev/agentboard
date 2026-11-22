@@ -135,4 +135,14 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(groups.first?.organization.id, OrganizationHome.defaultID)
         XCTAssertEqual(groups.first?.projects.map(\.name), ["api", "app"])
     }
+
+    /// A banner for each agent that starts waiting, but not for one already waiting, nor for the
+    /// one whose terminal is on screen.
+    func testTheBannerIsForAgentsThatJustStartedWaitingElsewhere() {
+        let a = UUID(), b = UUID(), c = UUID()
+        XCTAssertEqual(WaitingBanner.arrived(before: [a], now: [a, b], viewing: nil), [b])
+        XCTAssertEqual(WaitingBanner.arrived(before: [a], now: [a, b], viewing: b), [])
+        XCTAssertEqual(WaitingBanner.arrived(before: [a, b], now: [a], viewing: nil), [])
+        XCTAssertEqual(Set(WaitingBanner.arrived(before: [], now: [b, c], viewing: nil)), [b, c])
+    }
 }

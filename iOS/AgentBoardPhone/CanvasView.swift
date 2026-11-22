@@ -151,6 +151,29 @@ struct CanvasView: View {
         .task {
             DebugPerf.shared.start()
             await debugTestBoard()
+            // `-answerDecision <ok|letter>`: once an agent here opens a decision, answers it as its
+            // balloon's button does (after 10 s, for a screenshot), then logs the agent's lines
+            // that say ANSWER.
+            if let answer = DebugLaunch.value("answerDecision") {
+                var asked: Decision?
+                for _ in 0..<600 where asked == nil {
+                    asked = link.decisions.first { decision in link.cards(in: worktree.path).contains { $0.id == decision.agent } }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+                if let asked {
+                    DebugTerm.log("decision: opened \"\(asked.ask.question)\"")
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    link.send(BoardSay.answerDecision(asked.id, answer))
+                    DebugTerm.log("decision: answered \(answer)")
+                    for _ in 0..<120 {
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        let lines = link.session(asked.agent).withTerminal { $0.screenText() }.filter { $0.contains("ANSWER") }
+                        if lines.contains(where: { !$0.contains("<") }) { DebugTerm.log("decision: agent shows \(lines)"); break }
+                    }
+                } else {
+                    DebugTerm.log("decision: none opened")
+                }
+            }
             // `-openStream YES`: the first streamed card, full screen, once it is on the board.
             if UserDefaults.standard.bool(forKey: "openStream") {
                 for _ in 0..<30 where watching == nil {

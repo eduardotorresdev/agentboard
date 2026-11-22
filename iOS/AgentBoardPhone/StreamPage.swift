@@ -76,6 +76,16 @@ struct StreamPage: View {
             }
         }
         .task { await model.watch(element.id, on: link) }
+        #if DEBUG
+        // `-streamType <text>`: typed through the composer once the picture shows, as the user would.
+        .task {
+            guard let typed = DebugLaunch.value("streamType") else { return }
+            while model.notice != nil { try? await Task.sleep(nanoseconds: 300_000_000) }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            text = typed
+            send()
+        }
+        #endif
         .onDisappear { model.stop() }
     }
 
