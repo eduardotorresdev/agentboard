@@ -15,7 +15,7 @@ public enum OrganizationHome {
     private static let ownEntries: Set<String> = [".credentials.json", ".claude.json"]
 
     private static var userClaude: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude", isDirectory: true)
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude", isDirectory: true)
     }
 
     /// The organization's own folder in the data folder (its icon lives there too).
@@ -62,7 +62,7 @@ public enum OrganizationHome {
     /// `/login` in one of its agents fixes it.
     private static func inheritLogin(into directory: URL) {
         let files = FileManager.default
-        let home = files.homeDirectoryForCurrentUser
+        let home = URL(fileURLWithPath: NSHomeDirectory())
         let account = home.appendingPathComponent(".claude.json")
         try? files.copyItem(at: account, to: directory.appendingPathComponent(".claude.json"))
         try? files.copyItem(at: userClaude.appendingPathComponent(".credentials.json"),
@@ -98,6 +98,9 @@ public enum OrganizationHome {
     }
 
     fileprivate static func security(_ arguments: [String]) -> String? {
+        #if !os(macOS)
+        return nil  // No security tool on the phone, which keeps no agent logins.
+        #else
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
@@ -110,6 +113,7 @@ public enum OrganizationHome {
         guard process.terminationStatus == 0 else { return nil }
         let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .newlines)
         return text.isEmpty ? nil : text
+        #endif
     }
 }
 

@@ -89,6 +89,13 @@ final class WireTests: XCTestCase {
         XCTAssertNil(card["organization"])
     }
 
+    /// `BoardRequest.writePostIt(id:text:)` as Swift's synthesized Codable writes it.
+    func testEditingAPostItWritesItsText() throws {
+        let id = UUID()
+        let sent = try JSONSerialization.jsonObject(with: BoardSay.writePostIt(id, "# Plan\n- ship")) as! [String: [String: String]]
+        XCTAssertEqual(sent, ["writePostIt": ["id": id.uuidString, "text": "# Plan\n- ship"]])
+    }
+
     func testFingerprintIsFiveGroupsOfFour() {
         let print = HostChannel.fingerprint(of: Data(repeating: 0, count: 32))
         XCTAssertEqual(print.split(separator: " ").count, 5)

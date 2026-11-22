@@ -10,6 +10,9 @@ struct PhoneApp: App {
                 if account.token == nil { SignInView(account: account) } else { BrowseView(account: account) }
             }
             .preferredColorScheme(.light)
+            #if DEBUG
+            .onAppear { account.logKey() }
+            #endif
             .tint(Theme.accent)
         }
     }
@@ -33,7 +36,8 @@ struct SignInView: View {
         VStack(alignment: .leading, spacing: 20) {
             Spacer()
             // The whole scene, clouds included, stays inside the margin.
-            SkyBlob()
+            // The leftmost cloud starts 6 points into the frame: its edge lines up with the text.
+            SkyBlob().padding(.leading, -6)
             Text("Sign in").font(Theme.Font.headline).tracking(Theme.Font.headlineTracking).foregroundStyle(Theme.ink)
             if let code {
                 Text("Enter this code on GitHub, from any device.").font(Theme.Font.body).foregroundStyle(Theme.inkMuted)
@@ -49,7 +53,6 @@ struct SignInView: View {
             }
             if let error { Text(error).font(Theme.Font.caption).foregroundStyle(Theme.danger) }
             Spacer()
-            Fingerprint(account: account)
         }
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -407,12 +410,16 @@ struct WorktreesView: View {
             let list = await catalog.worktrees(on: link, document: await catalog.document())
             withAnimation(.smooth) { worktrees = list }
             #if DEBUG
-            // `-openWorktree <path>` and `-openCard <uuid>`, once.
+            // `-openWorktree <path>` and `-openCard <uuid>`, once. `agent` for either: the first
+            // agent card's worktree, or that card.
             if path.count == 1 {
-                if let wanted = DebugLaunch.value("openWorktree") {
+                let agent = link.cards.first { $0.runner == nil }
+                if var wanted = DebugLaunch.value("openWorktree") {
+                    if wanted == "agent", let agent { wanted = agent.worktree }
                     path.append(list.first { $0.path == wanted } ?? Worktree(path: wanted, host: link.host.id.lowercased()))
                 }
-                if let id = DebugLaunch.value("openCard").flatMap(UUID.init), let card = link.cards.first(where: { $0.id == id }) {
+                let wanted = DebugLaunch.value("openCard")
+                if let card = wanted == "agent" ? agent : link.cards.first(where: { $0.id == wanted.flatMap(UUID.init) }) {
                     path.append(card)
                 }
             }
