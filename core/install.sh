@@ -4,7 +4,7 @@ set -eu
 
 # In a function, called on the last line: a download cut short runs nothing.
 main() {
-  base="${AGENTBOARD_DOWNLOAD:-https://agentboard-account.agentboard-account-server.workers.dev/download}"
+  base="${AGENTBOARD_DOWNLOAD:-https://agentboard.eduardotorres.dev/download}"
   case "$base" in
     https://*) ;;
     *) fail "the download address must be https" ;;

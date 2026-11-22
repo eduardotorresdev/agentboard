@@ -23,7 +23,7 @@ import Testing
     func aBoardDrivesARealHost() async throws {
         let environment = ProcessInfo.processInfo.environment
         let saved = try JSONDecoder().decode(Saved.self, from: Data(contentsOf: URL(fileURLWithPath: environment["AGENTBOARD_PILOT"]!)))
-        let server = URL(string: environment["AGENTBOARD_SERVER"] ?? "https://agentboard-account.agentboard-account-server.workers.dev")!
+        let server = URL(string: environment["AGENTBOARD_SERVER"] ?? "https://agentboard.eduardotorres.dev")!
         var listing = URLRequest(url: server.appendingPathComponent("v1/hosts"))
         listing.setValue("Bearer \(saved.token)", forHTTPHeaderField: "Authorization")
         let hosts = try JSONDecoder().decode([Host].self, from: try await URLSession.shared.data(for: listing).0)

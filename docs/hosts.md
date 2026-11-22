@@ -171,7 +171,7 @@ reaches no other. Only a host's session speaks as the host: a board's can't regi
 take a host's line. A host belongs to the
 account that registered it; every call on it from another account is 404.
 
-- It is deployed at `https://agentboard-account.agentboard-account-server.workers.dev`
+- It is deployed at `https://agentboard.eduardotorres.dev`
   (`server/README.md` says how); `AGENTBOARD_SERVER` points a build elsewhere.
 - Errors are `{"error": "<code>"}` with the status: 400 `invalid_*`, 401 `unauthorized`, 403
   `too_many_hosts`, 404 `not_found`, 429 `rate_limited`, 502 `github`.

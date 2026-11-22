@@ -10,7 +10,7 @@ use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
-pub const DEPLOYED: &str = "https://agentboard-account.agentboard-account-server.workers.dev";
+pub const DEPLOYED: &str = "https://agentboard.eduardotorres.dev";
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
