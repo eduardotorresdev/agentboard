@@ -388,7 +388,10 @@ final class AccountStore {
     func refreshHosts() async {
         guard let token else { return }
         do {
-            let fresh: [Host] = try await call("GET", "v1/hosts", token: token)
+            // This Mac as a host of the account is this board's own core, not another host.
+            let itself = MacHost.hostID
+            let listed: [Host] = try await call("GET", "v1/hosts", token: token)
+            let fresh = listed.filter { $0.id != itself }
             // Signed out, or in again as someone else, while the answer was on its way.
             guard self.token == token else { return }
             if hosts != fresh { hosts = fresh }

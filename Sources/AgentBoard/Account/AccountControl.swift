@@ -225,6 +225,7 @@ struct AccountMenu: View {
                     .lineLimit(1)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
+                macHostActions
                 MenuAction(title: confirmingSignOut ? L("Sign out? Click again") : L("Sign out"),
                            caption: L("Agents on your hosts keep running; this Mac stops showing them.")) {
                     guard confirmingSignOut else { return confirmingSignOut = true }
@@ -252,6 +253,37 @@ struct AccountMenu: View {
         .padding(6)
         .onExitCommand(perform: close)
         .modifier(MenuChrome(state: state, anchor: anchor))
+    }
+
+    /// This Mac as a host: on or off, its own sign-in, and the boards waiting for approval.
+    @ViewBuilder private var macHostActions: some View {
+        let host = hosts.macHost
+        MenuAction(title: (host.isWanted ? "✓ " : "") + L("This Mac as host"),
+                   caption: L("Your other boards can run agents here, once you approve each one.")) {
+            host.setWanted(!host.isWanted, signedIn: account.account != nil)
+        }
+        .accessibilityAddTraits(host.isWanted ? .isSelected : [])
+        if let signIn = host.signIn {
+            MenuAction(title: L("Confirm code \(signIn.code)"),
+                       caption: L("The host signs in on its own, apart from this board: open the page and enter this code.")) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(signIn.code, forType: .string)
+                NSWorkspace.shared.open(signIn.page)
+            }
+            .padding(.leading, 22)
+        }
+        if let error = host.error {
+            Text(error).font(Theme.Font.caption).foregroundStyle(Theme.danger)
+                .padding(.horizontal, 8).padding(.leading, 22)
+        }
+        ForEach(host.waiting) { board in
+            MenuAction(title: L("Approve \(board.fingerprint)"),
+                       caption: board.name.isEmpty ? L("A board wants to use this Mac. Its own account menu shows the same fingerprint.")
+                           : L("“\(board.name)” wants to use this Mac. Its own account menu shows the same fingerprint.")) {
+                host.approve(board)
+            }
+            .padding(.leading, 22)
+        }
     }
 }
 
