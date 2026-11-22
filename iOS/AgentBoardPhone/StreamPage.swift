@@ -103,6 +103,9 @@ struct StreamPage: View {
             if stopped { return client.close() }
             self.client = client
             surface.client = client
+            #if DEBUG
+            if UserDefaults.standard.bool(forKey: "streamProbe") { StreamProbe.shared.start(client) }
+            #endif
             let ended = AsyncStream<Void> { continuation in
                 let surface = surface
                 let decoder = Locked(StreamDecoder())
@@ -110,6 +113,9 @@ struct StreamPage: View {
                     var picture: StreamDecoder.Picture?
                     decoder.mutate { picture = $0.decode(out) }
                     guard let picture else { return }
+                    #if DEBUG
+                    StreamProbe.shared.saw(picture)
+                    #endif
                     DispatchQueue.main.async {
                         MainActor.assumeIsolated {
                             if case .header = picture {} else if self?.notice != nil { self?.notice = nil }
@@ -227,3 +233,68 @@ final class StreamSurfaceView: UIView {
         client?.send(["type": "scroll", "x": point.x, "y": point.y, "dx": (at.x - last.x) / scale, "dy": (at.y - last.y) / scale])
     }
 }
+
+#if DEBUG
+/// `-streamProbe YES`: logs pictures per second, and 20 touch→frame latencies: a touch at the
+/// picture's center, then the time until a frame whose center brightness flipped (the test page
+/// toggles its background on each pointer down).
+final class StreamProbe: @unchecked Sendable {
+    static let shared = StreamProbe()
+    private let lock = NSLock()
+    private var frames = 0
+    private var second = Date()
+    private var header: StreamWire.Header?
+    private var lastBright: Bool?
+    private var touched: Date?
+    private var samples: [Double] = []
+
+    func start(_ client: StreamClient) {
+        Thread.detachNewThread { [self] in
+            Thread.sleep(forTimeInterval: 4)
+            for _ in 0..<20 {
+                guard let header = lock.withLock({ self.header }) else { Thread.sleep(forTimeInterval: 1); continue }
+                lock.withLock { touched = Date() }
+                client.send(["type": "touch", "phase": "down", "x": header.width / 2, "y": header.height / 2])
+                client.send(["type": "touch", "phase": "up", "x": header.width / 2, "y": header.height / 2])
+                Thread.sleep(forTimeInterval: 1.5)
+            }
+            let sorted = lock.withLock { samples.sorted() }
+            DebugTerm.log("stream probe: \(sorted.count) samples, median \(sorted.isEmpty ? 0 : Int(sorted[sorted.count / 2])) ms, min \(Int(sorted.first ?? 0)), max \(Int(sorted.last ?? 0))")
+        }
+    }
+
+    func saw(_ picture: StreamDecoder.Picture) {
+        var bright: Bool?
+        switch picture {
+        case .header(let next): lock.withLock { header = next }; return
+        case .image(let image): bright = Self.centerIsBright(image)
+        case .sample: break
+        }
+        let now = Date()
+        lock.withLock {
+            frames += 1
+            if now.timeIntervalSince(second) >= 1 {
+                DebugTerm.log("stream fps \(frames)")
+                frames = 0
+                second = now
+            }
+            guard let bright else { return }
+            if let last = lastBright, last != bright, let touched {
+                let ms = now.timeIntervalSince(touched) * 1000
+                samples.append(ms)
+                DebugTerm.log("stream touch→frame \(Int(ms)) ms")
+                self.touched = nil
+            }
+            lastBright = bright
+        }
+    }
+
+    private static func centerIsBright(_ image: CGImage) -> Bool {
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        context?.draw(image, in: CGRect(x: -CGFloat(image.width) / 2, y: -CGFloat(image.height) / 2, width: CGFloat(image.width), height: CGFloat(image.height)))
+        return Int(pixel[0]) + Int(pixel[1]) + Int(pixel[2]) > 384
+    }
+}
+#endif

@@ -151,6 +151,13 @@ struct CanvasView: View {
         .task {
             DebugPerf.shared.start()
             await debugTestBoard()
+            // `-openStream YES`: the first streamed card, full screen, once it is on the board.
+            if UserDefaults.standard.bool(forKey: "openStream") {
+                for _ in 0..<30 where watching == nil {
+                    watching = link.elements.first { $0.worktree == worktree.path && $0.streams }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+            }
             if let value = DebugLaunch.value("zoom"), let scale = Double(value) { zoom = scale; rasterZoom = scale }
             guard UserDefaults.standard.bool(forKey: "autoPan") else { return }
             let start = Date()
