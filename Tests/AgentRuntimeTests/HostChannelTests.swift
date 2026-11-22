@@ -14,6 +14,8 @@ struct HostChannelTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let server = root.appendingPathComponent("server")
         let wrangler = server.appendingPathComponent("node_modules/.bin/wrangler").path
+        // wrangler refuses to start without the assets folder, which only a release fills.
+        try FileManager.default.createDirectory(at: server.appendingPathComponent("public"), withIntermediateDirectories: true)
         let relayPath = ProcessInfo.processInfo.environment["AGENTBOARD_HOST_RELAY"] ?? root.appendingPathComponent("core/target/debug/examples/relay").path
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abhost-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -197,6 +199,8 @@ struct HostChannelTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let server = root.appendingPathComponent("server")
         let wrangler = server.appendingPathComponent("node_modules/.bin/wrangler").path
+        // wrangler refuses to start without the assets folder, which only a release fills.
+        try FileManager.default.createDirectory(at: server.appendingPathComponent("public"), withIntermediateDirectories: true)
         let agentboard = root.appendingPathComponent("core/target/debug/agentboard").path
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abmac-\(UUID().uuidString.prefix(8))")
         let data = folder.appendingPathComponent("data"), hostFolder = data.appendingPathComponent("host")
