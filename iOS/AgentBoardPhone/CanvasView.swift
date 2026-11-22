@@ -216,7 +216,7 @@ extension CanvasView {
         let path = worktree.path
         guard (path as NSString).lastPathComponent.hasPrefix("phone-test-") else { return }
         let defaults = UserDefaults.standard
-        guard ["testAgent", "testRunner", "testBoard", "removeTest"].contains(where: defaults.bool(forKey:)) else { return }
+        guard ["testAgent", "testRunner", "testBoard", "prepareTest", "removeTest"].contains(where: defaults.bool(forKey:)) else { return }
         while link.phase != .connected { try? await Task.sleep(nanoseconds: 300_000_000) }
         // Read-only: which phone-test folders the host still has.
         let left = await link.run("sh", ["-c", "ls -d \"$HOME\"/agentboard/projects/phone-test-* 2>/dev/null; true"])
@@ -232,6 +232,8 @@ extension CanvasView {
         DebugTerm.log("test: setting up \(path)")
         let ran = await link.run("sh", ["-c", setup, "sh", path])
         DebugTerm.log("test: setup status \(ran?.status ?? -1), agents \(link.cards(in: path).count), provider \(AgentCatalog.all.first?.id ?? "none")")
+        // `-prepareTest YES`: only the folder, for a UI test that adds the cards itself.
+        if defaults.bool(forKey: "prepareTest") { return }
         // `-testBoard YES`: an agent, a post-it and a picture, left closed, to compare with the Mac.
         if defaults.bool(forKey: "testBoard") {
             if !link.cards(in: path).contains(where: { $0.runner == nil }), let provider = AgentCatalog.all.first { link.addAgent(provider, to: path) }

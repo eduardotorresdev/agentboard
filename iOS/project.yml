@@ -46,10 +46,22 @@ targets:
         CODE_SIGNING_ALLOWED: NO
         BUNDLE_LOADER: $(TEST_HOST)
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/AgentBoardPhone.app/AgentBoardPhone
+  AgentBoardPhoneUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [AgentBoardPhoneUITests]
+    dependencies:
+      - target: AgentBoardPhone
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AgentBoardPhone
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
 schemes:
   AgentBoardPhone:
     build:
       targets:
         AgentBoardPhone: all
     test:
-      targets: [AgentBoardPhoneTests]
+      targets: [AgentBoardPhoneTests, AgentBoardPhoneUITests]
