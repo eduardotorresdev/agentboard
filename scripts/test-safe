@@ -42,6 +42,19 @@ HELPER="$DEV/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-te
 BUNDLE="$PWD/$SCRATCH/arm64-apple-macosx/debug/AgentBoardPackageTests.xctest/Contents/MacOS/AgentBoardPackageTests"
 POLICY="(version 1)(allow default)(deny file-write* (subpath \"$SUPPORT/AgentBoard\") (subpath \"$SUPPORT/AgentBoard Dev\"))"
 
+# What the installed app (/Applications) keeps rewriting while the user works, left out of the
+# comparison only while it runs (checked at the start and at the end): its board state (database,
+# who made what, drafts, layout, images, attachments, browsers, simulators). This run can't
+# write them anyway (the sandbox above). Everything else still counts: the account, keys, vault,
+# hosts, organizations, and any new file.
+# shortcut: a fixed list of the app's own files; extend it when the app starts rewriting another
+# while in use (a false alarm names it).
+installed_app_files() {
+    pgrep -qf "^/Applications/AgentBoard.app/" || return 0
+    printf '%s\n' ./agentboard.sqlite ./agentboard.sqlite-wal ./agentboard.sqlite-shm ./makers.json ./composer-drafts.json \
+        ./workspace.json ./tools.port ./images/ ./attachments/ ./Browsers/ ./Simulators/
+}
+installed_app_files > "$WORK/installed"
 fingerprint > "$WORK/before"
 ENVIRONMENT=(AGENTBOARD_TEST=1 "DYLD_FRAMEWORK_PATH=$DEV/Platforms/MacOSX.platform/Developer/Library/Frameworks:$DEV/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks"
     "DYLD_LIBRARY_PATH=$DEV/Platforms/MacOSX.platform/Developer/usr/lib")
@@ -59,10 +72,13 @@ if [ "${XCTEST:-1}" = 1 ]; then
     [ "${PIPESTATUS[0]}" -eq 0 ] || STATUS=1
 fi
 fingerprint > "$WORK/after"
+installed_app_files >> "$WORK/installed"
+installed_app_files_only() { awk 'NR == FNR { owned[$0]; next }
+    { path = $0; sub(/^[0-9a-f]+  /, "", path); for (o in owned) if (path == o || (o ~ /\/$/ && index(path, o) == 1)) next; print }' "$WORK/installed" "$1"; }
 
-if ! diff -q "$WORK/before" "$WORK/after" >/dev/null; then
+if ! diff -q <(installed_app_files_only "$WORK/before") <(installed_app_files_only "$WORK/after") >/dev/null; then
     echo "test-safe: THE REAL DATA FOLDER OR PREFERENCES CHANGED. Stop and report:" >&2
-    diff "$WORK/before" "$WORK/after" >&2
+    diff <(installed_app_files_only "$WORK/before") <(installed_app_files_only "$WORK/after") >&2
     exit 99
 fi
 echo "test-safe: real data unchanged (exit $STATUS, work folder $WORK)"
