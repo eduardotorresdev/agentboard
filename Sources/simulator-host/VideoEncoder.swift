@@ -39,6 +39,9 @@ final class VideoEncoder {
         forceKey = true
     }
 
+    /// Whether frames of this size go out without a new session.
+    func fits(width: Int, height: Int) -> Bool { session != nil && width == self.width && height == self.height }
+
     func encode(_ pixels: CVPixelBuffer) {
         prepare(width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels))
         guard let session else { return }

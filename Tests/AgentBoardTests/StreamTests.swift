@@ -76,7 +76,7 @@ struct StreamTests {
     }
 
     @Test @MainActor func anIOSStreamRecoversWhenTheSidecarRestarts() {
-        let ios = IOSimulators()
+        let ios = IOSSimulators()
         let card = UUID()
         ios.cards.insert(card)
         let got = Outs()
@@ -140,6 +140,146 @@ struct StreamTests {
         client.close()
         try await Task.sleep(for: .milliseconds(300))
         #expect(source.watchers == 0)
+    }
+
+    /// A real browser card through the real sidecar (Playwright's WebKit, reused from another
+    /// install: AGENTBOARD_PLAYWRIGHT_MODULES), streamed over the loopback: measures frames a
+    /// second and input-to-picture latency, then kills the sidecar and expects the stream back.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_PLAYWRIGHT_MODULES"] != nil), .timeLimit(.minutes(3)))
+    @MainActor func aBrowserStreamLivesThroughItsSidecarRestarting() async throws {
+        let browsers = BrowserStore(database: nil)
+        let record = browsers.add(.desktop, to: NSTemporaryDirectory(), at: .zero, url: "about:blank")
+        defer { browsers.remove(record.id) }
+        try await browsers.ready(record.id)
+        // A still page whose colour flips on each click: the screencast sends a frame only when
+        // the picture changes, so the first frame after a click is the click's.
+        let page = "() => { document.body.style.margin = '0'; document.body.style.height = '100vh'; let on = false; "
+            + "document.body.onclick = () => { on = !on; document.body.style.background = on ? '#0090ff' : '#ffffff' } }"
+        _ = try await browsers.call("evaluate", on: record.id, ["function": page])
+        let server = try StreamServer(sources: [browsers])
+        let port = try await server.start()
+        defer { server.stop() }
+        let client = try Client(port: port)
+        client.write(Data(#"{"token":"\#(server.token)","card":"\#(record.id.uuidString)"}"#.utf8 + [0x0a]))
+        let first = await Task.detached { client.messages(count: 1, timeout: 20) }.value
+        guard case .header(let header)? = first.first else { Issue.record("no header"); return }
+        #expect(header.kind == "jpeg")
+
+        var latencies: [Double] = []
+        for _ in 0..<8 {
+            await Task.detached { client.drain(0.5) }.value
+            let sent = Date()
+            for phase in ["down", "up"] {
+                client.write(StreamWire.frame(Data(#"{"type":"touch","phase":"\#(phase)","x":40,"y":40}"#.utf8)))
+            }
+            if let shown = await Task.detached(operation: { client.nextJPEG(timeout: 3) }).value { latencies.append(shown.timeIntervalSince(sent) * 1000) }
+        }
+        #expect(latencies.count >= 6, "clicks didn't show: \(latencies)")
+
+        let animate = "() => { const tick = () => { document.body.style.background = `hsl(${Date.now() % 360}, 80%, 50%)`; requestAnimationFrame(tick) }; tick() }"
+        _ = try await browsers.call("evaluate", on: record.id, ["function": animate])
+        await Task.detached { client.drain(0.5) }.value
+        let frames = await Task.detached { () -> Int in
+            var count = 0
+            let end = Date().addingTimeInterval(5)
+            while let _ = client.nextJPEG(timeout: end.timeIntervalSinceNow) { count += 1 }
+            return count
+        }.value
+        let sorted = latencies.sorted()
+        print("stream-live browser: \(Double(frames) / 5) fps animating; click to frame ms median \(sorted.isEmpty ? 0 : sorted[sorted.count / 2]) "
+              + "min \(sorted.first ?? 0) max \(sorted.last ?? 0); load \(Self.load())")
+        #expect(frames > 25)
+
+        // The sidecar dies; nothing shows the card on a board, yet its stream comes back.
+        let pid = try #require(browsers.host.pid)
+        kill(pid, SIGKILL)
+        let killed = Date()
+        let again = await Task.detached { () -> (Bool, Date?) in
+            var header = false
+            let end = Date().addingTimeInterval(60)
+            while let out = client.next(timeout: end.timeIntervalSinceNow) {
+                if case .header = out { header = true }
+                if header, case .jpeg = out { return (true, Date()) }
+            }
+            return (header, nil)
+        }.value
+        #expect(again.0, "no fresh header after the sidecar restarted")
+        let back = try #require(again.1, "no frame after the sidecar restarted")
+        print("stream-live browser: back \(back.timeIntervalSince(killed)) s after the sidecar was killed")
+        client.close()
+    }
+
+    /// A real iOS Simulator (a device made for the test, booted headless by the real
+    /// simulator-host: AGENTBOARD_SIMULATOR_HOST, then shut down and deleted) streamed over the
+    /// loopback: how soon a viewer gets its first picture, and frames while a finger drags.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_SIMULATOR_HOST"] != nil), .timeLimit(.minutes(5)))
+    @MainActor func anIOSSimulatorStreamsLive() async throws {
+        let udid = try Self.simctl(["create", "AgentBoard stream test", "iPhone 17"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        defer {
+            _ = try? Self.simctl(["shutdown", udid])
+            _ = try? Self.simctl(["delete", udid])
+        }
+        let ios = IOSSimulators()
+        let record = SimulatorRecord(id: UUID(), worktree: "/w", name: "iPhone 17", udid: udid, deviceType: "iPhone 17", frame: .zero)
+        _ = try await ios.open(record, pixels: 800)
+        // The screen comes up and the encoder warms before anyone watches, as on a board.
+        try await Task.sleep(for: .seconds(8))
+        let source = IOSSource(ios: ios, card: record.id)
+        let server = try StreamServer(sources: [source])
+        let port = try await server.start()
+        defer { server.stop() }
+        let client = try Client(port: port)
+        let asked = Date()
+        client.write(Data(#"{"token":"\#(server.token)","card":"\#(record.id.uuidString)"}"#.utf8 + [0x0a]))
+        let firstPicture = await Task.detached { () -> Date? in
+            let end = Date().addingTimeInterval(20)
+            while let out = client.next(timeout: end.timeIntervalSinceNow) { if case .video = out { return Date() } }
+            return nil
+        }.value
+        let joined = try #require(firstPicture, "no picture").timeIntervalSince(asked)
+
+        // A finger drags the home screen sideways and back for 3 s.
+        let size = CGSize(width: 402, height: 874)
+        let dragged = Date()
+        let counting = Task.detached { () -> (Int, Date?) in
+            var count = 0, first: Date?
+            let end = Date().addingTimeInterval(4)
+            while let out = client.next(timeout: end.timeIntervalSinceNow) {
+                if case .video = out { count += 1; first = first ?? Date() }
+            }
+            return (count, first)
+        }
+        ios.touch(record.id, "down", at: CGPoint(x: size.width * 0.8, y: size.height / 2))
+        for step in 0..<180 {
+            try await Task.sleep(for: .milliseconds(16))
+            let t = Double(step % 60) / 60
+            ios.touch(record.id, "move", at: CGPoint(x: size.width * (0.8 - 0.6 * (step / 60 % 2 == 0 ? t : 1 - t)), y: size.height / 2))
+        }
+        ios.touch(record.id, "up", at: CGPoint(x: size.width * 0.5, y: size.height / 2))
+        let (frames, first) = await counting.value
+        let toPicture = first.map { $0.timeIntervalSince(dragged) * 1000 } ?? -1
+        print("stream-live ios: first picture \(String(format: "%.2f", joined)) s after the hello; \(Double(frames) / 3) fps while dragging; "
+              + "first drag frame \(String(format: "%.0f", toPicture)) ms after the finger went down; load \(Self.load())")
+        #expect(frames > 30)
+        client.close()
+        await ios.close(record, deleting: false)
+    }
+
+    static func simctl(_ arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl"] + arguments
+        let out = Pipe()
+        process.standardOutput = out
+        try process.run()
+        process.waitUntilExit()
+        return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    }
+
+    static func load() -> String {
+        var load = [Double](repeating: 0, count: 3)
+        getloadavg(&load, 3)
+        return load.map { String(format: "%.1f", $0) }.joined(separator: " ")
     }
 
     /// Decodes Annex B access units (parameter sets in front of the first) as a client would.
@@ -213,6 +353,22 @@ private final class FakeSource: StreamSource {
 
     func input(_ card: UUID, _ event: StreamWire.Input) { inputs.append(event) }
     func requestKeyFrame(_ card: UUID) {}
+}
+
+/// One iOS card of an `IOSSimulators`, as `SimulatorStore` serves it.
+@MainActor
+private final class IOSSource: StreamSource {
+    let ios: IOSSimulators
+    let card: UUID
+    init(ios: IOSSimulators, card: UUID) {
+        self.ios = ios
+        self.card = card
+    }
+    func stream(_ card: UUID, to sink: @escaping StreamTaps.Sink) -> (() -> Void)? { card == self.card ? ios.stream(card, to: sink) : nil }
+    func input(_ card: UUID, _ event: StreamWire.Input) {
+        if case .touch(let phase, let x, let y) = event { ios.touch(card, phase, at: CGPoint(x: x, y: y)) }
+    }
+    func requestKeyFrame(_ card: UUID) { ios.requestKeyFrame(card) }
 }
 
 /// A card that sends numbered H.264-shaped units as fast as it can, a keyframe every 25, and
@@ -299,15 +455,39 @@ private final class Client: @unchecked Sendable {
         return all
     }
 
+    private var reader = StreamWire.Reader()
+
+    /// The next message, or nil if none comes within `timeout`.
+    func next(timeout: TimeInterval) -> StreamWire.Out? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            if let message = try? reader.next() {
+                if let out = StreamWire.decode(message) { return out }
+                continue
+            }
+            guard deadline.timeIntervalSinceNow > 0, let data = read(timeout: max(0.01, deadline.timeIntervalSinceNow)) else { return nil }
+            reader.append(data)
+        }
+    }
+
     func messages(count: Int, timeout: TimeInterval) -> [StreamWire.Out] {
-        var reader = StreamWire.Reader()
         var outs: [StreamWire.Out] = []
         let deadline = Date().addingTimeInterval(timeout)
-        while outs.count < count, Date() < deadline, let data = read(timeout: max(0.1, deadline.timeIntervalSinceNow)) {
-            reader.append(data)
-            while let message = try? reader.next() { outs += [StreamWire.decode(message)].compactMap { $0 } }
-        }
+        while outs.count < count, let out = next(timeout: deadline.timeIntervalSinceNow) { outs.append(out) }
         return outs
+    }
+
+    /// The next JPEG, skipping anything else, and when it came.
+    func nextJPEG(timeout: TimeInterval) -> Date? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while let out = next(timeout: deadline.timeIntervalSinceNow) { if case .jpeg = out { return Date() } }
+        return nil
+    }
+
+    /// Reads and drops whatever comes for `seconds`.
+    func drain(_ seconds: TimeInterval) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while next(timeout: deadline.timeIntervalSinceNow) != nil {}
     }
 
     func close() {

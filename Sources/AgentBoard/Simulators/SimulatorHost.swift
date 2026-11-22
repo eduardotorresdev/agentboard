@@ -78,7 +78,9 @@ final class SimulatorHost {
     }
 
     private func launch() throws {
-        guard let executable = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("simulator-host"),
+        // AGENTBOARD_SIMULATOR_HOST: a build's own, for runs whose main executable isn't the app's (tests).
+        let override = ProcessInfo.processInfo.environment["AGENTBOARD_SIMULATOR_HOST"].map(URL.init(fileURLWithPath:))
+        guard let executable = override ?? Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("simulator-host"),
               FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw Failure(message: L("The simulator helper is missing from the app."))
         }

@@ -77,3 +77,27 @@ card's screen or page is back: the client gets a fresh `H`, then a keyframe.
   size. Measured straight from Playwright (not yet through the app) with a page animating
   every frame, 390×844: about 19 fps, 11 KB a frame, frames delivered within ~10 ms of capture;
   a click shows in the next frame 23–86 ms later. Taken under heavy load: provisional.
+
+## Recovery
+
+- A rotation (a new screen size) gets a new encoder session made off the main queue; until it is
+  ready no frames go out and clients keep the last picture. The screen and input never wait.
+- A watched browser card whose page fails (the sidecar stopped, the page crashed) reopens by
+  itself every 2 s while someone watches, whether or not a board shows the card; once open, its
+  stream starts over with a fresh `H`.
+- A watched iOS card is streamed again once a restarted `simulator-host` shows its screen.
+
+## Testing
+
+`StreamTests` covers framing, the token, input, a slow client, the iOS restart and an H.264
+round trip through the real encoder. Two live tests run only when asked, through
+`scripts/test-safe --filter`:
+
+- `AGENTBOARD_PLAYWRIGHT_MODULES=<a node_modules with this build's Playwright>` and
+  `PLAYWRIGHT_BROWSERS_PATH=<its WebKit cache>`: a real browser card through the real sidecar
+  (reused, so the isolated home downloads nothing), with fps, click-to-frame latency, and a
+  killed sidecar that must come back.
+- `AGENTBOARD_SIMULATOR_HOST=<.build/…/debug/simulator-host>`: a device made for the test,
+  booted headless, streamed, then shut down and deleted.
+
+Both print `stream-live …` lines with the load average they ran under.

@@ -277,7 +277,7 @@ final class Screen {
         self.context = context
         display?.registerScreenCallbacksWithUUID(callbacks, callbackQueue: .main, frameCallback: { [weak self] in
             self?.layer.perform(NSSelectorFromString("setContentsChanged"))
-            if let self, self.streaming, let encoder = self.encoder, let unmasked = self.unmasked { encoder.encode(unmasked) }
+            if let self, self.streaming, let unmasked = self.unmasked { self.encode(unmasked) }
         }, surfacesChangedCallback: { [weak self] masked, unmasked in
             self?.show(masked ?? unmasked, unmasked: unmasked ?? masked)
         }, propertiesChangedCallback: { _ in })
@@ -298,9 +298,16 @@ final class Screen {
         warmEncoder()
     }
 
-    // shortcut: a screen that changes size later (rotation) makes its new session on the main queue, a ~2 s stall while streaming; warm the new size off the main queue if that bites.
+    /// Encodes a frame if the session fits its size; one of a new size (a rotation) waits for a
+    /// session made off the main queue, so the screen and input never stall, and clients keep
+    /// the last picture meanwhile.
+    private func encode(_ surface: IOSurface) {
+        guard let encoder, encoder.fits(width: surface.width, height: surface.height) else { return warmEncoder() }
+        encoder.encode(surface)
+    }
+
     private func warmEncoder() {
-        guard encoder == nil, !warming, let unmasked else { return }
+        guard !warming, let unmasked, encoder?.fits(width: unmasked.width, height: unmasked.height) != true else { return }
         warming = true
         let card = card, width = unmasked.width, height = unmasked.height
         DispatchQueue.global(qos: .utility).async {
@@ -310,8 +317,11 @@ final class Screen {
             encoder.prepare(width: width, height: height)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.context != nil else { return encoder.invalidate() }
+                self.encoder?.invalidate()
                 self.encoder = encoder
                 self.warming = false
+                // The size changed again while this one was made.
+                if let unmasked = self.unmasked, !encoder.fits(width: unmasked.width, height: unmasked.height) { return self.warmEncoder() }
                 if self.streaming { self.stream(true) }
             }
         }
@@ -321,9 +331,9 @@ final class Screen {
     /// which a still screen would otherwise not send.
     func stream(_ on: Bool) {
         streaming = on
-        guard on, let encoder else { return }
-        encoder.requestKeyFrame()
-        if let unmasked { encoder.encode(unmasked) }
+        guard on else { return }
+        encoder?.requestKeyFrame()
+        if let unmasked { encode(unmasked) }
     }
 
     func detach() {

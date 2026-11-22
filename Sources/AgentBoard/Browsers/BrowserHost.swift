@@ -67,6 +67,9 @@ final class BrowserHost {
         }
     }
 
+    /// The sidecar's process, while it runs.
+    var pid: Int32? { process?.processIdentifier }
+
     func stop() {
         input?.closeFile()
         process = nil
@@ -109,6 +112,19 @@ final class BrowserHost {
         let node: URL
         let folder: URL
         let path: String
+        /// Playwright from another install (`reusablePlaywright`), found through NODE_PATH.
+        var modules: URL?
+    }
+
+    /// AGENTBOARD_PLAYWRIGHT_MODULES: a `node_modules` holding this build's Playwright (another
+    /// instance's), used in place so an isolated data folder doesn't download its own; WebKit
+    /// comes from PLAYWRIGHT_BROWSERS_PATH when set. Nil when unset or another version.
+    nonisolated private static var reusablePlaywright: URL? {
+        guard let path = ProcessInfo.processInfo.environment["AGENTBOARD_PLAYWRIGHT_MODULES"] else { return nil }
+        let modules = URL(fileURLWithPath: path)
+        let manifest = modules.appendingPathComponent("playwright-core/package.json")
+        let version = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])?["version"] as? String
+        return version == playwrightVersion ? modules : nil
     }
 
     private func launchSidecar(_ launch: Launch) throws {
@@ -119,6 +135,7 @@ final class BrowserHost {
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = launch.path
         environment["AGENTBOARD_ARTIFACTS"] = Self.folder.path
+        if let modules = launch.modules { environment["NODE_PATH"] = modules.path }
         if let injection = Self.injectionLibrary { environment["AGENTBOARD_INJECT"] = injection.path }
         // Inherited from a terminal the app was started from; WebKit must not see them.
         for key in environment.keys where key.hasPrefix("DYLD_") { environment[key] = nil }
@@ -210,7 +227,9 @@ final class BrowserHost {
         let node = try await findOrInstallNode(searchPath: loginPath, progress: progress)
         let path = node.deletingLastPathComponent().path + ":" + loginPath
 
-        let manifest = folder.appendingPathComponent("node_modules/playwright-core/package.json")
+        let reused = reusablePlaywright
+        let modules = reused ?? folder.appendingPathComponent("node_modules")
+        let manifest = modules.appendingPathComponent("playwright-core/package.json")
         let current = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])?["version"] as? String
         if current != playwrightVersion {
             progress(L("Installing Playwright…"))
@@ -223,13 +242,15 @@ final class BrowserHost {
             try run(node, [npm.path, "install", "--no-audit", "--no-fund", "--loglevel=error"], in: folder, path: path)
         }
         progress(L("Checking WebKit…"))
-        try run(node, [folder.appendingPathComponent("node_modules/playwright-core/cli.js").path, "install", "webkit"], in: folder, path: path)
-        return Launch(node: node, folder: folder, path: path)
+        try run(node, [modules.appendingPathComponent("playwright-core/cli.js").path, "install", "webkit"], in: folder, path: path)
+        return Launch(node: node, folder: folder, path: path, modules: reused)
     }
 
     /// Node 18 or newer from `searchPath`, else the copy this app installed, else a fresh one.
     nonisolated private static func findOrInstallNode(searchPath: String, progress: @escaping @Sendable (String) -> Void) async throws -> URL {
-        let candidates = searchPath.split(separator: ":").map { URL(fileURLWithPath: String($0)).appendingPathComponent("node") }
+        // The process's own PATH too: a run with an isolated home has a login shell without the user's.
+        let inherited = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        let candidates = (searchPath + ":" + inherited).split(separator: ":").map { URL(fileURLWithPath: String($0)).appendingPathComponent("node") }
         let own = Self.folder.appendingPathComponent("Node/bin/node")
         for node in candidates + [own] where FileManager.default.isExecutableFile(atPath: node.path) {
             if let version = output(node, ["--version"]), let major = Int(version.dropFirst().prefix { $0 != "." }), major >= 18 {

@@ -495,6 +495,7 @@ final class BrowserStore {
                 guard pages[id] != nil else { throw error }
                 pages[id]?.phase = .failed(error.localizedDescription)
                 onPageChange?(id)
+                recoverStream(id)
                 throw error
             }
         }
@@ -585,6 +586,7 @@ final class BrowserStore {
         case "crashed":
             pages[block]?.phase = .failed(L("The page crashed. Click to reload it."))
             pages[block]?.contextID = nil
+            recoverStream(block)
         default:
             return
         }
@@ -596,6 +598,7 @@ final class BrowserStore {
             for id in pages.keys {
                 pages[id]?.phase = .failed(reason)
                 pages[id]?.contextID = nil
+                recoverStream(id)
             }
         }
         pages.keys.forEach { onPageChange?($0) }

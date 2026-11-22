@@ -58,6 +58,18 @@ extension BrowserStore: StreamSource {
     /// Every JPEG stands alone.
     func requestKeyFrame(_ card: UUID) {}
 
+    /// A watched page that failed (its sidecar stopped, the page crashed) opens again by itself,
+    /// whether or not the Mac board shows the card; `resumeStream` then restarts its stream. A
+    /// sidecar that keeps failing is tried every 2 s while someone watches.
+    func recoverStream(_ card: UUID) {
+        guard taps.watched(card), case .failed = pages[card]?.phase else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard taps.watched(card) else { return }
+            reopen(card)
+        }
+    }
+
     /// The card's page opened again (its sidecar restarted, its profile changed): a stream
     /// watching it starts over on the new page, header first.
     func resumeStream(_ card: UUID) {
