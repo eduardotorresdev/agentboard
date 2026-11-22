@@ -212,15 +212,14 @@ struct ImageMarksLayout {
 }
 
 /// Hosts the annotation chrome over an image card and lets every click outside it through to the board.
-final class ImageMarksHost: NSView {
+final class ImageMarksHost: ZoomedView {
     let state: ImageMarks
     var layout: ImageMarksLayout
 
     init(state: ImageMarks, layout: ImageMarksLayout, content: some View) {
         self.state = state
         self.layout = layout
-        super.init(frame: .zero)
-        addSubview(NSHostingView(rootView: content))
+        super.init(content: content)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -228,7 +227,9 @@ final class ImageMarksHost: NSView {
     override var isFlipped: Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let superview, layout.catches(convert(point, from: superview), state) else { return nil }
+        guard let superview else { return nil }
+        let local = convert(point, from: superview)
+        guard layout.catches(CGPoint(x: local.x / zoom, y: local.y / zoom), state) else { return nil }
         return super.hitTest(point)
     }
 }

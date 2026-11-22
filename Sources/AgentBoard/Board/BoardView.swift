@@ -224,7 +224,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// Project and worktree of this board, for the balloons' title.
     var place = ProjectStore.Place(worktree: "")
     /// Decision balloons, by agent: its questions show one after the other in the same balloon.
-    private var balloons: [UUID: (view: NSView, model: DecisionBalloonModel)] = [:]
+    private var balloons: [UUID: (view: ZoomedView, model: DecisionBalloonModel)] = [:]
     /// The annotation chrome over each picture.
     private var markHosts: [UUID: ImageMarksHost] = [:]
     /// The runner control under the pointer.
@@ -801,8 +801,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             shown.insert(record.id)
             let balloon = balloons[record.id] ?? {
                 let model = DecisionBalloonModel(decision: sequence.shown)
-                let view = NSView()
-                view.addSubview(NSHostingView(rootView: DecisionBalloon(store: store, model: model)))
+                let view = ZoomedView(content: DecisionBalloon(store: store, model: model))
                 model.onHeight = { [weak self] in DispatchQueue.main.async { self?.placeBalloon(record.id) } }
                 balloons[record.id] = (view, model)
                 addSubview(view)
@@ -836,9 +835,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private func placeBalloon(_ id: UUID) {
         guard let balloon = balloons[id] else { return }
         let rect = CGRect(origin: balloon.model.origin, size: CGSize(width: DecisionMetrics.outerWidth, height: balloon.model.height))
-        balloon.view.frame = screen(rect)
-        balloon.view.setBoundsSize(rect.size)
-        balloon.view.subviews.first?.frame = balloon.view.bounds
+        balloon.view.place(screen(rect), size: rect.size, zoom: zoom)
     }
 
     /// Browser cards sit above the agents, in their own stacking order.
@@ -3465,9 +3462,7 @@ extension BoardView {
                     // Nothing to mark while the picture is still on its way to the host.
                     host.isHidden = store.sendingMedia.contains(record.file)
                     let rect = layout.frame.offsetBy(dx: record.frame.minX, dy: record.frame.minY)
-                    host.frame = screen(rect)
-                    host.setBoundsSize(rect.size)
-                    host.subviews.first?.frame = host.bounds
+                    host.place(screen(rect), size: rect.size, zoom: zoom)
                 }
                 card.footed = state.footerOpen
             }

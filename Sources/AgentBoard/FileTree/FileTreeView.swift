@@ -23,6 +23,30 @@ struct Zoomed<Content: View>: View {
     }
 }
 
+/// SwiftUI chrome on the board, laid out in world points and drawn at the board's zoom. The scale
+/// is applied inside SwiftUI: scaling this view's bounds draws the same, but SwiftUI then answers
+/// clicks where the controls would sit at zoom 1.
+class ZoomedView: NSView {
+    private let host = FileTreeHost()
+
+    init(content: some View) {
+        super.init(frame: .zero)
+        addSubview(NSHostingView(rootView: Zoomed(host: host) { content }))
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    var zoom: CGFloat { host.zoom }
+
+    /// Puts the view at `frame`, in its superview's points, showing content `size` big at zoom 1.
+    func place(_ frame: CGRect, size: CGSize, zoom: CGFloat) {
+        self.frame = frame
+        if host.size != size { host.size = size }
+        if host.zoom != zoom { host.zoom = zoom }
+        subviews.first?.frame = bounds
+    }
+}
+
 /// The inside of a file tree card: the worktree's folders on the left, the open file on the right.
 struct FileTreeView: View {
     let store: FileTreeStore
