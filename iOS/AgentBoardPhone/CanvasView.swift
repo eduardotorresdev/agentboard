@@ -49,14 +49,16 @@ struct CanvasView: View {
         GeometryReader { geometry in
             let bounds = (cards.map(\.frame) + Array(others.values)).reduce(CGRect.null) { $0.union($1) }
             let board = bounds.isNull ? CGRect(x: 0, y: 0, width: 1, height: 1) : bounds.insetBy(dx: -40, dy: -40)
-            // Starts with the terminal cards and post-its in view (the whole board when there are none): a
-            // long column of screenshots shouldn't shrink the agents to specks.
-            let cardBounds = (cards.map(\.frame) + notes.map(\.frame)).reduce(CGRect.null) { $0.union($1) }
-            let focus = cardBounds.isNull ? board : cardBounds.insetBy(dx: -40, dy: -40)
+            // Starts with every element in view, as the Mac frames a board.
+            let focus = board
             let fit = min(1, geometry.size.width / focus.width, geometry.size.height / focus.height)
             let scale = zoom == 0 ? fit : zoom
             let origin = CGPoint(x: focus.midX * scale - geometry.size.width / 2 - offset.width,
                                  y: focus.midY * scale - geometry.size.height / 2 - offset.height)
+            #if DEBUG
+            // Each element's board frame and where it lands on screen, once per layout change.
+            let _ = DebugLayout.log(scale: scale, origin: origin, [("card", cards.map { ($0.name, $0.frame) }), ("postit", notes.map { ($0.name, $0.frame) }), ("image", media.map { ($0.name, $0.frame) })])
+            #endif
             // What the screen shows, in board points: only cards there draw live.
             let visible = CGRect(x: origin.x / scale, y: origin.y / scale, width: geometry.size.width / scale, height: geometry.size.height / scale)
             let frame = { (card: Card) in dragging?.id == card.id ? dragging!.frame : card.frame }
@@ -439,3 +441,22 @@ struct DecisionBalloon: View {
 
     private static func distance(_ p: CGPoint, _ q: CGPoint) -> CGFloat { hypot(q.x - p.x, q.y - p.y) }
 }
+
+#if DEBUG
+@MainActor enum DebugLayout {
+    private static var last = ""
+
+    static func log(scale: CGFloat, origin: CGPoint, _ groups: [(String, [(String, CGRect)])]) {
+        // Off while measuring: building these strings every frame would be the cost measured.
+        guard !UserDefaults.standard.bool(forKey: "perf") else { return }
+        let lines = groups.flatMap { kind, items in items.map { name, f in
+            let screen = CGRect(x: f.minX * scale - origin.x, y: f.minY * scale - origin.y, width: f.width * scale, height: f.height * scale)
+            return "\(kind) \(name) board=\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width)),\(Int(f.height)) screen=\(Int(screen.minX)),\(Int(screen.minY)),\(Int(screen.width)),\(Int(screen.height))"
+        } }
+        let text = "layout scale=\(String(format: "%.3f", scale))\n" + lines.joined(separator: "\n")
+        guard text != last else { return }
+        last = text
+        DebugTerm.log(text)
+    }
+}
+#endif
