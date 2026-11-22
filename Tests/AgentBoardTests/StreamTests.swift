@@ -235,7 +235,7 @@ struct StreamTests {
     /// A real iOS Simulator (a device made for the test, booted headless by the real
     /// simulator-host: AGENTBOARD_SIMULATOR_HOST, then shut down and deleted) streamed over the
     /// loopback: how soon a viewer gets its first picture, and frames while a finger drags.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_SIMULATOR_HOST"] != nil), .timeLimit(.minutes(10)))
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_SIMULATOR_HOST"] != nil), .timeLimit(.minutes(14)))
     @MainActor func anIOSSimulatorStreamsLive() async throws {
         let udid = try Self.simctl(["create", "AgentBoard stream test", "iPhone 17"]).trimmingCharacters(in: .whitespacesAndNewlines)
         defer {
@@ -262,9 +262,9 @@ struct StreamTests {
         _ = try #require(firstPicture, "no picture").timeIntervalSince(asked)
 
         // Booting the device loads the machine: measure only once the 1-minute load is below 5
-        // (up to 300 s), the first stream still open and drained meanwhile.
+        // (up to 480 s), the first stream still open and drained meanwhile.
         let settled = await Task.detached { () -> Bool in
-            let end = Date().addingTimeInterval(300)
+            let end = Date().addingTimeInterval(480)
             while Date() < end {
                 if Self.oneMinuteLoad() < 5 { return true }
                 client.drain(5)
@@ -306,6 +306,30 @@ struct StreamTests {
         ios.touch(record.id, "up", at: CGPoint(x: size.width * 0.5, y: size.height / 2))
         let (frames, first) = await counting.value
         let toPicture = first.map { $0.timeIntervalSince(dragged) * 1000 } ?? -1
+
+        // 20 separate touches, 0.5 s apart: a finger goes down and moves 40 points (the home
+        // screen follows), and the time to the next frame is taken from the move.
+        var touches: [Double] = []
+        for index in 0..<20 {
+            await Task.detached { viewer.drain(0.5) }.value
+            let x = size.width / 2, y = size.height / 2, toward: CGFloat = index % 2 == 0 ? -40 : 40
+            ios.touch(record.id, "down", at: CGPoint(x: x, y: y))
+            try await Task.sleep(for: .milliseconds(20))
+            let moved = Date()
+            ios.touch(record.id, "move", at: CGPoint(x: x + toward, y: y))
+            let shown = await Task.detached { () -> Date? in
+                let end = Date().addingTimeInterval(2)
+                while let out = viewer.next(timeout: end.timeIntervalSinceNow) { if case .video = out { return Date() } }
+                return nil
+            }.value
+            ios.touch(record.id, "up", at: CGPoint(x: x + toward, y: y))
+            if let shown { touches.append(shown.timeIntervalSince(moved) * 1000) }
+        }
+        let sortedTouches = touches.dropFirst().sorted()
+        func percentile(_ q: Double) -> Double { sortedTouches.isEmpty ? -1 : sortedTouches[min(sortedTouches.count - 1, Int(Double(sortedTouches.count) * q))] }
+        print("stream-live ios touches: \(touches.count) of 20 showed; first \(String(format: "%.0f", touches.first ?? -1)) ms; "
+              + "the rest median \(String(format: "%.0f", percentile(0.5))) p90 \(String(format: "%.0f", percentile(0.9))) "
+              + "max \(String(format: "%.0f", sortedTouches.last ?? -1)) ms; all \(touches.map { Int($0) })"
         let valid = settled && Self.oneMinuteLoad() < 5
         print("stream-live ios \(valid ? "VALID" : "INVALID (load not below 5)"): first picture \(String(format: "%.2f", joined)) s after a viewer's hello; "
               + "\(Double(frames) / 3) fps while dragging; first drag frame \(String(format: "%.0f", toPicture)) ms after the finger went down; "
