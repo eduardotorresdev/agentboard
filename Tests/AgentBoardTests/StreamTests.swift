@@ -329,7 +329,7 @@ struct StreamTests {
         func percentile(_ q: Double) -> Double { sortedTouches.isEmpty ? -1 : sortedTouches[min(sortedTouches.count - 1, Int(Double(sortedTouches.count) * q))] }
         print("stream-live ios touches: \(touches.count) of 20 showed; first \(String(format: "%.0f", touches.first ?? -1)) ms; "
               + "the rest median \(String(format: "%.0f", percentile(0.5))) p90 \(String(format: "%.0f", percentile(0.9))) "
-              + "max \(String(format: "%.0f", sortedTouches.last ?? -1)) ms; all \(touches.map { Int($0) })"
+              + "max \(String(format: "%.0f", sortedTouches.last ?? -1)) ms; all \(touches.map { Int($0) })")
         let valid = settled && Self.oneMinuteLoad() < 5
         print("stream-live ios \(valid ? "VALID" : "INVALID (load not below 5)"): first picture \(String(format: "%.2f", joined)) s after a viewer's hello; "
               + "\(Double(frames) / 3) fps while dragging; first drag frame \(String(format: "%.0f", toPicture)) ms after the finger went down; "
