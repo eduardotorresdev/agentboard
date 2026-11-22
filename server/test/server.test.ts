@@ -758,3 +758,35 @@ it("holds batches of chunks to their limits", async () => {
   await env.DB.prepare("UPDATE vault_chunks SET size = ? WHERE account_id = ? AND id = ?").bind(512 * 1024 * 1024 - 7 * 1_100_000, account, ids[0]).run();
   expect(await refusal(await putChunks(token, framed([[chunkId(99), new Uint8Array(1)]])))).toEqual([413, { error: "vault_full" }, null]);
 });
+
+async function catalogCall(method: "GET" | "PUT", token: string, body?: unknown): Promise<[number, unknown]> {
+  const response = await call(method, "/v1/catalog", { token, body });
+  return [response.status, await response.json()];
+}
+
+it("keeps the catalog with a version, refusing a stale write", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const other = await signIn(account, "owner");
+  expect(await catalogCall("GET", token)).toEqual([404, { error: "no_catalog" }]);
+  expect(await catalogCall("PUT", token, { version: 0, document: btoa("a") })).toEqual([200, { version: 1 }]);
+  // A second board that read nothing, or read version 1 after it moved on, gets `stale`.
+  expect(await catalogCall("PUT", other, { version: 0, document: btoa("b") })).toEqual([409, { error: "stale" }]);
+  expect(await catalogCall("PUT", other, { version: 1, document: btoa("b") })).toEqual([200, { version: 2 }]);
+  expect(await catalogCall("PUT", token, { version: 1, document: btoa("c") })).toEqual([409, { error: "stale" }]);
+  expect(await catalogCall("GET", token)).toEqual([200, { version: 2, document: btoa("b") }]);
+  expect((await catalogCall("PUT", token, { version: 2, document: "" }))[0]).toBe(400);
+  expect((await catalogCall("PUT", token, { version: -1, document: btoa("x") }))[0]).toBe(400);
+  expect((await catalogCall("PUT", token, { version: 2, document: btoa("x".repeat(1_000_001)) }))[0]).toBe(413);
+  expect(await catalogCall("GET", await signIn(account + 1, "other"))).toEqual([404, { error: "no_catalog" }]);
+});
+
+it("lets a host's session read the catalog but not write it", async () => {
+  const account = nextIP + 1000;
+  const token = await signIn(account, "owner");
+  const { hostToken } = await register(account, "owner");
+  expect(await catalogCall("PUT", token, { version: 0, document: btoa("a") })).toEqual([200, { version: 1 }]);
+  expect(await catalogCall("GET", hostToken)).toEqual([200, { version: 1, document: btoa("a") }]);
+  expect(await catalogCall("PUT", hostToken, { version: 1, document: btoa("x") })).toEqual([403, { error: "wrong_session" }]);
+  expect((await call("GET", "/v1/catalog")).status).toBe(401);
+});

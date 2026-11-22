@@ -17,6 +17,7 @@ const MAX_MANIFEST = 1_500_000;
 const MAX_VAULT = 512 * 1024 * 1024;
 const MAX_MANIFEST_CHUNKS = 20_000;
 const MAX_HAVE = 5000;
+const MAX_CATALOG = 1_000_000; // no avatars in it (docs/catalog.md)
 const MAX_BATCH = 8 * 1024 * 1024; // bytes of framed chunks in one request or reply
 const MAX_BATCH_GET = 200;
 const FRAME_HEAD = 68; // id (64 ASCII hex) then the length (u32 big-endian)
@@ -91,6 +92,12 @@ async function route(request: Request, env: Env): Promise<Response> {
     return vault(request, env, account.id, path);
   }
 
+  // Like the vault: any session reads the catalog, only a board's writes it.
+  if (path === "/v1/catalog") {
+    if (request.method === "PUT" && hostSession) return fail(403, "wrong_session");
+    return catalog(request, env, account.id);
+  }
+
   const match = HOST_PATH.exec(path);
   if (!match) return fail(404, "not_found");
   const id = match[1].toLowerCase();
@@ -127,6 +134,28 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (!owned) return fail(404, "not_found");
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return fail(426, "upgrade_required");
   return relay(env, id, request).fetch(`https://relay/${id}/${action}`, request);
+}
+
+// The catalog's whole wire form, server side: an opaque document (base64 in JSON) and its
+// version. Nothing here reads into the document, so sealing it later changes no line.
+async function catalog(request: Request, env: Env, account: number): Promise<Response> {
+  if (request.method === "GET") {
+    const row = await env.DB.prepare("SELECT version, document FROM catalog WHERE account_id = ?").bind(account).first<{ version: number; document: ArrayBuffer | number[] }>();
+    return row ? json({ version: row.version, document: base64(new Uint8Array(row.document)) }) : fail(404, "no_catalog");
+  }
+  if (request.method !== "PUT") return fail(404, "not_found");
+  const { version, document } = (await readJSON(request)) ?? {};
+  if (!Number.isSafeInteger(version) || (version as number) < 0) return fail(400, "invalid_version");
+  const bytes = typeof document === "string" ? unbase64(document) : null;
+  if (!bytes || !bytes.length) return fail(400, "invalid_document");
+  if (bytes.length > MAX_CATALOG) return fail(413, "too_large");
+  const written = await (version === 0
+    ? env.DB.prepare("INSERT INTO catalog (account_id, version, document) VALUES (?, 1, ?) ON CONFLICT(account_id) DO NOTHING").bind(account, bytes)
+    : env.DB.prepare("UPDATE catalog SET version = version + 1, document = ? WHERE account_id = ? AND version = ?").bind(bytes, account, version)
+  ).run();
+  // A writer behind reads again, merges and repeats.
+  if (!written.meta.changes) return fail(409, "stale");
+  return json({ version: (version as number) + 1 });
 }
 
 async function vault(request: Request, env: Env, account: number, path: string): Promise<Response> {

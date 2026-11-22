@@ -43,6 +43,7 @@ struct AgentBoardApp: App {
         simulators.openStream = HostProxy.opener(account: account)
         hosts.prepare?(agents)
         store.hosts = hosts
+        CatalogSync.keep(store, account: hosts.account)
         AppDelegate.agents = agents
         _hosts = State(initialValue: hosts)
         _browsers = State(initialValue: browsers)
