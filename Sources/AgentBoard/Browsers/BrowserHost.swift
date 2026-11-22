@@ -241,8 +241,12 @@ final class BrowserHost {
             guard files.fileExists(atPath: npm.path) else { throw Failure(message: "npm was not found next to \(node.path).") }
             try run(node, [npm.path, "install", "--no-audit", "--no-fund", "--loglevel=error"], in: folder, path: path)
         }
-        progress(L("Checking WebKit…"))
-        try run(node, [modules.appendingPathComponent("playwright-core/cli.js").path, "install", "webkit"], in: folder, path: path)
+        // A reused install keeps its WebKit as it is: `install` would write into its cache (a link
+        // to this folder) and prune the builds no link names.
+        if reused == nil {
+            progress(L("Checking WebKit…"))
+            try run(node, [modules.appendingPathComponent("playwright-core/cli.js").path, "install", "webkit"], in: folder, path: path)
+        }
         return Launch(node: node, folder: folder, path: path, modules: reused)
     }
 

@@ -155,7 +155,15 @@ struct StreamTests {
         // the picture changes, so the first frame after a click is the click's.
         let page = "() => { document.body.style.margin = '0'; document.body.style.height = '100vh'; let on = false; "
             + "document.body.onclick = () => { on = !on; document.body.style.background = on ? '#0090ff' : '#ffffff' } }"
-        _ = try await browsers.call("evaluate", on: record.id, ["function": page])
+        // The first page may still be navigating: try until it settles.
+        for attempt in 1...10 {
+            do {
+                _ = try await browsers.call("evaluate", on: record.id, ["function": page])
+                break
+            } catch where attempt < 10 {
+                try await Task.sleep(for: .milliseconds(500))
+            }
+        }
         let server = try StreamServer(sources: [browsers])
         let port = try await server.start()
         defer { server.stop() }

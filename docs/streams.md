@@ -72,11 +72,13 @@ card's screen or page is back: the client gets a fresh `H`, then a keyframe.
   The encoder session is made off the main queue as soon as the card's screen is up and kept
   while the card is open: making one takes 2–3 s, which a first viewer would otherwise wait.
   Warm, the first keyframe comes about 0.2 s after a viewer joins, later frames 3 ms after the
-  screen draws them (320×240 test frames, load average ~170).
+  screen draws them (320×240 test frames, load average ~170). A live iPhone 17 simulator gave
+  63 fps while a finger dragged, the first frame 118 ms after the finger went down; its first
+  picture took 14 s after the hello, at load average 549 (provisional: retake at low load).
 - **Browsers**: Playwright's `page.screencast` (WebKit), JPEG at quality 70, at the viewport's
-  size. Measured straight from Playwright (not yet through the app) with a page animating
-  every frame, 390×844: about 19 fps, 11 KB a frame, frames delivered within ~10 ms of capture;
-  a click shows in the next frame 23–86 ms later. Taken under heavy load: provisional.
+  size. Through the real sidecar and the loopback server (desktop card, page animating every
+  frame): 19.4 fps; a click sent on the stream shows 32–126 ms later (median 79). Killed, the
+  sidecar is back streaming in 12 s. Load average 84–136: provisional.
 
 ## Recovery
 
