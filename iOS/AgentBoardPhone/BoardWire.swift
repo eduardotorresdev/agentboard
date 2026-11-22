@@ -1,3 +1,4 @@
+import Connections
 import Foundation
 
 // The parts of BoardProtocol (Sources/Orchestration/BoardProtocol.swift) the phone reads, decoded
@@ -19,6 +20,9 @@ struct Line: Decodable, Identifiable, Equatable {
     let id: UUID
     let a: UUID
     let b: UUID
+    /// The card sides the line was drawn between, when it was drawn by hand.
+    var aSide: Side?
+    var bSide: Side?
 }
 
 struct PostIt: Decodable, Identifiable, Equatable {

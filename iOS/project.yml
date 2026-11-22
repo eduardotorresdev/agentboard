@@ -12,17 +12,15 @@ targets:
     platform: iOS
     sources:
       - AgentBoardPhone
-      # Shared with the Mac board as file references: the sealed channel and the core's framing.
-      # shortcut: AgentRuntime as a whole doesn't build for iOS yet (AppKit in AgentSession);
-      # link the package product instead once it does, and drop RuntimeStubs.swift.
-      - path: ../Sources/AgentRuntime/HostChannel.swift
-      - path: ../Sources/AgentRuntime/CoreSocket.swift
-      - path: ../Sources/AgentRuntime/CoreProtocol.swift
-      - path: ../Sources/AgentRuntime/DataFolder.swift
-      - path: ../Sources/AgentRuntime/AgentProvider.swift
     dependencies:
       - package: AgentBoard
         product: TerminalCore
+      - package: AgentBoard
+        product: TerminalRenderer
+      - package: AgentBoard
+        product: AgentRuntime
+      - package: AgentBoard
+        product: Connections
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.agentboard.phone

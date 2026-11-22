@@ -1,4 +1,6 @@
+import AgentRuntime
 import AVKit
+import Connections
 import SwiftUI
 
 /// A video card: plays from a copy in the app's temporary folder.
@@ -25,6 +27,8 @@ struct CanvasView: View {
     @State private var panStart: CGSize?
     @State private var zoom: CGFloat = 0
     @State private var zoomStart: CGFloat?
+    /// The zoom the cards' glyphs are drawn for: the last settled one.
+    @State private var rasterZoom: CGFloat?
     @State private var dragging: (id: UUID, frame: CGRect)?
     @State private var opened: Card?
     @State private var adding: Adding?
@@ -41,47 +45,59 @@ struct CanvasView: View {
         let others = Dictionary(notes.map { ($0.id, $0.frame) } + media.map { ($0.id, $0.frame) }, uniquingKeysWith: { a, _ in a })
         GeometryReader { geometry in
             let bounds = (cards.map(\.frame) + Array(others.values)).reduce(CGRect.null) { $0.union($1) }
+            let board = bounds.isNull ? CGRect(x: 0, y: 0, width: 1, height: 1) : bounds.insetBy(dx: -40, dy: -40)
             // Starts with the whole board in view.
-            let fit = bounds.isNull ? 1 : min(1, geometry.size.width / (bounds.width + 80), geometry.size.height / (bounds.height + 80))
+            let fit = min(1, geometry.size.width / board.width, geometry.size.height / board.height)
             let scale = zoom == 0 ? fit : zoom
-            let origin = CGPoint(x: (bounds.isNull ? 0 : bounds.midX) * scale - geometry.size.width / 2 - offset.width,
-                                 y: (bounds.isNull ? 0 : bounds.midY) * scale - geometry.size.height / 2 - offset.height)
-            let place = { (rect: CGRect) in CGRect(x: rect.minX * scale - origin.x, y: rect.minY * scale - origin.y, width: rect.width * scale, height: rect.height * scale) }
+            let origin = CGPoint(x: board.midX * scale - geometry.size.width / 2 - offset.width,
+                                 y: board.midY * scale - geometry.size.height / 2 - offset.height)
+            // What the screen shows, in board points: only cards there draw live.
+            let visible = CGRect(x: origin.x / scale, y: origin.y / scale, width: geometry.size.width / scale, height: geometry.size.height / scale)
             let frame = { (card: Card) in dragging?.id == card.id ? dragging!.frame : card.frame }
             let frameOf = { (id: UUID) -> CGRect? in cards.first { $0.id == id }.map(frame) ?? others[id] }
+            let place = { (rect: CGRect) in rect.offsetBy(dx: -board.minX, dy: -board.minY) }
 
             ZStack(alignment: .topLeading) {
                 Theme.sky.ignoresSafeArea()
-                Path { path in
-                    for line in link.lines {
-                        guard let a = frameOf(line.a), let b = frameOf(line.b) else { continue }
-                        let (from, to) = (place(a), place(b))
-                        path.move(to: CGPoint(x: from.midX, y: from.midY))
-                        path.addLine(to: CGPoint(x: to.midX, y: to.midY))
+                // The board, laid out once in its own points; panning and zooming only move and
+                // scale it as a whole.
+                ZStack(alignment: .topLeading) {
+                    Path { path in
+                        for line in link.lines {
+                            guard let a = frameOf(line.a), let b = frameOf(line.b) else { continue }
+                            let points = Ropes.points(line, place(a), place(b))
+                            guard let first = points.first else { continue }
+                            path.move(to: first)
+                            points.dropFirst().forEach { path.addLine(to: $0) }
+                        }
+                    }
+                    .stroke(Theme.accent, lineWidth: 2 / scale)
+                    ForEach(notes) { note in
+                        let rect = place(note.frame)
+                        PostItView(note: note, scale: 1).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
+                            .onTapGesture { text = note.text; editing = note }
+                    }
+                    ForEach(media) { item in
+                        let rect = place(item.frame)
+                        MediaView(link: link, item: item).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
+                    }
+                    ForEach(cards) { card in
+                        let rect = place(frame(card))
+                        CardView(link: link, card: card, live: visible.intersects(frame(card)), zoom: rasterZoom ?? scale,
+                                 onDrag: { translation, ended in
+                            var moved = card.frame
+                            moved.origin.x += translation.width / scale
+                            moved.origin.y += translation.height / scale
+                            if ended { link.move(card.id, to: moved); dragging = nil } else { dragging = (card.id, moved) }
+                        })
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                        .onTapGesture { opened = card }
                     }
                 }
-                .stroke(Theme.accent, lineWidth: 2)
-                ForEach(notes) { note in
-                    let rect = place(note.frame)
-                    PostItView(note: note, scale: scale).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
-                        .onTapGesture { text = note.text; editing = note }
-                }
-                ForEach(media) { item in
-                    let rect = place(item.frame)
-                    MediaView(link: link, item: item).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
-                }
-                ForEach(cards) { card in
-                    let rect = place(frame(card))
-                    CardView(link: link, card: card, scale: scale, onDrag: { translation, ended in
-                        var moved = card.frame
-                        moved.origin.x += translation.width / scale
-                        moved.origin.y += translation.height / scale
-                        if ended { link.move(card.id, to: moved); dragging = nil } else { dragging = (card.id, moved) }
-                    })
-                    .frame(width: rect.width, height: rect.height)
-                    .offset(x: rect.minX, y: rect.minY)
-                    .onTapGesture { opened = card }
-                }
+                .frame(width: board.width, height: board.height, alignment: .topLeading)
+                .scaleEffect(scale, anchor: .topLeading)
+                .offset(x: board.minX * scale - origin.x, y: board.minY * scale - origin.y)
             }
             .contentShape(Rectangle())
             .gesture(DragGesture()
@@ -97,7 +113,9 @@ struct CanvasView: View {
                     zoomStart = start
                     zoom = min(3, max(0.1, start * value.magnification))
                 }
-                .onEnded { _ in zoomStart = nil })
+                // Glyphs are drawn again for the new size once the pinch ends, never during it.
+                .onEnded { _ in zoomStart = nil; rasterZoom = zoom })
+            .onAppear { if rasterZoom == nil { rasterZoom = scale } }
             .overlay {
                 if cards.isEmpty, others.isEmpty {
                     SkyBlobEmptyState()
@@ -107,6 +125,21 @@ struct CanvasView: View {
         .navigationTitle(worktree.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $opened) { card in TerminalPage(link: link, card: card) }
+        #if DEBUG
+        // `-perf YES` logs fps; `-zoom <scale>` sets the zoom; `-autoPan YES` pans back and forth
+        // as a finger would, for measuring without touching the simulator.
+        .task {
+            DebugPerf.shared.start()
+            if let value = DebugLaunch.value("zoom"), let scale = Double(value) { zoom = scale; rasterZoom = scale }
+            guard UserDefaults.standard.bool(forKey: "autoPan") else { return }
+            let start = Date()
+            while !Task.isCancelled {
+                let t = Date().timeIntervalSince(start)
+                offset = CGSize(width: sin(t * 1.5) * 220, height: cos(t * 1.1) * 160)
+                try? await Task.sleep(nanoseconds: 8_000_000)
+            }
+        }
+        #endif
         .sheet(item: $editing) { note in
             NavigationStack {
                 TextEditor(text: $text)
@@ -193,7 +226,7 @@ struct MediaView: View {
             if let data = link.files[item.file] {
                 if item.isVideo {
                     VideoCard(data: data, name: item.file)
-                } else if let image = UIImage(data: data) {
+                } else if let image = Thumbnails.image(item.file, data: data, width: item.frame.width) {
                     Image(uiImage: image).resizable().scaledToFit()
                 }
             } else {
@@ -214,7 +247,8 @@ extension Card: Hashable {
 struct CardView: View {
     let link: HostLink
     let card: Card
-    let scale: CGFloat
+    let live: Bool
+    let zoom: CGFloat
     let onDrag: (CGSize, Bool) -> Void
 
     var body: some View { content }
@@ -231,14 +265,17 @@ struct CardView: View {
                         .background(Theme.deep, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
                 }
             }
-            .padding(.horizontal, 10).frame(height: 32)
+            .padding(.horizontal, 12).frame(height: 34)
             .background(.ultraThinMaterial)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 4)
                 .onChanged { onDrag($0.translation, false) }
                 .onEnded { onDrag($0.translation, true) })
-            TerminalScreen(terminal: link.terminal(card.id), version: link.screens)
+            // As the Mac's card: the terminal inset 12 points on the card's surface.
+            MetalTerminal(session: link.session(card.id), live: live, zoom: zoom)
                 .allowsHitTesting(false)
+                .padding([.horizontal, .bottom], 12)
+                .background(Theme.surface)
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .overlay(alignment: .top) {
@@ -278,4 +315,49 @@ struct DecisionBalloon: View {
         Button(title) { link.send(BoardSay.answerDecision(decision.id, value)) }
             .buttonStyle(SolidButton(fill: Theme.surface, text: Theme.deep))
     }
+}
+
+/// Pictures decoded once, at the size their card shows them (2x its board width), not at
+/// their full resolution on every redraw.
+@MainActor enum Thumbnails {
+    private static var cache: [String: UIImage] = [:]
+
+    static func image(_ file: String, data: Data, width: CGFloat) -> UIImage? {
+        if let image = cache[file] { return image }
+        guard let full = UIImage(data: data) else { return nil }
+        let target = min(1, width * 2 / max(full.size.width, 1))
+        let image = full.preparingThumbnail(of: CGSize(width: full.size.width * target, height: full.size.height * target)) ?? full
+        cache[file] = image
+        return image
+    }
+}
+
+/// Lines hang as the Mac's ropes between card handles, settled once per pair of frames.
+@MainActor enum Ropes {
+    private static var cache: [UUID: (CGRect, CGRect, [CGPoint])] = [:]
+
+    static func points(_ line: Line, _ a: CGRect, _ b: CGRect) -> [CGPoint] {
+        if let hit = cache[line.id], hit.0 == a, hit.1 == b { return hit.2 }
+        let sides: (Side, Side) = if let x = line.aSide, let y = line.bSide { (x, y) } else {
+            // The closest pair of handles, as the Mac picks for a line drawn without them.
+            Side.allCases.flatMap { x in Side.allCases.map { (x, $0) } }
+                .min { distance(handle(a, $0.0), handle(b, $0.1)) < distance(handle(a, $1.0), handle(b, $1.1)) }!
+        }
+        let points = Rope.resting(from: RopeAnchor(point: handle(a, sides.0), side: sides.0),
+                                  to: RopeAnchor(point: handle(b, sides.1), side: sides.1)).points
+        cache[line.id] = (a, b, points)
+        return points
+    }
+
+    /// Mirrors the Mac's `CardMetrics.handles`: the middle of each side.
+    static func handle(_ frame: CGRect, _ side: Side) -> CGPoint {
+        switch side {
+        case .top: CGPoint(x: frame.midX, y: frame.minY)
+        case .right: CGPoint(x: frame.maxX, y: frame.midY)
+        case .bottom: CGPoint(x: frame.midX, y: frame.maxY)
+        case .left: CGPoint(x: frame.minX, y: frame.midY)
+        }
+    }
+
+    private static func distance(_ p: CGPoint, _ q: CGPoint) -> CGFloat { hypot(q.x - p.x, q.y - p.y) }
 }

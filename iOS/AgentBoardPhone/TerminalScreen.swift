@@ -1,70 +1,7 @@
+import AgentRuntime
 import SwiftUI
 import TerminalCore
 import UIKit
-
-/// Draws a TerminalCore screen as text: one run per stretch of equal style.
-/// shortcut: SwiftUI text, not the Mac's Metal renderer (TerminalRenderer doesn't build for iOS
-/// yet); fine for one terminal on screen, swap for TerminalPresenter once it does.
-struct TerminalScreen: View {
-    let terminal: Terminal
-    /// Changes whenever the terminal does.
-    let version: Int
-
-    var body: some View {
-        GeometryReader { geometry in
-            // Monospaced glyphs are ~0.6 em wide: the host's columns fit the width.
-            let size = min(14, max(4, geometry.size.width / (CGFloat(terminal.cols) * 0.602)))
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(0..<terminal.rows, id: \.self) { row in
-                    Text(Self.line(terminal, row: row)).lineLimit(1).fixedSize()
-                }
-            }
-            .font(.system(size: size, design: .monospaced))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .background(Theme.surface)
-        .id(version)
-    }
-
-    static func line(_ terminal: Terminal, row: Int) -> AttributedString {
-        var line = AttributedString()
-        let cursor = terminal.cursor
-        for column in 0..<terminal.cols {
-            let cell = terminal.cell(column: column, row: row)
-            if cell.width == .tail { continue }
-            var piece = AttributedString(terminal.text(of: cell) ?? " ")
-            let attributes = cell.attributes
-            var foreground = Self.color(cell.foreground, fallback: Theme.ink)
-            var background = cell.background.isDefault ? nil : Self.color(cell.background, fallback: Theme.surface)
-            if attributes.contains(.inverse) || (cursor.visible && cursor.row == row && cursor.column == column) {
-                (foreground, background) = (background ?? Theme.surface, foreground)
-            }
-            piece.foregroundColor = attributes.contains(.dim) ? foreground.opacity(0.55) : foreground
-            if let background { piece.backgroundColor = background }
-            if attributes.contains(.bold) { piece.inlinePresentationIntent = .stronglyEmphasized }
-            if attributes.contains(.underline) { piece.underlineStyle = .single }
-            line += piece
-        }
-        return line
-    }
-
-    /// The terminal ANSI palette the Mac's light theme uses (an allowed exception to Theme).
-    static let ansi: [UInt32] = [0x14233D, 0xCE2C31, 0x2F7D45, 0xA35F00, 0x3463C9, 0x8E4EC6, 0x107D98, 0x8B8799,
-                                 0x6F6A80, 0xE5484D, 0x3E9B58, 0xC27C0E, 0x5B8DEF, 0xA66BD9, 0x2A9DB8, 0xC7C3D1]
-
-    static func color(_ color: TerminalColor, fallback: Color) -> Color {
-        switch color.kind {
-        case .default: return fallback
-        case .rgb(let r, let g, let b): return Color(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255)
-        case .palette(let index):
-            if index < 16 { return Theme.color(ansi[Int(index)]) }
-            if index >= 232 { let level = Double(8 + Int(index - 232) * 10) / 255; return Color(.sRGB, red: level, green: level, blue: level) }
-            let steps: [Double] = [0, 95, 135, 175, 215, 255]
-            let i = Int(index) - 16
-            return Color(.sRGB, red: steps[i / 36] / 255, green: steps[i / 6 % 6] / 255, blue: steps[i % 6] / 255)
-        }
-    }
-}
 
 /// The keys a phone keyboard lacks, as the bytes the program asked for.
 enum ExtraKey: String, CaseIterable, Identifiable {
@@ -104,18 +41,17 @@ struct TerminalPage: View {
     @State private var typing = false
 
     var body: some View {
-        let terminal = link.terminal(card.id)
         VStack(spacing: 0) {
-            TerminalScreen(terminal: terminal, version: link.screens)
+            MetalTerminal(session: link.session(card.id), showsCursor: true)
                 .padding(8)
                 .contentShape(Rectangle())
                 .onTapGesture { typing.toggle() }
                 .background(KeyCatcher(active: $typing) { text in
-                    let bytes = control ? ExtraKey.controlled(text) : text == "\n" ? terminal.encode(.enter) : Array(text.utf8)
+                    let bytes = control ? ExtraKey.controlled(text) : text == "\n" ? encode(.enter) : Array(text.utf8)
                     control = false
                     link.type(bytes, to: card.id)
-                } backspace: { link.type(terminal.encode(.backspace), to: card.id) })
-            keys(terminal)
+                } backspace: { link.type(encode(.backspace), to: card.id) })
+            keys
             composer
         }
         .background(Theme.canvas)
@@ -125,18 +61,21 @@ struct TerminalPage: View {
         .task {
             guard let text = DebugLaunch.value("typeText") else { return }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
-            link.type(Array(text.utf8) + terminal.encode(.enter), to: card.id)
+            link.type(Array(text.utf8) + encode(.enter), to: card.id)
         }
         #endif
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func keys(_ terminal: Terminal) -> some View {
+    /// What `key` sends, as the program asked for it (application cursor keys and so on).
+    private func encode(_ key: TerminalKey) -> [UInt8] { link.session(card.id).withTerminal { $0.encode(key) } }
+
+    private var keys: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(ExtraKey.allCases) { key in
                     Button(key.rawValue) {
-                        if let code = key.key { link.type(terminal.encode(code), to: card.id) } else { control.toggle() }
+                        if let code = key.key { link.type(encode(code), to: card.id) } else { control.toggle() }
                     }
                     .buttonStyle(SolidButton(fill: key == .control && control ? Theme.accent : Theme.surfaceDeep,
                                              text: key == .control && control ? Theme.onAccent : Theme.ink))

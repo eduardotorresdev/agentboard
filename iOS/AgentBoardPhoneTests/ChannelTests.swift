@@ -4,6 +4,7 @@ import Network
 import TerminalCore
 import XCTest
 @testable import AgentBoardPhone
+@testable import AgentRuntime
 
 /// The phone's side of "The channel" and "Board identity" (docs/hosts.md) against a fake relay
 /// that plays the host's side, written from the doc, not from HostChannel.swift.

@@ -2,6 +2,7 @@ import Foundation
 import TerminalCore
 import XCTest
 @testable import AgentBoardPhone
+@testable import AgentRuntime
 
 final class WireTests: XCTestCase {
     func testCtrlTurnsLettersIntoControlCodes() {

@@ -1,3 +1,4 @@
+import AgentRuntime
 import CryptoKit
 import Foundation
 import TerminalCore
@@ -23,20 +24,17 @@ import UIKit
     private(set) var media: [Media] = []
     private(set) var attention: [Attention] = []
     private(set) var decisions: [Decision] = []
-    /// Bumped whenever a mirrored terminal changed, so views redraw.
-    private(set) var screens = 0
     /// Pictures and videos brought from the host, by file name; nil while on their way or refused.
     private(set) var files: [String: Data] = [:]
 
     private var rawCards: [UUID: [String: Any]] = [:]
-    private var terminals: [UUID: Terminal] = [:]
-    private var socket: CoreSocket?
+    /// The cards' sessions, mirroring the core's as the Mac's do (`AgentSession.host(on:id:)`).
+    @ObservationIgnored private var sessions: [UUID: AgentSession] = [:]
+    @ObservationIgnored private var client: CoreClient?
     private var account: Account?
-    private var runs: [UUID: CheckedContinuation<(status: Int32, output: Data)?, Never>] = [:]
     private var fetching: Set<String> = []
     private var opening = false
     private var dataFolder: String?
-    private let queue = DispatchQueue(label: "agentboard.phone.core")
 
     init(host: Host) { self.host = host }
 
@@ -45,7 +43,7 @@ import UIKit
     /// Opens the channel; on a drop it opens it again by itself, keeping what the board showed.
     func connect(account: Account) {
         self.account = account
-        guard !opening, socket == nil else { return }
+        guard !opening, client == nil else { return }
         guard let id = host.uuid, let key = Data(base64Encoded: host.public_key), let token = account.token else {
             phase = .failed("This host has no valid identity.")
             return
@@ -69,33 +67,35 @@ import UIKit
         connect(account: account)
     }
 
-    private func opened(_ opened: HostChannel.Opened, path: HostChannel.Path?) {
-        opening = false
+    private func opened(_ opened: HostChannel.Opened, path: HostChannel.Path?) async {
         switch opened {
-        case .pending(let trusted): phase = .pending(trusted: trusted)
-        case .failed: dropped("The host didn't answer.")
+        case .pending(let trusted):
+            opening = false
+            phase = .pending(trusted: trusted)
+        case .failed:
+            opening = false
+            dropped("The host didn't answer.")
         case .channel(let fd):
             self.path = path
-            let socket = CoreSocket(fd: fd, queue: queue)
-            socket.onFrame = { kind, payload in
-                let bytes = Array(payload)
-                DispatchQueue.main.async { [weak self] in self?.received(kind, bytes) }
-            }
-            socket.onClose = { DispatchQueue.main.async { [weak self, weak socket] in
-                guard let self, self.socket === socket else { return }
+            let result = await Task.detached { CoreClient.open(on: fd) }.value
+            opening = false
+            guard case .success(let client) = result else { return dropped("The host's core didn't answer.") }
+            self.client = client
+            client.onDisconnect = { [weak self, weak client] in
+                guard let self, self.client === client else { return }
                 self.dropped("Reconnecting…")
-            } }
-            self.socket = socket
-            socket.start()
-            socket.send(CoreRequest.hello(version: CoreProtocol.version, oldest: CoreProtocol.oldest))
+            }
+            if let state = client.serviceState { welcomed(state) }
+            client.onService { data in DispatchQueue.main.async { [weak self] in self?.serviced(data) } }
+            phase = .connected
+            // After a reconnect: the sessions shown before attach again, and get a fresh snapshot.
+            for (id, session) in sessions { attach(id, session, on: client) }
         }
     }
 
     private func dropped(_ why: String) {
-        socket = nil
+        client = nil
         phase = .failed(why)
-        runs.values.forEach { $0.resume(returning: nil) }
-        runs.removeAll()
         fetching.removeAll()
         // Tries again in a moment, while anyone still holds this link.
         Task { [weak self] in
@@ -108,7 +108,7 @@ import UIKit
 
     func disconnect() {
         account = nil
-        socket?.close()
+        client?.disconnect()
     }
 
     // MARK: Board
@@ -123,7 +123,7 @@ import UIKit
         send(BoardSay.move(raw, to: frame))
     }
 
-    func send(_ request: Data) { socket?.send(.service, Array(request)) }
+    func send(_ request: Data) { client?.send(service: request) }
 
     /// The organization the worktree's cards belong to, so a new one lands on the same board.
     private func organization(in worktree: String) -> String? {
@@ -183,12 +183,8 @@ import UIKit
     /// Runs a program on the host's machine: its exit status and what it printed; nil when the
     /// channel went away first.
     func run(_ executable: String, _ arguments: [String]) async -> (status: Int32, output: Data)? {
-        guard let socket else { return nil }
-        let call = UUID()
-        return await withCheckedContinuation { done in
-            runs[call] = done
-            socket.send(CoreRequest.run(call: call, executable: executable, arguments: arguments, directory: nil, input: nil))
-        }
+        guard let client else { return nil }
+        return await client.run(executable, arguments).map { ($0.status, $0.output) }
     }
 
     /// Brings a card's picture or video from the host (64 MiB at most), as the Mac does.
@@ -212,55 +208,26 @@ import UIKit
 
     // MARK: Terminals
 
-    /// The card's terminal, attached to its session on first use.
-    func terminal(_ id: UUID) -> Terminal {
-        if let terminal = terminals[id] { return terminal }
-        let terminal = Terminal(cols: 80, rows: 24)
-        terminals[id] = terminal
-        attach(id)
-        return terminal
+    /// The card's session, mirroring the core's; attached on first use.
+    func session(_ id: UUID) -> AgentSession {
+        if let session = sessions[id] { return session }
+        let session = AgentSession(cols: 80, rows: 24)
+        sessions[id] = session
+        if let client { attach(id, session, on: client) }
+        return session
     }
 
     /// The size only matters for a session the core doesn't have yet; one it has keeps its own.
-    private func attach(_ id: UUID) {
+    private func attach(_ id: UUID, _ session: AgentSession, on client: CoreClient) {
+        session.host(on: client, id: id)
         let card = cards.first { $0.id == id }
         send(BoardSay.open(id, cols: Int((card?.frame.width ?? 640) / 8), rows: Int((card?.frame.height ?? 400) / 17)))
+        session.attach()
     }
 
     func type(_ bytes: [UInt8], to id: UUID) {
         guard !bytes.isEmpty else { return }
-        socket?.send(.data, id: id, bytes)
-    }
-
-    // MARK: Frames
-
-    private func received(_ kind: FrameKind, _ payload: [UInt8]) {
-        switch kind {
-        case .control:
-            guard let event = try? JSONDecoder().decode(CoreEvent.self, from: Data(payload)) else { return }
-            switch event {
-            case .welcome(_, _, _, let service):
-                phase = .connected
-                if let service { welcomed(service) }
-                // After a reconnect: the terminals shown before attach again, and get a fresh snapshot.
-                terminals.keys.forEach(attach)
-            case .ran(let call, let status, let output, _):
-                runs.removeValue(forKey: call)?.resume(returning: (status, output))
-            default: break
-            }
-        case .service:
-            serviced(Data(payload))
-        case .snapshot:
-            guard let id = UUID(bytes: payload[...]), let terminal = terminals[id] else { return }
-            _ = terminal.restore(Array(payload.dropFirst(16)))
-            screens += 1
-        case .data:
-            guard let id = UUID(bytes: payload[...]), let terminal = terminals[id] else { return }
-            terminal.feed(Array(payload.dropFirst(16)))
-            // The Mac board answers the program's queries; a mirror only shows.
-            _ = terminal.takeOutput()
-            screens += 1
-        }
+        sessions[id]?.send(bytes)
     }
 
     private func welcomed(_ service: Data) {
@@ -290,7 +257,8 @@ import UIKit
         case .cardRemoved(let id):
             cards.removeAll { $0.id == id }
             rawCards[id] = nil
-            terminals[id] = nil
+            sessions[id]?.onChange = nil
+            sessions[id] = nil
         case .connections(let lines): self.lines = lines
         case .attention(let list): attention = list
         case .decisions(let list): decisions = list.filter { $0.state == .open }

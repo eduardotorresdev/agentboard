@@ -9,22 +9,21 @@
 /* Begin PBXBuildFile section */
 		08B5C9ECDE282D6C8EA9014E /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C478D047C898DAA4F0505D43 /* Theme.swift */; };
 		0E654E3954D15F3D25FBEE08 /* TerminalCore in Frameworks */ = {isa = PBXBuildFile; productRef = A5B35CB1BBA4FF11B1DBB1B7 /* TerminalCore */; };
-		1783DDBE5477EDC8028796B6 /* HostChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45D7C652E10B845872375F9 /* HostChannel.swift */; };
+		16B2DFA6E3B5C18712AF8F2D /* AgentRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 72578C64870ED0715F2715E1 /* AgentRuntime */; };
 		2392435829A19FD9B1BE1AC0 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24309D6871EB935EF294397B /* App.swift */; };
 		2DE73D2AC70A2BC50DDD1EA8 /* BoardWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A34C2EB469107922DB1EBD /* BoardWire.swift */; };
 		3D734D7CD7779C50B39A8A41 /* SkyBlob.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49AC2B70D021A1E09873D61 /* SkyBlob.swift */; };
 		3F19EDD464AAA398A1DB21F0 /* CanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F5172C3F44CCDAF4ABB67C /* CanvasView.swift */; };
-		47556952FA04715878FB754F /* CoreProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 265E1FF69D9E3EFA052EF109 /* CoreProtocol.swift */; };
 		4B6C5EFB7CF86B543918D81F /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E49A6830ED49F9E3FAFBE2 /* Catalog.swift */; };
 		4F1932D35874D14389BBCB67 /* Blob.metal in Sources */ = {isa = PBXBuildFile; fileRef = 82741891075384796470421C /* Blob.metal */; };
-		54FB58FCF209B821F3695FFC /* RuntimeStubs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E06288750CE5B6459717FA8 /* RuntimeStubs.swift */; };
+		5AC9B7193D6978B524338A91 /* TerminalRenderer in Frameworks */ = {isa = PBXBuildFile; productRef = F7D3657E07CE4203F6CD7D0A /* TerminalRenderer */; };
 		5C585DDF665946537CFB71FC /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A875B6538276F4639127608 /* Account.swift */; };
 		62DB7CC674824D544054C553 /* WireTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA79EE3E87B5B3991578985D /* WireTests.swift */; };
-		676F8C8C063B1D8055E5CC11 /* DataFolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA2463626328ACD107F65168 /* DataFolder.swift */; };
 		9B25E078506F911356F20BE8 /* ChannelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD553EA659FDE2F43B28BE26 /* ChannelTests.swift */; };
-		D4F3FFCE9F3FF27E246F5B92 /* CoreSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34113BE53BF849E2B02F35BE /* CoreSocket.swift */; };
+		DB5DD0BE02734EE42E419103 /* MetalTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC0A33A4CCFD54E4E369192 /* MetalTerminal.swift */; };
 		E132F572DA376AD7F104E6F6 /* HostLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183F64FDA7A9218A44664CDF /* HostLink.swift */; };
-		F29BB1CCED42CAE255A176A2 /* AgentProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77A9BD709F015B040C562C93 /* AgentProvider.swift */; };
+		EDFF32E4C1E2435965E217D4 /* Connections in Frameworks */ = {isa = PBXBuildFile; productRef = 3B25DF701F4D807409BFA8A1 /* Connections */; };
+		F44D9058F3AA3876AC14B418 /* DebugPerf.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB3B14BB1AEFEE58807F3243 /* DebugPerf.swift */; };
 		F8A3980890B46D058C99D28E /* TerminalScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16B2CD1E11EC1FEBA49AA2EB /* TerminalScreen.swift */; };
 /* End PBXBuildFile section */
 
@@ -43,23 +42,19 @@
 		183F64FDA7A9218A44664CDF /* HostLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostLink.swift; sourceTree = "<group>"; };
 		1A875B6538276F4639127608 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
 		24309D6871EB935EF294397B /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
-		265E1FF69D9E3EFA052EF109 /* CoreProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreProtocol.swift; sourceTree = "<group>"; };
 		2D5A670F61F8D329B0500E56 /* AgentBoardPhone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgentBoardPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		30078F5107173B38313FAE6C /* AgentBoardPhoneTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgentBoardPhoneTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		34113BE53BF849E2B02F35BE /* CoreSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreSocket.swift; sourceTree = "<group>"; };
 		47F5172C3F44CCDAF4ABB67C /* CanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasView.swift; sourceTree = "<group>"; };
-		77A9BD709F015B040C562C93 /* AgentProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentProvider.swift; sourceTree = "<group>"; };
-		7E06288750CE5B6459717FA8 /* RuntimeStubs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStubs.swift; sourceTree = "<group>"; };
 		82741891075384796470421C /* Blob.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Blob.metal; sourceTree = "<group>"; };
 		924DFDB86B769145610335DF /* agent-a2f81d65094d4744b */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "agent-a2f81d65094d4744b"; path = ..; sourceTree = SOURCE_ROOT; };
 		A2E49A6830ED49F9E3FAFBE2 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		A49AC2B70D021A1E09873D61 /* SkyBlob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkyBlob.swift; sourceTree = "<group>"; };
 		B3A34C2EB469107922DB1EBD /* BoardWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardWire.swift; sourceTree = "<group>"; };
-		B45D7C652E10B845872375F9 /* HostChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostChannel.swift; sourceTree = "<group>"; };
 		C478D047C898DAA4F0505D43 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		CA2463626328ACD107F65168 /* DataFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataFolder.swift; sourceTree = "<group>"; };
+		CB3B14BB1AEFEE58807F3243 /* DebugPerf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugPerf.swift; sourceTree = "<group>"; };
 		CD553EA659FDE2F43B28BE26 /* ChannelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelTests.swift; sourceTree = "<group>"; };
 		EA79EE3E87B5B3991578985D /* WireTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireTests.swift; sourceTree = "<group>"; };
+		FDC0A33A4CCFD54E4E369192 /* MetalTerminal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalTerminal.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -68,6 +63,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				0E654E3954D15F3D25FBEE08 /* TerminalCore in Frameworks */,
+				5AC9B7193D6978B524338A91 /* TerminalRenderer in Frameworks */,
+				16B2DFA6E3B5C18712AF8F2D /* AgentRuntime in Frameworks */,
+				EDFF32E4C1E2435965E217D4 /* Connections in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -101,8 +99,9 @@
 				B3A34C2EB469107922DB1EBD /* BoardWire.swift */,
 				47F5172C3F44CCDAF4ABB67C /* CanvasView.swift */,
 				A2E49A6830ED49F9E3FAFBE2 /* Catalog.swift */,
+				CB3B14BB1AEFEE58807F3243 /* DebugPerf.swift */,
 				183F64FDA7A9218A44664CDF /* HostLink.swift */,
-				7E06288750CE5B6459717FA8 /* RuntimeStubs.swift */,
+				FDC0A33A4CCFD54E4E369192 /* MetalTerminal.swift */,
 				A49AC2B70D021A1E09873D61 /* SkyBlob.swift */,
 				16B2CD1E11EC1FEBA49AA2EB /* TerminalScreen.swift */,
 				C478D047C898DAA4F0505D43 /* Theme.swift */,
@@ -118,25 +117,11 @@
 			name = Packages;
 			sourceTree = "<group>";
 		};
-		BEFDB7E0433D7A012457CDA1 /* AgentRuntime */ = {
-			isa = PBXGroup;
-			children = (
-				77A9BD709F015B040C562C93 /* AgentProvider.swift */,
-				265E1FF69D9E3EFA052EF109 /* CoreProtocol.swift */,
-				34113BE53BF849E2B02F35BE /* CoreSocket.swift */,
-				CA2463626328ACD107F65168 /* DataFolder.swift */,
-				B45D7C652E10B845872375F9 /* HostChannel.swift */,
-			);
-			name = AgentRuntime;
-			path = ../Sources/AgentRuntime;
-			sourceTree = "<group>";
-		};
 		DC052F2C3AC86CE666D4A71E = {
 			isa = PBXGroup;
 			children = (
 				9E1E1C166281FD5243405CB8 /* AgentBoardPhone */,
 				45A84259B47E3D960A5F3451 /* AgentBoardPhoneTests */,
-				BEFDB7E0433D7A012457CDA1 /* AgentRuntime */,
 				BD9BDB1D6F1983BD437FCF05 /* Packages */,
 				5038A8660CF81A417AA35EB9 /* Products */,
 			);
@@ -177,6 +162,9 @@
 			name = AgentBoardPhone;
 			packageProductDependencies = (
 				A5B35CB1BBA4FF11B1DBB1B7 /* TerminalCore */,
+				F7D3657E07CE4203F6CD7D0A /* TerminalRenderer */,
+				72578C64870ED0715F2715E1 /* AgentRuntime */,
+				3B25DF701F4D807409BFA8A1 /* Connections */,
 			);
 			productName = AgentBoardPhone;
 			productReference = 2D5A670F61F8D329B0500E56 /* AgentBoardPhone.app */;
@@ -234,18 +222,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				5C585DDF665946537CFB71FC /* Account.swift in Sources */,
-				F29BB1CCED42CAE255A176A2 /* AgentProvider.swift in Sources */,
 				2392435829A19FD9B1BE1AC0 /* App.swift in Sources */,
 				4F1932D35874D14389BBCB67 /* Blob.metal in Sources */,
 				2DE73D2AC70A2BC50DDD1EA8 /* BoardWire.swift in Sources */,
 				3F19EDD464AAA398A1DB21F0 /* CanvasView.swift in Sources */,
 				4B6C5EFB7CF86B543918D81F /* Catalog.swift in Sources */,
-				47556952FA04715878FB754F /* CoreProtocol.swift in Sources */,
-				D4F3FFCE9F3FF27E246F5B92 /* CoreSocket.swift in Sources */,
-				676F8C8C063B1D8055E5CC11 /* DataFolder.swift in Sources */,
-				1783DDBE5477EDC8028796B6 /* HostChannel.swift in Sources */,
+				F44D9058F3AA3876AC14B418 /* DebugPerf.swift in Sources */,
 				E132F572DA376AD7F104E6F6 /* HostLink.swift in Sources */,
-				54FB58FCF209B821F3695FFC /* RuntimeStubs.swift in Sources */,
+				DB5DD0BE02734EE42E419103 /* MetalTerminal.swift in Sources */,
 				3D734D7CD7779C50B39A8A41 /* SkyBlob.swift in Sources */,
 				F8A3980890B46D058C99D28E /* TerminalScreen.swift in Sources */,
 				08B5C9ECDE282D6C8EA9014E /* Theme.swift in Sources */,
@@ -502,9 +486,21 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		3B25DF701F4D807409BFA8A1 /* Connections */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Connections;
+		};
+		72578C64870ED0715F2715E1 /* AgentRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AgentRuntime;
+		};
 		A5B35CB1BBA4FF11B1DBB1B7 /* TerminalCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TerminalCore;
+		};
+		F7D3657E07CE4203F6CD7D0A /* TerminalRenderer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TerminalRenderer;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
