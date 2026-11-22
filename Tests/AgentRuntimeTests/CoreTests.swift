@@ -123,6 +123,25 @@ struct CoreTests {
         #expect((answer["sessions"] as? [Any])?.isEmpty == true)
     }
 
+    /// A board reaching this Mac as a host hears its stats at once and then every 2 s.
+    @Test func reportsTheMachine() async throws {
+        let core = try Fixture()
+        let board = try core.board()
+        let heard = Locked<[HostStats]>([])
+        board.onHost = { stats in heard.withLock { $0.append(stats) } }
+        board.subscribeToHost()
+        try await waitUntil { heard.withLock { $0.count >= 2 } }
+        let stats = heard.withLock { $0 }
+        #expect(stats.count >= 2)
+        for sample in stats {
+            #expect((0...1).contains(sample.cpu))
+            #expect(sample.memoryTotal > 0 && sample.memoryUsed <= sample.memoryTotal)
+            #expect(sample.diskTotal > 0 && sample.diskUsed <= sample.diskTotal)
+            #expect(sample.cores > 0 && sample.load >= 0)
+        }
+        board.disconnect()
+    }
+
     /// A mirrored session shows the program's output and sends it input, like a local one.
     @Test func mirrorsAProgram() async throws {
         let core = try Fixture()

@@ -4,6 +4,48 @@ import Testing
 
 @MainActor
 struct ImageMarksTests {
+    /// A click on Mark reaches the button at any zoom, instead of falling through to the card's move and resize.
+    @Test func theMarkButtonTakesClicksAtAnyZoom() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("marks-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let store = AgentStore(database: folder.appendingPathComponent("cards.sqlite"), connect: { .failure(.noCore) })
+        let board = BoardView(store: store, browsers: BrowserStore(database: nil), simulators: SimulatorStore(database: nil),
+                              fileTrees: FileTreeStore(database: nil))
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1600, height: 1000), styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        window.contentView = board
+        board.worktree = "/w"
+        let picture = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1440, pixelsHigh: 900, bitsPerSample: 8, samplesPerPixel: 4,
+                                       hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        _ = try await store.addImage(.data(picture.representation(using: .png, properties: [:])!), named: "p", to: "/w", at: CGPoint(x: 200, y: 100))
+        window.orderFrontRegardless()
+        board.syncLayers()
+        let host = try #require(board.subviews.compactMap { $0 as? ImageMarksHost }.first)
+
+        // A command-scroll zooms the board; 0 leaves it at 1.
+        for wheel: Int32 in [0, -40, 60] {
+            if wheel != 0 {
+                let scroll = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: wheel, wheel2: 0, wheel3: 0))
+                scroll.flags = .maskCommand
+                board.scrollWheel(with: try #require(NSEvent(cgEvent: scroll)))
+            }
+            board.syncLayers()
+            try await Task.sleep(for: .milliseconds(300))
+            host.state.marking = false
+            let button = host.layout.button
+            let point = host.convert(CGPoint(x: button.midX * host.zoom, y: button.midY * host.zoom), to: nil)
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                window.sendEvent(try #require(NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+                try await Task.sleep(for: .milliseconds(150))
+            }
+            #expect(host.state.marking, "zoom \(host.zoom)")
+        }
+    }
+
     /// Connected beats last sent to beats first on the board; among several connected, the last sent to.
     @Test func recommendsAnAgent() {
         let a = UUID(), b = UUID(), c = UUID()

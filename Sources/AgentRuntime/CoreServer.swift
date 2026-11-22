@@ -50,6 +50,8 @@ public final class CoreServer: @unchecked Sendable {
     /// Logs each session a board attaches to as well (`AGENTBOARD_CORE_VERBOSE=1`).
     private let verbose = ProcessInfo.processInfo.environment["AGENTBOARD_CORE_VERBOSE"] == "1"
     private var idleChecks = 0
+    private var hostSampler = HostSampler()
+    private var sendsHostStats = false
     /// How long the core lingers with no board connected and no program running.
     private let idleTimeout: Double
 
@@ -266,6 +268,7 @@ public final class CoreServer: @unchecked Sendable {
         case .takeOver:
             handOff(to: client)
         case .run(let call, let executable, let arguments, let directory, let input):
+            #if os(macOS)
             // Off the queue: the program may take as long as it likes.
             Thread.detachNewThread {
                 let process = Process()
@@ -301,9 +304,14 @@ public final class CoreServer: @unchecked Sendable {
                 process.waitUntilExit()
                 client.socket.send(CoreEvent.ran(call: call, status: process.terminationStatus, output: printed, error: failed))
             }
+            #else
+            client.socket.send(CoreEvent.ran(call: call, status: -1, output: Data(), error: Data("Running programs needs a Mac.".utf8)))
+            #endif
         case .subscribeHost:
-            // This Mac's board doesn't show its own machine's stats; the hosts' core reports them.
-            break
+            // Asked by a board reaching this Mac as a host (`agentboard relay`).
+            client.hearsHost = true
+            client.socket.send(CoreEvent.host(hostSampler.sample()))
+            scheduleHostStats()
         }
     }
 
@@ -421,6 +429,21 @@ public final class CoreServer: @unchecked Sendable {
         onExit()
     }
 
+    /// Every 2 s, while a board connected asked for them: one timer for all of them.
+    private func scheduleHostStats() {
+        guard !sendsHostStats else { return }
+        sendsHostStats = true
+        queue.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            self.sendsHostStats = false
+            let hearing = self.clients.values.filter(\.hearsHost)
+            guard self.listener != nil, !hearing.isEmpty else { return }
+            let stats = self.hostSampler.sample()
+            for client in hearing { client.socket.send(CoreEvent.host(stats)) }
+            self.scheduleHostStats()
+        }
+    }
+
     /// Exits after `idleTimeout` with no board connected and nothing running. Programs that
     /// ended are then lost, which is what a relaunch without a core would do anyway.
     private func scheduleIdleCheck() {
@@ -443,6 +466,8 @@ public final class CoreBoard: Hashable, @unchecked Sendable {
     /// Set by `subscribeStatuses`: it then hears every session's status. Other clients (an
     /// agent's own connection) never get events they didn't ask for.
     var hearsAllStatuses = false
+    /// Set by `subscribeHost`: it then hears this machine's stats every 2 s.
+    var hearsHost = false
     /// In the order the core accepted boards, for its log.
     let number: Int
     init(socket: CoreSocket, number: Int) {

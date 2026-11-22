@@ -829,6 +829,25 @@ mod tests {
     }
 
     #[test]
+    fn an_untrusted_board_reaches_neither_the_core_nor_a_port() {
+        let host = host(TOKEN);
+        let listen = host.listen();
+        let port = TcpListener::bind("127.0.0.1:0").unwrap();
+        port.set_nonblocking(true).unwrap();
+        let stranger = SigningKey::from_bytes(&[7; 32]);
+        for carrying in ["core".to_string(), format!("tcp:{}", port.local_addr().unwrap().port())] {
+            // Asked for at once, without waiting for the verdict, as a board does.
+            let (mut ws, mut board) = host.proved(&listen, Board::of(stranger.clone()));
+            let _ = ws.send(Message::Binary(board.seal(carrying.as_bytes())));
+            assert_eq!(board.open(&ws.read().unwrap().into_data()).unwrap(), b"pending 1");
+            assert_closed(&mut ws);
+        }
+        assert!(host.core_closed.recv_timeout(Duration::from_millis(200)).is_err(), "the core was never reached");
+        assert!(port.accept().is_err(), "the port was never reached");
+        assert_eq!(boards::load(&host.folder).unwrap().trusted.len(), 1);
+    }
+
+    #[test]
     fn a_trusted_board_keeps_the_list_over_a_channel() {
         let host = host(TOKEN);
         let listen = host.listen();

@@ -15,7 +15,7 @@ mod wire;
 #[cfg(test)]
 mod test_support;
 
-pub use account::{login, logout};
+pub use account::{login, logout, sign_in_as_host};
 pub use boards::{first_board, show as boards, trust_named as trust, untrust_named as untrust};
 pub use relay::serve_relay;
 pub use service::{install_service, status, uninstall_service};

@@ -306,7 +306,7 @@ struct Rig {
         let hosts = hosts, projects = projects
         hosts.prepare = { $0.projectTools = ProjectTools(projects: projects, agents: $0, hosts: hosts) }
         hosts.prepare?(local)
-        // The core standing in for the host's reports no stats: host_list doesn't wait long for them.
+        // host_list doesn't wait long for stats of a host it can't reach.
         ProjectTools.statsPatience = 0.2
         project = try #require(projects.addProject(at: repo))
         try await waitUntil { account.hosts.count == 2 }
@@ -428,6 +428,21 @@ struct Rig {
 
 // MARK: The tools
 
+@MainActor @Test func theHostListSaysWhenAHostSendsNoStats() async throws {
+    let rig = try await Rig()
+    defer { rig.cleanUp() }
+    // The host is online on the account, but its core can't be reached: no stats ever arrive.
+    rig.server.stop()
+    unlink(rig.socket)
+    let caller = AgentRecord(id: UUID(), worktree: rig.repo.path, providerID: "claude", name: "Agent", frame: .zero,
+                             organization: rig.projects.organizationID)
+    rig.hosts.local.insert(caller)
+    let tools = ProjectTools(projects: rig.projects, agents: rig.hosts.local, hosts: rig.hosts)
+    let result = await tools.call("host_list", arguments: [:], caller: caller.id)
+    let list = result.content.map { if case .text(let text) = $0 { text } else { "" } }.joined()
+    #expect(list.contains("builder") && list.contains("online") && list.contains("stats: not connected"))
+}
+
 @MainActor @Test func theHostToolsSayWhoIsThereAndRefuseWhatIsnt() async throws {
     let rig = try await Rig()
     defer { rig.cleanUp() }
@@ -442,8 +457,8 @@ struct Rig {
     let list = text(await tools.call("host_list", arguments: [:], caller: caller.id))
     #expect(list.contains("This Mac") && list.contains("the host you run on"))
     #expect(list.contains("builder") && list.contains("0b6f0d6e-5f0a-4a55-9a37-0d5b8f1c2e11") && list.contains("online"))
-    // An online host this board wasn't connected to is connected to for its stats, and the list says when it has none.
-    #expect(rig.hosts[rig.host] != nil && list.contains("stats: not connected"))
+    // An online host this board wasn't connected to is connected to for its stats (the Swift core reports them).
+    #expect(rig.hosts[rig.host] != nil && list.contains("CPU ") && !list.contains("stats: not connected"))
     #expect(list.contains("laptop") && list.contains("offline"))
 
     #expect(await tools.call("worktree_create", arguments: [:], caller: caller.id).isError)

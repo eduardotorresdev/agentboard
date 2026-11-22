@@ -576,6 +576,9 @@ public final class Orchestrator: CoreService {
     /// GUI apps get a minimal PATH; ask the user's interactive login shell for the real one
     /// so tools installed through shell config (like ~/.local/bin) are found.
     nonisolated public static func loginShellPath() -> String {
+        #if !os(macOS)
+        return ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+        #else
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let process = Process()
         let pipe = Pipe()
@@ -592,6 +595,7 @@ public final class Orchestrator: CoreService {
         process.waitUntilExit()
         let path = String(decoding: data, as: UTF8.self).split(separator: "\n").last.map(String.init)
         return path?.isEmpty == false ? path! : fallback
+        #endif
     }
 
     fileprivate func element(_ id: UUID) -> ElementInfo? { elements[id] }

@@ -22,6 +22,7 @@ pub const USAGE: &str = "usage: agentboard <command>
   trust <fingerprint or key>    let that computer use this host
   untrust <fingerprint or key>  stop letting it
   host         run the host here, in the foreground
+  relay [--core <socket>]       serve boards for a core already running here (the Mac app's)
   core [--socket <path>] [--socket-path]
   data-folder  print where the host keeps its data";
 
@@ -53,6 +54,27 @@ pub fn host() {
         move || host::serve_relay(Path::new(&socket_path))
     });
     serve(socket_path, 1e9);
+}
+
+/// `agentboard relay`: what `host` adds to a core, for a core this binary didn't start (the Mac
+/// app's Swift one, on its default socket unless `--core` says otherwise).
+pub fn relay(arguments: &[String]) {
+    let core = match arguments {
+        [] => core_protocol::socket_path(),
+        [flag, path] if flag == "--core" => path.clone(),
+        _ => {
+            eprintln!("{USAGE}");
+            std::process::exit(2);
+        }
+    };
+    // The host's files in a folder of their own: the app keeps its own token, board key and
+    // vault key beside its core's, and a host's `vault.key` or `boards.json` must not meet them.
+    std::env::set_var("AGENTBOARD_HOME", data_folder::url().join("host"));
+    if let Err(message) = host::sign_in_as_host() {
+        eprintln!("{message}");
+        std::process::exit(1);
+    }
+    host::serve_relay(Path::new(&core));
 }
 
 pub fn run(arguments: &[String]) {

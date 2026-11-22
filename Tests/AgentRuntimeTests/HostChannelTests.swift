@@ -14,6 +14,8 @@ struct HostChannelTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let server = root.appendingPathComponent("server")
         let wrangler = server.appendingPathComponent("node_modules/.bin/wrangler").path
+        // wrangler refuses to start without the assets folder, which only a release fills.
+        try FileManager.default.createDirectory(at: server.appendingPathComponent("public"), withIntermediateDirectories: true)
         let relayPath = ProcessInfo.processInfo.environment["AGENTBOARD_HOST_RELAY"] ?? root.appendingPathComponent("core/target/debug/examples/relay").path
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abhost-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -186,6 +188,83 @@ struct HostChannelTests {
         close(admitted)
         #expect(try ask(#"{"forget":{"key":"\#(strangerKey)"}}"#)["ok"] as? Bool == true)
         #expect(HostChannel.open(server: address, token: token, host: host, hostKey: hostKey, board: stranger) == .pending(trusted: 1))
+    }
+
+    /// This Mac as a host, as a phone reaches it: the account server run locally, `agentboard
+    /// relay` (`cargo build -p agentboard` in `core/`) and this build's Swift core
+    /// (`swift build --product AgentBoardCore`), on a data folder of their own. A new board
+    /// waits; once trusted, its channel says hello to the Swift core and is welcomed.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_HOST_E2E"] == "1"))
+    func aBoardReachesThisMacsCoreOnceApproved() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let server = root.appendingPathComponent("server")
+        let wrangler = server.appendingPathComponent("node_modules/.bin/wrangler").path
+        // wrangler refuses to start without the assets folder, which only a release fills.
+        try FileManager.default.createDirectory(at: server.appendingPathComponent("public"), withIntermediateDirectories: true)
+        let agentboard = root.appendingPathComponent("core/target/debug/agentboard").path
+        let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abmac-\(UUID().uuidString.prefix(8))")
+        let data = folder.appendingPathComponent("data"), hostFolder = data.appendingPathComponent("host")
+        try FileManager.default.createDirectory(at: hostFolder, withIntermediateDirectories: true)
+        var running: [Process] = []
+        defer {
+            for process in running where process.isRunning { process.terminate() }
+            try? FileManager.default.removeItem(at: folder)
+        }
+        func launch(_ executable: String, _ arguments: [String], environment: [String: String] = [:]) throws -> Process {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = arguments
+            process.currentDirectoryURL = server
+            process.environment = ProcessInfo.processInfo.environment.merging(["CI": "1", "WRANGLER_SEND_METRICS": "false"]) { $1 }.merging(environment) { $1 }
+            process.standardOutput = FileHandle.nullDevice
+            try process.run()
+            return process
+        }
+        func run(_ executable: String, _ arguments: [String], environment: [String: String] = [:]) throws {
+            let process = try launch(executable, arguments, environment: environment)
+            process.waitUntilExit()
+            try #require(process.terminationStatus == 0, "\(executable) \(arguments.joined(separator: " "))")
+        }
+
+        let state = folder.appendingPathComponent("state").path
+        let token = "e2e-\(UUID().uuidString)"
+        let host = UUID(), hostToken = "e2e-host-\(UUID().uuidString)"
+        let hash = { (token: String) in SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined() }
+        let made = Int(Date().timeIntervalSince1970)
+        try run(wrangler, ["d1", "migrations", "apply", "agentboard-account", "--local", "--persist-to", state])
+        try run(wrangler, ["d1", "execute", "agentboard-account", "--local", "--persist-to", state, "--command",
+                           "INSERT INTO accounts (id, login) VALUES (1, 'tester'); INSERT INTO sessions (token_hash, account_id, created_at) VALUES ('\(hash(token))', 1, \(made)); INSERT INTO sessions (token_hash, account_id, created_at, host_id) VALUES ('\(hash(hostToken))', 1, \(made), '\(host.uuidString.lowercased())');"])
+        let port = try freePort()
+        running.append(try launch(wrangler, ["dev", "--local", "--ip", "127.0.0.1", "--port", "\(port)", "--inspector-port", "\(try freePort())", "--persist-to", state]))
+        let address = try #require(URL(string: "http://127.0.0.1:\(port)"))
+        try #require(eventually(60) { (try? String(contentsOf: address, encoding: .utf8)) == "ok" }, "the account server starts")
+
+        // The Mac's host as the relay's own sign-in leaves it; no board trusted, no first-use window.
+        let identity = Curve25519.Signing.PrivateKey()
+        let config = ["id": host.uuidString.lowercased(), "key": identity.rawRepresentation.base64EncodedString(), "name": "e2e mac", "token": hostToken]
+        try JSONSerialization.data(withJSONObject: config).write(to: hostFolder.appendingPathComponent("host.json"))
+        let socket = folder.appendingPathComponent("core.sock").path
+        let core = root.appendingPathComponent(".build/debug/AgentBoardCore").path
+        running.append(try launch(core, [], environment: ["AGENTBOARD_HOME": data.path, "AGENTBOARD_CORE_SOCKET": socket]))
+        try #require(eventually(10) { FileManager.default.fileExists(atPath: socket) }, "the Swift core listens")
+        running.append(try launch(agentboard, ["relay", "--core", socket], environment: ["AGENTBOARD_HOME": data.path, "AGENTBOARD_SERVER": address.absoluteString]))
+
+        let hostKey = identity.publicKey.rawRepresentation
+        let phone = HostChannel.Board(key: Curve25519.Signing.PrivateKey(), name: "e2e phone")
+        var said = HostChannel.Opened.failed
+        try #require(eventually(30) {
+            said = HostChannel.open(server: address, token: token, host: host, hostKey: hostKey, board: phone)
+            return said != .failed
+        }, "the Mac comes online")
+        #expect(said == .pending(trusted: 0))
+        #expect(HostChannel.open(server: address, token: token, host: host, hostKey: hostKey, board: phone, carrying: .tcp(port: port)) == .pending(trusted: 0))
+
+        // Approved as the app does it: `agentboard trust` on the host's folder.
+        try run(agentboard, ["trust", phone.key.publicKey.rawRepresentation.base64EncodedString()], environment: ["AGENTBOARD_HOME": hostFolder.path])
+        let channel = try #require(HostChannel.open(server: address, token: token, host: host, hostKey: hostKey, board: phone).channel)
+        let client = try CoreClient.open(on: channel).get()
+        #expect(client.version == CoreProtocol.version)
+        client.disconnect()
     }
 
     private final class Paths: @unchecked Sendable {

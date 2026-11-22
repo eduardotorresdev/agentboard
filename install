@@ -18,6 +18,8 @@ BUNDLE_ID="dev.agentboard.AgentBoard"
 
 swift build -c release
 BIN=$(swift build -c release --show-bin-path)
+# The host program ("This Mac as host" runs `agentboard relay`), next to the app's executable.
+cargo build --release -p agentboard --manifest-path core/Cargo.toml
 
 # Assembled next to where it goes, so putting it in place is a rename.
 mkdir -p "$(dirname "$DEST")"
@@ -27,6 +29,7 @@ APP="$STAGE/AgentBoard.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Assets/AppIcon.icns "$APP/Contents/Resources/"
 cp "$BIN/AgentBoard" "$BIN/AgentBoardCore" "$BIN/libBrowserInjection.dylib" "$BIN/simulator-host" "$APP/Contents/MacOS/"
+cp core/target/release/agentboard "$APP/Contents/MacOS/"
 # Where SwiftPM's resource accessors look: the bundle's root.
 cp -R "$BIN"/AgentBoard_*.bundle "$APP/"
 VERSION=$(date +%Y.%m.%d)

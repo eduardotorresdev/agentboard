@@ -11,6 +11,8 @@ import Orchestration
 final class HostStores {
     let local: AgentStore
     let account: AccountStore
+    /// This Mac as a host of the account, for other boards.
+    let macHost = MacHost()
     private(set) var remote: [UUID: AgentStore] = [:]
     /// Gives a new host's store what the app gave this Mac's (its tools).
     @ObservationIgnored var prepare: ((AgentStore) -> Void)?
@@ -200,6 +202,7 @@ final class HostStores {
             }
         }
         account.onSignOut = { [weak self] in
+            self?.macHost.signOut()
             self?.remote.values.forEach { $0.quit() }
             self?.bulk.values.forEach { $0.client.disconnect() }
             self?.bulk = [:]
@@ -218,6 +221,7 @@ final class HostStores {
             self?.editingHost = nil
         }
         account.onHosts = { [weak self] in
+            self?.macHost.start()
             self?.remote.values.forEach { $0.explainDown() }
             self?.knock()
         }
