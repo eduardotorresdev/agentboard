@@ -102,6 +102,9 @@ final class MetalTerminalView: UIView {
     }
 
     private func draw() {
+        #if DEBUG
+        DebugTerm.log("try session=\(session != nil) window=\(window != nil) bounds=\(bounds.size) presenter=\(Self.presenter != nil) mid=\(session?.isMidUpdate ?? false) live=\(live)")
+        #endif
         guard let presenter = Self.presenter, let session, window != nil, bounds.width > 0, bounds.height > 0,
               let glyphs = glyphs(), !session.isMidUpdate else { return }
         let state = layerState ?? TerminalLayer(device: presenter.device)
@@ -109,10 +112,8 @@ final class MetalTerminalView: UIView {
         presenter.beginFrame()
         session.withTerminalForDisplay { _ = state.update(from: $0, theme: theme, glyphs: glyphs) }
         #if DEBUG
-        if showsCursor, let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("term.txt") {
-            let text = session.withTerminal { "\($0.cols)x\($0.rows) state=\(session.state)\n" + $0.screenText().joined(separator: "\n") }
-            try? text.write(to: url, atomically: true, encoding: .utf8)
-        }
+        let lines = session.withTerminal { $0.screenText() }
+        DebugTerm.log("draw \(ObjectIdentifier(session).hashValue) \(state.cols)x\(state.rows) \(session.state) filled=\(lines.filter { !$0.isEmpty }.count) bounds=\(bounds.size) first=\(lines.first { !$0.isEmpty }?.prefix(40) ?? "")")
         #endif
         let pixels = CGSize(width: state.cols * glyphs.cellWidth, height: state.rows * glyphs.cellHeight)
         guard pixels.width > 0, pixels.height > 0 else { return }
@@ -147,3 +148,17 @@ final class MetalTerminalView: UIView {
 extension Theme {
     static let surfaceUI = UIColor(surface)
 }
+
+#if DEBUG
+/// Appends to Documents/term.txt, which `simctl get_app_container … data` reaches.
+enum DebugTerm {
+    static func log(_ line: String) {
+        guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("term.txt") else { return }
+        if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        handle.seekToEndOfFile()
+        handle.write(Data((line + "\n").utf8))
+        try? handle.close()
+    }
+}
+#endif

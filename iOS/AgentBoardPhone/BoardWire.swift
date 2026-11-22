@@ -121,6 +121,11 @@ enum BoardSay {
     static func dismissAttention(_ id: UUID) -> Data { json(["dismissAttention": ["_0": id.uuidString]]) }
 
     /// `answer`: "ok", "useRecommended", or a variant's letter.
+    /// Starts a stopped agent again, or restarts a runner, as the Mac's restart does.
+    static func restart(_ id: UUID) -> Data {
+        json(["restart": ["id": id.uuidString]])
+    }
+
     static func answerDecision(_ id: UUID, _ answer: String) -> Data {
         let value: Any = ["ok", "useRecommended"].contains(answer) ? [answer: [String: Any]()] : ["option": ["_0": answer]]
         return json(["answerDecision": ["id": id.uuidString, "answer": value]])

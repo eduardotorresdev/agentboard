@@ -30,6 +30,8 @@ import UIKit
     private var rawCards: [UUID: [String: Any]] = [:]
     /// The cards' sessions, mirroring the core's as the Mac's do (`AgentSession.host(on:id:)`).
     @ObservationIgnored private var sessions: [UUID: AgentSession] = [:]
+    /// Agents this link already asked the core to start.
+    @ObservationIgnored private var started: Set<UUID> = []
     @ObservationIgnored private var client: CoreClient?
     private var account: Account?
     private var fetching: Set<String> = []
@@ -220,8 +222,15 @@ import UIKit
     /// The size only matters for a session the core doesn't have yet; one it has keeps its own.
     private func attach(_ id: UUID, _ session: AgentSession, on client: CoreClient) {
         session.host(on: client, id: id)
+        #if DEBUG
+        DebugTerm.log("attach \(id) session=\(ObjectIdentifier(session).hashValue) known=\(cards.contains { $0.id == id })")
+        #endif
         let card = cards.first { $0.id == id }
-        send(BoardSay.open(id, cols: Int((card?.frame.width ?? 640) / 8), rows: Int((card?.frame.height ?? 400) / 17)))
+        // As the Mac's board: an agent the core isn't running starts the first time it shows;
+        // runners stay as they are (starting one is the developer's call).
+        let start = card?.runner == nil && !started.contains(id)
+        started.insert(id)
+        send(BoardSay.open(id, cols: Int((card?.frame.width ?? 640) / 8), rows: Int((card?.frame.height ?? 400) / 17), start: start))
         session.attach()
     }
 

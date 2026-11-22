@@ -79,4 +79,10 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(print.split(separator: " ").count, 5)
         XCTAssertTrue(print.split(separator: " ").allSatisfy { $0.count == 4 })
     }
+
+    func testRestartAsSwiftEncodesIt() throws {
+        let id = UUID()
+        let object = try JSONSerialization.jsonObject(with: BoardSay.restart(id)) as? [String: [String: String]]
+        XCTAssertEqual(object, ["restart": ["id": id.uuidString]])
+    }
 }

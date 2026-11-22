@@ -39,6 +39,7 @@ struct TerminalPage: View {
     @State private var control = false
     @State private var prompt = ""
     @State private var typing = false
+    @State private var stopped = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,11 +57,32 @@ struct TerminalPage: View {
         }
         .background(Theme.canvas)
         .navigationTitle(card.name)
+        .toolbar {
+            if stopped {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Start") { link.send(BoardSay.restart(card.id)) }
+                        .accessibilityHint("Runs the agent's program again.")
+                }
+            }
+        }
+        // The session's state isn't observable; a glance each second is enough for one button.
+        .task {
+            while !Task.isCancelled {
+                let now = link.session(card.id).state == .stopped
+                if now != stopped { withAnimation(.smooth) { stopped = now } }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
         #if DEBUG
-        // `-typeText <text>`: typed into the terminal once it showed, then Enter.
+        // `-typeText <text>`: typed into the terminal once it showed (started first if stopped), then Enter.
         .task {
             guard let text = DebugLaunch.value("typeText") else { return }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // A stopped agent is started first, as tapping Start would.
+            if link.session(card.id).state == .stopped {
+                link.send(BoardSay.restart(card.id))
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
             link.type(Array(text.utf8) + encode(.enter), to: card.id)
         }
         #endif

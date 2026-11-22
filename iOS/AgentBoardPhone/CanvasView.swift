@@ -71,7 +71,7 @@ struct CanvasView: View {
                             points.dropFirst().forEach { path.addLine(to: $0) }
                         }
                     }
-                    .stroke(Theme.accent, lineWidth: 2 / scale)
+                    .stroke(Theme.accent, lineWidth: 2)  // board points: thickens with zoom, as on the Mac
                     ForEach(notes) { note in
                         let rect = place(note.frame)
                         PostItView(note: note, scale: 1).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
@@ -99,6 +99,7 @@ struct CanvasView: View {
                 .scaleEffect(scale, anchor: .topLeading)
                 .offset(x: board.minX * scale - origin.x, y: board.minY * scale - origin.y)
             }
+            .clipped()  // nothing of the board under the top bar
             .contentShape(Rectangle())
             .gesture(DragGesture()
                 .onChanged { value in
@@ -123,6 +124,7 @@ struct CanvasView: View {
             }
         }
         .navigationTitle(worktree.title)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $opened) { card in TerminalPage(link: link, card: card) }
         #if DEBUG

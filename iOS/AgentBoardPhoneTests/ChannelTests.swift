@@ -1,3 +1,6 @@
+import UIKit
+import TerminalRenderer
+import Metal
 import CryptoKit
 import Foundation
 import Network
@@ -66,6 +69,31 @@ final class ChannelTests: XCTestCase {
             XCTAssertTrue(terminal.restore(bytes), name)
             XCTAssertEqual(terminal.snapshot(), bytes, name)
         }
+    }
+
+    /// What the card draws: a mirrored session fed the core's snapshot, then output, through
+    /// the same calls `CoreClient` makes, rendered by the same Metal layer the card uses.
+    @MainActor func testMirroredSessionShowsSnapshotAndOutput() throws {
+        let bytes = try [UInt8](Data(contentsOf: Self.repo.appendingPathComponent("core/fixtures/terminal/agent_fullscreen.snapshot")))
+        let expected = Terminal(cols: 10, rows: 5)
+        XCTAssertTrue(expected.restore(bytes))
+        XCTAssertFalse(expected.screenText().allSatisfy(\.isEmpty))
+        let session = AgentSession(cols: 80, rows: 24)
+        session.isObserved = true
+        var changes = 0
+        session.onChange = { changes += 1 }
+        session.coreSnapshot(bytes)
+        XCTAssertEqual(session.withTerminal { $0.screenText() }, expected.screenText())
+        Array("\r\nphone-ok".utf8).withUnsafeBytes { session.coreReceived($0) }
+        XCTAssertTrue(session.withTerminal { $0.screenText() }.contains { $0.contains("phone-ok") })
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        XCTAssertGreaterThan(changes, 0, "the card is told to redraw")
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let glyphs = try XCTUnwrap(GlyphCache(device: device, font: UIFont.monospacedSystemFont(ofSize: 36, weight: .regular) as CTFont), "the glyph atlas the card uses at 3x")
+        let layer = TerminalLayer(device: device)
+        session.withTerminalForDisplay { _ = layer.update(from: $0, theme: .light, glyphs: glyphs) }
+        XCTAssertEqual(layer.cols, expected.cols)
+        XCTAssertEqual(layer.rows, expected.rows)
     }
 
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
