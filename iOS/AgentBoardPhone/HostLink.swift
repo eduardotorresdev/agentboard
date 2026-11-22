@@ -30,8 +30,6 @@ import UIKit
     private var rawCards: [UUID: [String: Any]] = [:]
     /// The cards' sessions, mirroring the core's as the Mac's do (`AgentSession.host(on:id:)`).
     @ObservationIgnored private var sessions: [UUID: AgentSession] = [:]
-    /// Agents this link already asked the core to start.
-    @ObservationIgnored private var started: Set<UUID> = []
     @ObservationIgnored private var client: CoreClient?
     private var account: Account?
     private var fetching: Set<String> = []
@@ -219,19 +217,21 @@ import UIKit
         return session
     }
 
-    /// The size only matters for a session the core doesn't have yet; one it has keeps its own.
+    /// Mirrors the core's session as it is; one the core doesn't have stays empty and stopped,
+    /// and nothing is created there just because the phone looked.
     private func attach(_ id: UUID, _ session: AgentSession, on client: CoreClient) {
         session.host(on: client, id: id)
-        #if DEBUG
-        DebugTerm.log("attach \(id) session=\(ObjectIdentifier(session).hashValue) known=\(cards.contains { $0.id == id })")
-        #endif
-        let card = cards.first { $0.id == id }
-        // As the Mac's board: an agent the core isn't running starts the first time it shows;
-        // runners stay as they are (starting one is the developer's call).
-        let start = card?.runner == nil && !started.contains(id)
-        started.insert(id)
-        send(BoardSay.open(id, cols: Int((card?.frame.width ?? 640) / 8), rows: Int((card?.frame.height ?? 400) / 17), start: start))
         session.attach()
+    }
+
+    /// The card opened full screen: an agent the core has no session for starts, as on the
+    /// Mac's board; runners stay as they are (starting one is the developer's call). The size
+    /// only matters for a session the core doesn't have yet.
+    func open(_ id: UUID) {
+        let card = cards.first { $0.id == id }
+        _ = session(id)
+        send(BoardSay.open(id, cols: Int((card?.frame.width ?? 640) / 8), rows: Int((card?.frame.height ?? 400) / 17),
+                           start: card?.runner == nil))
     }
 
     func type(_ bytes: [UInt8], to id: UUID) {
@@ -245,6 +245,9 @@ import UIKit
         rawCards = [:]
         for card in raw { if let id = (card["id"] as? String).flatMap(UUID.init) { rawCards[id] = card } }
         cards = state.cards
+        #if DEBUG
+        for card in cards { DebugTerm.log("card \(card.id) runner=\(card.runner != nil) \(card.worktree) | \(card.name)") }
+        #endif
         lines = state.connections
         postIts = state.postIts ?? []
         media = state.images ?? []

@@ -67,6 +67,7 @@ struct TerminalPage: View {
         }
         // The session's state isn't observable; a glance each second is enough for one button.
         .task {
+            link.open(card.id)
             while !Task.isCancelled {
                 let now = link.session(card.id).state == .stopped
                 if now != stopped { withAnimation(.smooth) { stopped = now } }
