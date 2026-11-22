@@ -235,7 +235,7 @@ struct StreamTests {
     /// A real iOS Simulator (a device made for the test, booted headless by the real
     /// simulator-host: AGENTBOARD_SIMULATOR_HOST, then shut down and deleted) streamed over the
     /// loopback: how soon a viewer gets its first picture, and frames while a finger drags.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_SIMULATOR_HOST"] != nil), .timeLimit(.minutes(5)))
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_SIMULATOR_HOST"] != nil), .timeLimit(.minutes(10)))
     @MainActor func anIOSSimulatorStreamsLive() async throws {
         let udid = try Self.simctl(["create", "AgentBoard stream test", "iPhone 17"]).trimmingCharacters(in: .whitespacesAndNewlines)
         defer {
@@ -259,7 +259,32 @@ struct StreamTests {
             while let out = client.next(timeout: end.timeIntervalSinceNow) { if case .video = out { return Date() } }
             return nil
         }.value
-        let joined = try #require(firstPicture, "no picture").timeIntervalSince(asked)
+        _ = try #require(firstPicture, "no picture").timeIntervalSince(asked)
+
+        // Booting the device loads the machine: measure only once the 1-minute load is below 5
+        // (up to 300 s), the first stream still open and drained meanwhile.
+        let settled = await Task.detached { () -> Bool in
+            let end = Date().addingTimeInterval(300)
+            while Date() < end {
+                if Self.oneMinuteLoad() < 5 { return true }
+                client.drain(5)
+                print("stream-live ios: waiting for the load to settle: \(Self.load())")
+            }
+            return false
+        }.value
+        let loadAtStart = Self.load()
+
+        // A second viewer joins the warm stream: how soon its first picture comes.
+        let viewer = try Client(port: port)
+        let joining = Date()
+        viewer.write(Data(#"{"token":"\#(server.token)","card":"\#(record.id.uuidString)"}"#.utf8 + [0x0a]))
+        let viewerPicture = await Task.detached { () -> Date? in
+            let end = Date().addingTimeInterval(20)
+            while let out = viewer.next(timeout: end.timeIntervalSinceNow) { if case .video = out { return Date() } }
+            return nil
+        }.value
+        let joined = try #require(viewerPicture, "no picture for the second viewer").timeIntervalSince(joining)
+        client.close()
 
         // A finger drags the home screen sideways and back for 3 s.
         let size = CGSize(width: 402, height: 874)
@@ -267,7 +292,7 @@ struct StreamTests {
         let counting = Task.detached { () -> (Int, Date?) in
             var count = 0, first: Date?
             let end = Date().addingTimeInterval(4)
-            while let out = client.next(timeout: end.timeIntervalSinceNow) {
+            while let out = viewer.next(timeout: end.timeIntervalSinceNow) {
                 if case .video = out { count += 1; first = first ?? Date() }
             }
             return (count, first)
@@ -281,10 +306,12 @@ struct StreamTests {
         ios.touch(record.id, "up", at: CGPoint(x: size.width * 0.5, y: size.height / 2))
         let (frames, first) = await counting.value
         let toPicture = first.map { $0.timeIntervalSince(dragged) * 1000 } ?? -1
-        print("stream-live ios: first picture \(String(format: "%.2f", joined)) s after the hello; \(Double(frames) / 3) fps while dragging; "
-              + "first drag frame \(String(format: "%.0f", toPicture)) ms after the finger went down; load \(Self.load())")
+        let valid = settled && Self.oneMinuteLoad() < 5
+        print("stream-live ios \(valid ? "VALID" : "INVALID (load not below 5)"): first picture \(String(format: "%.2f", joined)) s after a viewer's hello; "
+              + "\(Double(frames) / 3) fps while dragging; first drag frame \(String(format: "%.0f", toPicture)) ms after the finger went down; "
+              + "load at start \(loadAtStart), at end \(Self.load())")
         #expect(frames > 30)
-        client.close()
+        viewer.close()
         await ios.close(record, deleting: false)
     }
 
@@ -297,6 +324,12 @@ struct StreamTests {
         try process.run()
         process.waitUntilExit()
         return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    }
+
+    static func oneMinuteLoad() -> Double {
+        var load = [Double](repeating: 0, count: 3)
+        getloadavg(&load, 3)
+        return load[0]
     }
 
     static func load() -> String {
