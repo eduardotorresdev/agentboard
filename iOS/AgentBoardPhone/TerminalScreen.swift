@@ -79,7 +79,8 @@ struct TerminalPage: View {
         #if DEBUG
         // `-typeText <text>`: typed into the terminal once it showed (started first if stopped), then Enter.
         .task {
-            guard let text = DebugLaunch.value("typeText") else { return }
+            guard let text = DebugLaunch.value("typeText"), !DebugOnce.typed else { return }
+            DebugOnce.typed = true
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             // An agent not running is started first, as tapping Start would.
             if ![.running, .starting].contains(link.session(card.id).state) {
@@ -93,7 +94,10 @@ struct TerminalPage: View {
                 link.type(encode(.enter), to: card.id)
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
             }
-            link.type(Array(text.utf8) + encode(.enter), to: card.id)
+            // Enter apart: in one write with the text, an agent's prompt takes it as pasted.
+            link.type(Array(text.utf8), to: card.id)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            link.type(encode(.enter), to: card.id)
             // `-leaveAfterTyping YES`: back to the board, so what the agent does next finds the user elsewhere.
             if UserDefaults.standard.bool(forKey: "leaveAfterTyping") {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)

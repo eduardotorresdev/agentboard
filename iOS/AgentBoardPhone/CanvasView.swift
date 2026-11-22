@@ -150,11 +150,15 @@ struct CanvasView: View {
         // as a finger would, for measuring without touching the simulator.
         .task {
             DebugPerf.shared.start()
+            // Once per launch: coming back from a card shows the board again, and must not
+            // open it, or ask, a second time.
+            guard !DebugOnce.canvas else { return }
+            DebugOnce.canvas = true
             await debugTestBoard()
             // `-answerDecision <ok|letter>`: once an agent here opens a decision, answers it as its
             // balloon's button does (after 10 s, for a screenshot), then logs the agent's lines
             // that say ANSWER.
-            if let answer = DebugLaunch.value("answerDecision") {
+            if let answer = DebugLaunch.value("answerDecision") { Task { @MainActor [link, worktree] in
                 var asked: Decision?
                 for _ in 0..<600 where asked == nil {
                     asked = link.decisions.first { decision in link.cards(in: worktree.path).contains { $0.id == decision.agent } }
@@ -173,7 +177,7 @@ struct CanvasView: View {
                 } else {
                     DebugTerm.log("decision: none opened")
                 }
-            }
+            } }
             // `-openStream YES`: the first streamed card, full screen, once it is on the board.
             if UserDefaults.standard.bool(forKey: "openStream") {
                 for _ in 0..<30 where watching == nil {
@@ -247,6 +251,12 @@ struct CanvasView: View {
 }
 
 #if DEBUG
+/// What a DEBUG launch does only once, though its screen shows again.
+@MainActor enum DebugOnce {
+    static var canvas = false
+    static var typed = false
+}
+
 extension CanvasView {
     /// A throwaway board on the host, only for worktrees named `phone-test-…`:
     /// `-testAgent YES` makes the folder a git repository if it isn't one, adds an agent card
