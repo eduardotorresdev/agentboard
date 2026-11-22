@@ -224,3 +224,46 @@ private struct Mac {
         #expect(catalog.avatars[self.organization]?.version == 3)
     }
 }
+
+/// The relay the app runs as this Mac's host, built by `cargo build -p agentboard` in core/.
+private let relayBinary = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().appendingPathComponent("core/target/debug/agentboard").path
+
+@Suite(.enabled(if: FileManager.default.isExecutableFile(atPath: relayBinary), "Build the relay first: cd core && cargo build -p agentboard."))
+struct CatalogRelayHostIDTests {
+    /// The id `agentboard relay` writes into `host/host.json` is the one the Mac's worktrees go up under.
+    @Test func theMacsWorktreesGoUpUnderTheRelaysHostID() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("agentboard-relay-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        // No server answers: the relay makes its identity, saves it, then fails to sign in and exits.
+        let relay = Process()
+        relay.executableURL = URL(fileURLWithPath: relayBinary)
+        relay.arguments = ["relay", "--core", home.appendingPathComponent("no-core.sock").path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["AGENTBOARD_HOME"] = home.path
+        environment["AGENTBOARD_SERVER"] = "http://127.0.0.1:9"
+        relay.environment = environment
+        relay.standardOutput = FileHandle.nullDevice
+        relay.standardError = FileHandle.nullDevice
+        try relay.run()
+        let deadline = Date().addingTimeInterval(30)
+        while relay.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        if relay.isRunning { relay.terminate() }
+        #expect(relay.terminationStatus != 0)
+
+        let written = try JSONSerialization.jsonObject(with: Data(contentsOf: home.appendingPathComponent("host/host.json"))) as? [String: Any]
+        let relayID = try #require(written?["id"] as? String)
+        let id = try #require(CatalogSync.macHostID(in: home))
+        #expect(id == relayID.lowercased())
+
+        let mac = try Mac()
+        let organization = UUID()
+        try mac.database.saveOrganization(Organization(id: organization, name: "Team", color: 1))
+        try mac.database.insertProject(name: "app", path: "/p/app", organization: organization)
+        let catalog = FakeCatalog()
+        _ = try await mac.sync(catalog, host: id) { [Worktree(path: $0, branch: "main", host: nil), Worktree(path: $0 + "-fix", branch: "fix", host: nil)] }
+        #expect(catalog.current.worktrees.map(\.host) == [id, id])
+        #expect(catalog.current.worktrees.map(\.id) == ["\(id):/p/app", "\(id):/p/app-fix"])
+    }
+}
