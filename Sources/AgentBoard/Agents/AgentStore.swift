@@ -415,6 +415,8 @@ final class AgentStore {
             settleDecisions()
         case .held(let id, let count):
             heldMessages[id] = count == 0 ? nil : count
+        case .elements:
+            break  // This board runs its own; the event is for boards that can't (a phone).
         case .promptReturned(let id, let text, let reason):
             ComposerDrafts.restore(text, for: id)
             composerNotices[id] = L("Not sent: \(reason).")

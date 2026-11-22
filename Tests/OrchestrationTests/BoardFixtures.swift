@@ -126,10 +126,12 @@ struct BoardFixtures {
             ("attention", .attention(Self.attention)),
             ("held", .held(id: ids[0], count: 2)),
             ("promptReturned", .promptReturned(id: ids[0], text: "run the tests", reason: "it exited")),
+            ("elements", .elements([element, bare])),
         ]
         for (name, event) in events { try write(event, "event_" + name) }
         let state = BoardState(cards: [Self.agent, Self.runner, Self.plain], connections: Self.lines, runners: Self.runners,
-                               postIts: [Self.postIt, Self.emptyPostIt], attention: Self.attention, images: [Self.image, Self.video])
+                               postIts: [Self.postIt, Self.emptyPostIt], attention: Self.attention, images: [Self.image, Self.video],
+                               elements: [element])
         try write(state, "state")
         // What a core that predates post-its, attention and images sends.
         var old = BoardState(cards: [Self.plain], connections: [], runners: RunnerReport())

@@ -1,3 +1,4 @@
+import AgentRuntime
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -364,7 +365,7 @@ struct StreamTests {
 
     /// Decodes Annex B access units (parameter sets in front of the first) as a client would.
     static func decode(_ units: [Data]) throws -> [CGSize] {
-        guard let first = units.first, let format = ScrcpyStream.formatDescription(fromConfig: first) else { throw Failed() }
+        guard let first = units.first, let format = StreamWire.formatDescription(fromConfig: first) else { throw Failed() }
         var session: VTDecompressionSession?
         guard VTDecompressionSessionCreate(allocator: nil, formatDescription: format, decoderSpecification: nil, imageBufferAttributes: nil,
                                            outputCallback: nil, decompressionSessionOut: &session) == noErr, let session else { throw Failed() }
@@ -372,10 +373,10 @@ struct StreamTests {
         let sizes = Sizes()
         for (index, unit) in units.enumerated() {
             // Parameter sets aren't picture data: the decoder takes them from the format.
-            let picture = ScrcpyStream.nalUnits(unit).filter { ![7, 8].contains(($0.first ?? 0) & 0x1f) }
+            let picture = StreamWire.nalUnits(unit).filter { ![7, 8].contains(($0.first ?? 0) & 0x1f) }
             var annexB = Data()
             for nal in picture { annexB += Data([0, 0, 0, 1]) + nal }
-            guard let sample = ScrcpyStream.sampleBuffer(annexB: annexB, format: format, keyFrame: index == 0) else { throw Failed() }
+            guard let sample = StreamWire.sampleBuffer(annexB: annexB, format: format, keyFrame: index == 0) else { throw Failed() }
             VTDecompressionSessionDecodeFrame(session, sampleBuffer: sample, flags: [], infoFlagsOut: nil) { status, _, image, _, _ in
                 if status == noErr, let image { sizes.add(CGSize(width: CVPixelBufferGetWidth(image), height: CVPixelBufferGetHeight(image))) }
             }

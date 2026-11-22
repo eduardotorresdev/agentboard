@@ -24,6 +24,8 @@ import UIKit
     private(set) var media: [Media] = []
     private(set) var attention: [Attention] = []
     private(set) var decisions: [Decision] = []
+    private(set) var elements: [Element] = []
+    @ObservationIgnored private var tickets: [UUID: [UUID: CheckedContinuation<(port: Int, token: String)?, Never>]] = [:]
     /// Pictures and videos brought from the host, by file name; nil while on their way or refused.
     private(set) var files: [String: Data] = [:]
 
@@ -93,8 +95,45 @@ import UIKit
         }
     }
 
+    // MARK: Streams
+
+    /// Where a card's stream is served (docs/streams.md, "Finding it"); nil when no Mac board
+    /// serves streams or the core doesn't answer within 5 s. The token is only kept in memory.
+    func streamTicket(_ card: UUID) async -> (port: Int, token: String)? {
+        guard client != nil else { return nil }
+        return await withCheckedContinuation { continuation in
+            let request = UUID()
+            tickets[card, default: [:]][request] = continuation
+            if tickets[card]?.count == 1 { send(BoardSay.streamTicket(card)) }
+            // Only this request times out: a newer one for the same card keeps its own 5 s.
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                self?.tickets[card]?.removeValue(forKey: request)?.resume(returning: nil)
+                if self?.tickets[card]?.isEmpty == true { self?.tickets[card] = nil }
+            }
+        }
+    }
+
+    /// A card's stream: a ticket, then a second channel to that port on the host's loopback.
+    func openStream(_ card: UUID) async -> StreamClient? {
+        guard let ticket = await streamTicket(card), let port = UInt16(exactly: ticket.port),
+              let id = host.uuid, let key = Data(base64Encoded: host.public_key), let account, let token = account.token else { return nil }
+        let board = HostChannel.Board(key: account.boardKey, name: UIDevice.current.name)
+        let addresses = host.addresses ?? []
+        let opened = await Task.detached {
+            HostChannel.open(server: AccountServer.url, token: token, host: id, hostKey: key, board: board, carrying: .tcp(port: port),
+                             addresses: addresses)
+        }.value
+        guard case .channel(let fd) = opened else { return nil }
+        let stream = StreamClient(fd: fd)
+        stream.start(token: ticket.token, card: card)
+        return stream
+    }
+
     private func dropped(_ why: String) {
         client = nil
+        for waiting in tickets.values { waiting.values.forEach { $0.resume(returning: nil) } }
+        tickets = [:]
         phase = .failed(why)
         fetching.removeAll()
         // Tries again in a moment, while anyone still holds this link.
@@ -284,6 +323,7 @@ import UIKit
         media = state.images ?? []
         attention = state.attention ?? []
         decisions = (state.decisions ?? []).filter { $0.state == .open }
+        elements = state.elements ?? []
     }
 
     private func serviced(_ data: Data) {
@@ -309,6 +349,10 @@ import UIKit
         case .postItRemoved(let id): postIts.removeAll { $0.id == id }
         case .imageAdded(let item), .imageUpdated(let item): upsert(item, in: &media)
         case .imageRemoved(let id): media.removeAll { $0.id == id }
+        case .elements(let list): elements = list
+        case .streamTicket(let card, let port, let token):
+            let answer = port.flatMap { port in token.map { (port: port, token: $0) } }
+            tickets.removeValue(forKey: card)?.values.forEach { $0.resume(returning: answer) }
         }
     }
 }

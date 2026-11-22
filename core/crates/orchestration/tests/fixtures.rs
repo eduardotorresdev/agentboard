@@ -132,7 +132,7 @@ fn requests_encode_as_swift_does() {
 fn events_encode_as_swift_does() {
     let names = [
         "cardAdded", "cardUpdated", "cardRemoved", "connections", "message", "runners", "runners_none", "toolCall", "postItAdded", "postItUpdated", "postItRemoved", "imageAdded", "imageUpdated",
-        "imageRemoved", "attention", "held", "promptReturned",
+        "imageRemoved", "attention", "held", "promptReturned", "elements",
     ];
     let events: Vec<BoardEvent> = names.iter().map(|name| round_trip(&format!("event_{name}"))).collect();
     assert_eq!(events[0], BoardEvent::CardAdded(only(runner())));
@@ -153,6 +153,8 @@ fn events_encode_as_swift_does() {
     let questions = queue[2].questions.as_ref().unwrap();
     assert_eq!(questions[0], AgentQuestion { question: "Which layout?".into(), header: Some("Layout".into()), options: vec![QuestionOption { label: "Grid".into(), description: Some("Rows and columns".into()) }, QuestionOption { label: "List".into(), description: None }], multi_select: true });
     assert_eq!(events[15], BoardEvent::Held { id: id(1), count: 2 });
+    let BoardEvent::Elements(Unlabelled { value: elements }) = &events[17] else { panic!("not the elements") };
+    assert_eq!(elements.iter().map(|info| (info.id, info.kind.as_str())).collect::<Vec<_>>(), [(id(5), "browser"), (id(6), "filetree")]);
 }
 
 #[test]
@@ -163,8 +165,9 @@ fn the_state_encodes_as_swift_does() {
     assert_eq!(state.post_its, Some(vec![post_it(), empty_post_it()]));
     assert_eq!(state.images, Some(vec![image(), video()]));
     assert_eq!(state.attention.map(|queue| queue.len()), Some(3));
+    assert_eq!(state.elements.map(|list| list.iter().map(|info| info.id).collect::<Vec<_>>()), Some(vec![id(5)]));
     let old: BoardState = round_trip("state_of_an_older_core");
-    assert_eq!((old.post_its, old.attention, old.images), (None, None, None));
+    assert_eq!((old.post_its, old.attention, old.images, old.elements), (None, None, None, None));
 }
 
 /// A data folder the Swift core used serves this one.

@@ -16,6 +16,19 @@ struct Card: Decodable, Identifiable, Equatable {
     let runner: Runner?
 }
 
+/// An element only a Mac board runs (a browser, a simulator, a file tree), as `ElementInfo` says.
+struct Element: Decodable, Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    /// `ElementKind`'s text: `browser`, `simulator`, `filetree`...
+    let kind: String
+    let detail: String?
+    let worktree: String
+    let frame: CGRect
+    /// Browsers and simulators: what the Mac streams (docs/streams.md).
+    var streams: Bool { ["browser", "simulator"].contains(kind) }
+}
+
 struct Line: Decodable, Identifiable, Equatable {
     let id: UUID
     let a: UUID
@@ -73,6 +86,7 @@ struct BoardSnapshot: Decodable {
     let images: [Media]?
     let attention: [Attention]?
     let decisions: [Decision]?
+    let elements: [Element]?
 }
 
 enum BoardUpdate: Decodable {
@@ -88,6 +102,9 @@ enum BoardUpdate: Decodable {
     case imageAdded(Media)
     case imageUpdated(Media)
     case imageRemoved(UUID)
+    case elements([Element])
+    /// How to reach a card's stream; nil while no Mac board serves them.
+    case streamTicket(card: UUID, port: Int?, token: String?)
 }
 
 /// Board → core requests, written as Swift's synthesized Codable writes `BoardRequest`.
@@ -127,6 +144,8 @@ enum BoardSay {
     }
 
     /// Starts a stopped agent again, or restarts a runner, as the Mac's restart does.
+    static func streamTicket(_ card: UUID) -> Data { json(["streamTicket": ["card": card.uuidString]]) }
+
     static func restart(_ id: UUID) -> Data {
         json(["restart": ["id": id.uuidString]])
     }

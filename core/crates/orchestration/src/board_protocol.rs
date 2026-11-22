@@ -112,6 +112,9 @@ pub enum BoardEvent {
     /// A composer prompt agent `id` couldn't take (it stopped, or waits on the developer):
     /// back to the composer with why.
     PromptReturned { id: Uuid, text: String, reason: String },
+    /// The boards' other elements (browsers, simulators), after a board said which it has: how
+    /// a board that can't run them (a phone) learns of them. Not sent back to that board.
+    Elements(Unlabelled<Vec<ElementInfo>>),
 }
 
 /// The one unlabelled value of a Swift enum case: `{"_0": value}`.
@@ -142,6 +145,9 @@ pub struct BoardState {
     /// The images; none from a core that predates them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<ImageRecord>>,
+    /// The boards' other elements; none from a core that predates sending them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elements: Option<Vec<ElementInfo>>,
 }
 
 /// What the running runners serve and cost, and when each started.

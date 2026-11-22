@@ -245,6 +245,35 @@ struct OrchestratorTests {
         phone.disconnect()
     }
 
+    /// The elements a Mac board runs reach the other boards (a phone can't run them), in the
+    /// event and in a later board's welcome, but never go back to the board that said them.
+    @Test func elementsReachTheOtherBoardsOnly() async throws {
+        let core = try await MainActor.run { try Core() }
+        defer { Task { @MainActor in core.stop() } }
+        let folder = await MainActor.run { core.folder }
+        let mac = try await board(core), phone = try await board(core)
+        let macInbox = Inbox(), phoneInbox = Inbox()
+        mac.onService { data in if let event = BoardEvent(data) { macInbox.add(event) } }
+        phone.onService { data in if let event = BoardEvent(data) { phoneInbox.add(event) } }
+        let browser = ElementInfo(id: UUID(), name: "Desktop", kind: "browser", detail: nil, worktree: folder.path,
+                                  frame: CGRect(x: 0, y: 0, width: 700, height: 500))
+        func listed(_ inbox: Inbox) -> [[UUID]] {
+            inbox.events.compactMap { event -> [UUID]? in if case .elements(let list) = event { list.map(\.id) } else { nil } }
+        }
+        mac.send(.elements([browser]))
+        try await waitUntil { listed(phoneInbox) == [[browser.id]] }
+        // Anything the Mac hears after its own list was sent says it wasn't echoed back.
+        mac.send(.streamTicket(card: browser.id))
+        try await waitUntil { macInbox.events.contains { if case .streamTicket = $0 { true } else { false } } }
+        #expect(listed(macInbox).isEmpty)
+        let late = try await board(core)
+        let welcome = try #require(late.serviceState.flatMap(BoardState.init))
+        #expect(welcome.elements?.map(\.id) == [browser.id])
+        late.disconnect()
+        mac.disconnect()
+        phone.disconnect()
+    }
+
     /// An agent's notifications queue it for the developer: its hooks raise and clear the
     /// request, a later signal keeps its place, and dismissing or removing it takes it out.
     @Test func agentsAskForTheDeveloper() async throws {

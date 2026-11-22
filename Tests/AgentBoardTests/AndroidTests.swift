@@ -58,7 +58,7 @@ struct AndroidTests {
 
     @Test func annexBSplitsIntoNALUnits() {
         let stream = Data([0, 0, 0, 1, 0x67, 1, 2, 0, 0, 1, 0x68, 3, 0, 0, 0, 1, 0x65, 4, 5])
-        #expect(ScrcpyStream.nalUnits(stream) == [Data([0x67, 1, 2]), Data([0x68, 3]), Data([0x65, 4, 5])])
+        #expect(StreamWire.nalUnits(stream) == [Data([0x67, 1, 2]), Data([0x68, 3]), Data([0x65, 4, 5])])
     }
 
     /// Each node is an element at its nesting depth; a description is the label and the text,

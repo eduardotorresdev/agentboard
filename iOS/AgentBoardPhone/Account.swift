@@ -107,6 +107,22 @@ struct AccountServer {
     }()
 
     #if DEBUG
+    /// `-accountToken <token>`: a session seeded into a local account server for tests, kept in
+    /// memory only (never the Keychain), and only when `AGENTBOARD_SERVER` is on this machine's
+    /// loopback, so a seeded token never reaches the real server.
+    init() {
+        guard let seeded = DebugLaunch.value("accountToken") else { return }
+        guard Self.allowsSeededToken(AccountServer.url) else {
+            Logger(subsystem: "dev.agentboard.phone", category: "account").error("refused -accountToken: AGENTBOARD_SERVER isn't a loopback address")
+            return
+        }
+        token = seeded
+    }
+
+    nonisolated static func allowsSeededToken(_ server: URL) -> Bool {
+        ["127.0.0.1", "localhost", "::1"].contains(server.host?.lowercased() ?? "")
+    }
+
     /// For `agentboard trust <key>` without reading it off the screen:
     /// `xcrun simctl spawn booted log show --predicate 'subsystem == "dev.agentboard.phone"'`.
     func logKey() {

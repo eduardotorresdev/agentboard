@@ -912,6 +912,7 @@ impl CoreService for Orchestrator {
             post_its: Some(store.post_its.clone()),
             attention: Some(store.attention.clone()),
             images: Some(store.images.clone()),
+            elements: Some(store.elements.values().cloned().collect()),
         };
         Some(state.encoded())
     }
@@ -1065,6 +1066,8 @@ impl Turn<'_> {
                     self.disconnect_element(id);
                 }
                 self.elements.extend(list.into_iter().map(|info| (info.id, info)));
+                let all: Vec<ElementInfo> = self.elements.values().cloned().collect();
+                self.broadcast(&BoardEvent::Elements(only(all)), sender);
             }
             BoardRequest::Open { id, cols, rows, start } => {
                 if self.record(id).is_none() {

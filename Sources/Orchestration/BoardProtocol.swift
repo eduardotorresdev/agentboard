@@ -95,6 +95,9 @@ public enum BoardEvent: Codable, Sendable {
     /// Every decision, oldest first, after any change. One that closed comes once more, as
     /// `closed` with the agent's echo, and is gone from the next list.
     case decisions([Decision])
+    /// The boards' other elements (browsers, simulators), after a board said which it has: how
+    /// a board that can't run them (a phone) learns of them. Not sent back to that board.
+    case elements([ElementInfo])
 }
 
 /// What a board gets with its welcome.
@@ -110,9 +113,12 @@ public struct BoardState: Codable, Sendable {
     public var images: [ImageRecord]?
     /// The decisions waiting on the developer; nil when there are none or from a core that predates them.
     public var decisions: [Decision]?
+    /// The boards' other elements; nil from a core that predates sending them.
+    public var elements: [ElementInfo]?
 
     public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = [],
-                attention: [AttentionRequest] = [], images: [ImageRecord] = [], decisions: [Decision] = []) {
+                attention: [AttentionRequest] = [], images: [ImageRecord] = [], decisions: [Decision] = [],
+                elements: [ElementInfo]? = nil) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
@@ -120,6 +126,7 @@ public struct BoardState: Codable, Sendable {
         self.attention = attention
         self.images = images
         self.decisions = decisions.isEmpty ? nil : decisions
+        self.elements = elements
     }
 }
 

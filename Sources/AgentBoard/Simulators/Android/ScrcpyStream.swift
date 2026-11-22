@@ -1,3 +1,4 @@
+import AgentRuntime
 import AVFoundation
 import CoreMedia
 import Foundation
@@ -102,12 +103,12 @@ final class ScrcpyStream: @unchecked Sendable {
                     }
                 case .config(let size):
                     let config = try video.read(size)
-                    format = Self.formatDescription(fromConfig: config)
+                    format = StreamWire.formatDescription(fromConfig: config)
                     onVideo?(config)
                 case .frame(let size, let key, _):
                     let payload = try video.read(size)
                     onVideo?(payload)
-                    guard let format, let sample = Self.sampleBuffer(annexB: payload, format: format, keyFrame: key) else { continue }
+                    guard let format, let sample = StreamWire.sampleBuffer(annexB: payload, format: format, keyFrame: key) else { continue }
                     frames += 1
                     if layer.sampleBufferRenderer.status == .failed { layer.sampleBufferRenderer.flush() }
                     layer.sampleBufferRenderer.enqueue(sample)
@@ -235,61 +236,5 @@ final class ScrcpyStream: @unchecked Sendable {
     }
 
     static func big<T: FixedWidthInteger>(_ value: T) -> Data { withUnsafeBytes(of: value.bigEndian) { Data($0) } }
-
-    // MARK: H.264
-
-    /// The NAL units of an Annex B stream (each after a 00 00 01 or 00 00 00 01 start code).
-    static func nalUnits(_ data: Data) -> [Data] {
-        let bytes = [UInt8](data)
-        var units: [Data] = []
-        var start: Int?
-        var index = 0
-        while index + 3 <= bytes.count {
-            if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 1 || (index + 3 < bytes.count && bytes[index + 2] == 0 && bytes[index + 3] == 1) {
-                let skip = bytes[index + 2] == 1 ? 3 : 4
-                if let start { units.append(Data(bytes[start..<index])) }
-                index += skip
-                start = index
-            } else {
-                index += 1
-            }
-        }
-        if let start, start < bytes.count { units.append(Data(bytes[start...])) }
-        return units
-    }
-
-    static func formatDescription(fromConfig config: Data) -> CMVideoFormatDescription? {
-        let units = nalUnits(config)
-        guard let sps = units.first(where: { ($0.first ?? 0) & 0x1f == 7 }), let pps = units.first(where: { ($0.first ?? 0) & 0x1f == 8 }) else { return nil }
-        var format: CMVideoFormatDescription?
-        sps.withUnsafeBytes { s in
-            pps.withUnsafeBytes { p in
-                let pointers = [s.bindMemory(to: UInt8.self).baseAddress!, p.bindMemory(to: UInt8.self).baseAddress!]
-                _ = CMVideoFormatDescriptionCreateFromH264ParameterSets(allocator: nil, parameterSetCount: 2, parameterSetPointers: pointers,
-                                                                        parameterSetSizes: [sps.count, pps.count], nalUnitHeaderLength: 4,
-                                                                        formatDescriptionOut: &format)
-            }
-        }
-        return format
-    }
-
-    /// Annex B to the length-prefixed form the decoder takes, shown as soon as it is enqueued.
-    static func sampleBuffer(annexB: Data, format: CMVideoFormatDescription, keyFrame: Bool) -> CMSampleBuffer? {
-        var avcc = Data()
-        for unit in nalUnits(annexB) { avcc += big(UInt32(unit.count)) + unit }
-        guard !avcc.isEmpty else { return nil }
-        var block: CMBlockBuffer?
-        guard CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: avcc.count, blockAllocator: nil, customBlockSource: nil,
-                                                 offsetToData: 0, dataLength: avcc.count, flags: 0, blockBufferOut: &block) == noErr, let block else { return nil }
-        avcc.withUnsafeBytes { _ = CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: avcc.count) }
-        var sample: CMSampleBuffer?
-        var size = avcc.count
-        guard CMSampleBufferCreateReady(allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: 1, sampleTimingEntryCount: 0,
-                                        sampleTimingArray: nil, sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample) == noErr,
-              let sample, let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as? [NSMutableDictionary],
-              let first = attachments.first else { return nil }
-        first[kCMSampleAttachmentKey_DisplayImmediately] = true
-        if !keyFrame { first[kCMSampleAttachmentKey_NotSync] = true }
-        return sample
-    }
 }
+

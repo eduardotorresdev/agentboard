@@ -275,7 +275,7 @@ public final class Orchestrator: CoreService {
     public func boardConnected(_ board: CoreBoard) -> Data? {
         boards.insert(board)
         return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
-                          attention: attention, images: images, decisions: decisions).encoded
+                          attention: attention, images: images, decisions: decisions, elements: Array(elements.values)).encoded
     }
 
     public func input(_ bytes: [UInt8], to id: UUID) -> [UInt8] {
@@ -330,6 +330,7 @@ public final class Orchestrator: CoreService {
                 if elements[info.id] == nil { bus.register(RemoteElement(id: info.id, store: self)) }
                 elements[info.id] = info
             }
+            broadcast(.elements(Array(elements.values)), except: board)
         case .open(let id, let cols, let rows, let start):
             guard let record = record(id) else { return }
             let fresh = server.session(id) == nil

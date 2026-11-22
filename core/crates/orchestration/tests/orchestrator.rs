@@ -1469,3 +1469,25 @@ fn agents_create_and_read_videos() {
     assert_eq!(core.call("video_remove", json!({}), a.id).0, "Removed “Video” from the board.");
     assert!(stored(&core).is_empty());
 }
+
+/// The elements a Mac board runs reach the other boards (a phone can't run them), never the board
+/// that said them.
+#[test]
+fn elements_reach_the_other_boards_only() {
+    let core = Core::new();
+    let mut mac = Board::open(&core);
+    let mut phone = Board::open(&core);
+    let browser = ElementInfo {
+        id: Uuid::new(),
+        name: "Desktop".into(),
+        kind: "browser".into(),
+        detail: None,
+        worktree: core.folder.to_string_lossy().into_owned(),
+        frame: Rect::new(0.0, 0.0, 700.0, 500.0),
+        organization: None,
+    };
+    mac.send(BoardRequest::Elements(only(vec![browser.clone()])));
+    phone.wait("the elements", |events| events.contains(&BoardEvent::Elements(only(vec![browser.clone()]))));
+    mac.read(Duration::from_millis(300));
+    assert!(!mac.events.iter().any(|event| matches!(event, BoardEvent::Elements(_))), "echoed back: {:?}", mac.events);
+}

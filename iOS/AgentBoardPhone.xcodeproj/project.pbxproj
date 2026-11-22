@@ -13,6 +13,7 @@
 		2392435829A19FD9B1BE1AC0 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24309D6871EB935EF294397B /* App.swift */; };
 		2DE73D2AC70A2BC50DDD1EA8 /* BoardWire.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A34C2EB469107922DB1EBD /* BoardWire.swift */; };
 		3D734D7CD7779C50B39A8A41 /* SkyBlob.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49AC2B70D021A1E09873D61 /* SkyBlob.swift */; };
+		3E165726B4AA0A670084C784 /* StreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91FBB1F0442CEC96B4603BCC /* StreamClient.swift */; };
 		3F19EDD464AAA398A1DB21F0 /* CanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F5172C3F44CCDAF4ABB67C /* CanvasView.swift */; };
 		4B6C5EFB7CF86B543918D81F /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2E49A6830ED49F9E3FAFBE2 /* Catalog.swift */; };
 		4F1932D35874D14389BBCB67 /* Blob.metal in Sources */ = {isa = PBXBuildFile; fileRef = 82741891075384796470421C /* Blob.metal */; };
@@ -21,6 +22,7 @@
 		5C585DDF665946537CFB71FC /* Account.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A875B6538276F4639127608 /* Account.swift */; };
 		62DB7CC674824D544054C553 /* WireTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA79EE3E87B5B3991578985D /* WireTests.swift */; };
 		9B25E078506F911356F20BE8 /* ChannelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD553EA659FDE2F43B28BE26 /* ChannelTests.swift */; };
+		BCE44D7FC69EB683927B6E42 /* StreamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 166A3BB7E18C1E9247836D0C /* StreamTests.swift */; };
 		DB5DD0BE02734EE42E419103 /* MetalTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC0A33A4CCFD54E4E369192 /* MetalTerminal.swift */; };
 		E132F572DA376AD7F104E6F6 /* HostLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183F64FDA7A9218A44664CDF /* HostLink.swift */; };
 		EDFF32E4C1E2435965E217D4 /* Connections in Frameworks */ = {isa = PBXBuildFile; productRef = 3B25DF701F4D807409BFA8A1 /* Connections */; };
@@ -47,6 +49,7 @@
 
 /* Begin PBXFileReference section */
 		006833C6B2CDCFAF6099FF72 /* AddMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddMenuUITests.swift; sourceTree = "<group>"; };
+		166A3BB7E18C1E9247836D0C /* StreamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamTests.swift; sourceTree = "<group>"; };
 		16B2CD1E11EC1FEBA49AA2EB /* TerminalScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScreen.swift; sourceTree = "<group>"; };
 		183F64FDA7A9218A44664CDF /* HostLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostLink.swift; sourceTree = "<group>"; };
 		1A875B6538276F4639127608 /* Account.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Account.swift; sourceTree = "<group>"; };
@@ -56,6 +59,7 @@
 		3EF7B13CA4C5585BBC2F82DF /* AgentBoardPhoneUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgentBoardPhoneUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		47F5172C3F44CCDAF4ABB67C /* CanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasView.swift; sourceTree = "<group>"; };
 		82741891075384796470421C /* Blob.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Blob.metal; sourceTree = "<group>"; };
+		91FBB1F0442CEC96B4603BCC /* StreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamClient.swift; sourceTree = "<group>"; };
 		924DFDB86B769145610335DF /* agent-a2f81d65094d4744b */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "agent-a2f81d65094d4744b"; path = ..; sourceTree = SOURCE_ROOT; };
 		A2E49A6830ED49F9E3FAFBE2 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		A49AC2B70D021A1E09873D61 /* SkyBlob.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkyBlob.swift; sourceTree = "<group>"; };
@@ -86,6 +90,7 @@
 			isa = PBXGroup;
 			children = (
 				CD553EA659FDE2F43B28BE26 /* ChannelTests.swift */,
+				166A3BB7E18C1E9247836D0C /* StreamTests.swift */,
 				EA79EE3E87B5B3991578985D /* WireTests.swift */,
 			);
 			path = AgentBoardPhoneTests;
@@ -122,6 +127,7 @@
 				183F64FDA7A9218A44664CDF /* HostLink.swift */,
 				FDC0A33A4CCFD54E4E369192 /* MetalTerminal.swift */,
 				A49AC2B70D021A1E09873D61 /* SkyBlob.swift */,
+				91FBB1F0442CEC96B4603BCC /* StreamClient.swift */,
 				16B2CD1E11EC1FEBA49AA2EB /* TerminalScreen.swift */,
 				C478D047C898DAA4F0505D43 /* Theme.swift */,
 			);
@@ -256,6 +262,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9B25E078506F911356F20BE8 /* ChannelTests.swift in Sources */,
+				BCE44D7FC69EB683927B6E42 /* StreamTests.swift in Sources */,
 				62DB7CC674824D544054C553 /* WireTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -282,6 +289,7 @@
 				E132F572DA376AD7F104E6F6 /* HostLink.swift in Sources */,
 				DB5DD0BE02734EE42E419103 /* MetalTerminal.swift in Sources */,
 				3D734D7CD7779C50B39A8A41 /* SkyBlob.swift in Sources */,
+				3E165726B4AA0A670084C784 /* StreamClient.swift in Sources */,
 				F8A3980890B46D058C99D28E /* TerminalScreen.swift in Sources */,
 				08B5C9ECDE282D6C8EA9014E /* Theme.swift in Sources */,
 			);
