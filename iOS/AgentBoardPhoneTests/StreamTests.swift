@@ -89,6 +89,21 @@ final class StreamTests: XCTestCase {
         XCTAssertFalse(Account.allowsSeededToken(URL(string: "http://127.0.0.1.example.com")!))
     }
 
+    /// Touches land in the stream's own space, the picture aspect-fit and centered: a 390×844
+    /// screen shown in a 390×390 view is pillarboxed, and the bars take no input.
+    func testTouchesMapIntoTheStreamsSpace() {
+        let view = CGSize(width: 390, height: 390), space = CGSize(width: 390, height: 844)
+        let scale = 390.0 / 844
+        let left = (390 - 390 * scale) / 2
+        let center = StreamSurfaceView.map(CGPoint(x: 195, y: 195), in: view, to: space)
+        XCTAssertEqual(center?.x ?? -1, 195, accuracy: 0.001)
+        XCTAssertEqual(center?.y ?? -1, 422, accuracy: 0.001)
+        let corner = StreamSurfaceView.map(CGPoint(x: left, y: 0), in: view, to: space)
+        XCTAssertEqual(corner?.x ?? -1, 0, accuracy: 0.001)
+        XCTAssertNil(StreamSurfaceView.map(CGPoint(x: 10, y: 195), in: view, to: space), "the bar beside the picture")
+        XCTAssertNil(StreamSurfaceView.map(CGPoint(x: 10, y: 10), in: view, to: .zero), "no header yet")
+    }
+
     // MARK: Helpers
 
     private func send(_ fd: Int32, _ data: Data) {
@@ -177,13 +192,4 @@ final class StreamTests: XCTestCase {
         VTDecompressionSessionInvalidate(session)
         return pictures.value
     }
-}
-
-/// A value shared with callback threads.
-final class Locked<T>: @unchecked Sendable {
-    private var stored: T
-    private let lock = NSLock()
-    init(_ value: T) { stored = value }
-    var value: T { lock.withLock { stored } }
-    func mutate(_ change: (inout T) -> Void) { lock.withLock { change(&stored) } }
 }

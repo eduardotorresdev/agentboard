@@ -109,3 +109,12 @@ struct StreamDecoder {
     /// After the layer failed: nothing shows until the next keyframe.
     mutating func restart() { waitingForKeyFrame = true }
 }
+
+/// A value shared with callback threads.
+final class Locked<T>: @unchecked Sendable {
+    private var stored: T
+    private let lock = NSLock()
+    init(_ value: T) { stored = value }
+    var value: T { lock.withLock { stored } }
+    func mutate(_ change: (inout T) -> Void) { lock.withLock { change(&stored) } }
+}

@@ -31,6 +31,7 @@ struct CanvasView: View {
     @State private var rasterZoom: CGFloat?
     @State private var dragging: (id: UUID, frame: CGRect)?
     @State private var opened: Card?
+    @State private var watching: Element?
     @State private var adding: Adding?
     @State private var draft = ""
     @State private var editing: PostIt?
@@ -45,7 +46,9 @@ struct CanvasView: View {
         let cards = link.cards(in: worktree.path)
         let notes = link.postIts.filter { $0.worktree == worktree.path }
         let media = link.media.filter { $0.worktree == worktree.path }
-        let others = Dictionary(notes.map { ($0.id, $0.frame) } + media.map { ($0.id, $0.frame) }, uniquingKeysWith: { a, _ in a })
+        let streamed = link.elements.filter { $0.worktree == worktree.path && $0.streams }
+        let others = Dictionary(notes.map { ($0.id, $0.frame) } + media.map { ($0.id, $0.frame) } + streamed.map { ($0.id, $0.frame) },
+                                uniquingKeysWith: { a, _ in a })
         GeometryReader { geometry in
             let bounds = (cards.map(\.frame) + Array(others.values)).reduce(CGRect.null) { $0.union($1) }
             let board = bounds.isNull ? CGRect(x: 0, y: 0, width: 1, height: 1) : bounds.insetBy(dx: -40, dy: -40)
@@ -88,6 +91,11 @@ struct CanvasView: View {
                     ForEach(media) { item in
                         let rect = place(item.frame)
                         MediaView(link: link, item: item).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
+                    }
+                    ForEach(streamed) { element in
+                        let rect = place(element.frame)
+                        ElementTile(element: element).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
+                            .onTapGesture { watching = element }
                     }
                     ForEach(cards) { card in
                         let rect = place(frame(card))
@@ -136,6 +144,7 @@ struct CanvasView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $opened) { card in TerminalPage(link: link, card: card) }
+        .navigationDestination(item: $watching) { element in StreamPage(link: link, element: element) }
         #if DEBUG
         // `-perf YES` logs fps; `-zoom <scale>` sets the zoom; `-autoPan YES` pans back and forth
         // as a finger would, for measuring without touching the simulator.
