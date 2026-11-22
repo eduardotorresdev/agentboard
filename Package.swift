@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "AgentBoard",
     defaultLocalization: "pt-BR",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS("26.0")],
     products: [
         // Exposed so Benchmarks/ can measure them against the previous engine.
         .library(name: "TerminalCore", targets: ["TerminalCore"]),
