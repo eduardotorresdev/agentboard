@@ -177,7 +177,11 @@ public final class SharedSurface<ID: Hashable> {
         IOSurfaceSetValue(surface, "IOSurfaceColorSpace" as CFString, CGColorSpace.sRGB)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
         descriptor.usage = [.renderTarget]
+        #if os(macOS)
         descriptor.storageMode = device.hasUnifiedMemory ? .shared : .managed
+        #else
+        descriptor.storageMode = .shared
+        #endif
         guard let texture = device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0) else { return nil }
         return Buffer(surface: surface, texture: texture)
     }
