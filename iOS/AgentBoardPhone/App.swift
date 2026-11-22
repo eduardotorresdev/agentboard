@@ -134,13 +134,36 @@ struct Fingerprint: View {
         loaded = true
     }
 
+    /// How many agents in a worktree wait for the user: in their terminal, or on a decision (as
+    /// the Mac's Needs you counts them).
+    func waiting(in worktree: Worktree) -> Int {
+        guard let link = link(id: worktree.host) else { return 0 }
+        let agents = Set(link.attention.map(\.id) + link.decisions.filter { $0.state != .closed }.map(\.agent))
+        return link.cards.filter { agents.contains($0.id) && $0.worktree == worktree.path }.count
+    }
+
+    /// A link's phase, as the browsing screens see it.
+    func phase(_ link: HostLink?) -> HostLink.Phase? {
+        #if DEBUG
+        // `-forceHostState pending|failed`: shows every host so, for screenshots of those rows.
+        switch DebugLaunch.value("forceHostState") {
+        case "pending": return .pending(trusted: 0)
+        case "failed": return .failed("Forced")
+        case "offline": return nil
+        default: break
+        }
+        #endif
+        return link?.phase
+    }
+
     /// What a host's worktrees can do right now, in a few words.
     func state(_ host: Host) -> (text: String, color: Color) {
-        switch links[host.id.lowercased()]?.phase {
+        switch phase(links[host.id.lowercased()]) {
         case .connected: ("Online", Theme.accent)
         case .pending: ("Waiting for trust", Theme.deep)
         case .failed: ("Unreachable", Theme.inkMuted)
-        case .connecting, nil: host.online ? ("Connecting", Theme.inkMuted) : ("Offline", Theme.inkMuted)
+        case .connecting: host.online ? ("Connecting", Theme.inkMuted) : ("Offline", Theme.inkMuted)
+        case nil: ("Offline", Theme.inkMuted)
         }
     }
 }
@@ -188,9 +211,14 @@ struct BrowseView: View {
                     if let current {
                         Text("PROJECTS").font(Theme.Font.eyebrow).tracking(0.8).foregroundStyle(Theme.inkMuted)
                         ForEach(current.projects) { project in
+                            let waiting = project.worktrees.reduce(0) { $0 + hosts.waiting(in: $1) }
                             NavigationLink(value: project) {
-                                ListRow(title: project.name, detail: project.worktrees.count == 1 ? "1 worktree" : "\(project.worktrees.count) worktrees")
+                                ListRow(title: project.name, detail: project.worktrees.count == 1 ? "1 worktree" : "\(project.worktrees.count) worktrees",
+                                        state: waiting == 0 ? nil : ("\(waiting) waiting for you", Theme.deep))
                             }
+                        }
+                        if current.projects.isEmpty {
+                            Text("No worktrees in this organization on your hosts yet.").font(Theme.Font.body).foregroundStyle(Theme.inkMuted)
                         }
                     } else if hosts.loaded {
                         Text(hosts.list.isEmpty ? "No hosts on this account yet." : "No projects on your hosts yet.")
@@ -203,7 +231,8 @@ struct BrowseView: View {
                 .padding(16)
             }
             .background(Theme.canvas)
-            .navigationTitle(current?.organization.name ?? "Projects")
+            // No large title: the selected organization chip already says where you are.
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: Route.hosts) { Image(systemName: "server.rack") }.accessibilityLabel("Hosts")
@@ -245,8 +274,13 @@ struct BrowseView: View {
         let found = OrganizationGroup.group(await catalog.browse(hosts.list.map(hosts.link)))
         withAnimation(.smooth) { groups = found }
         #if DEBUG
-        if path.isEmpty, let name = DebugLaunch.value("openProject"), let project = found.flatMap(\.projects).first(where: { $0.name == name }) {
-            path.append(project)
+        if let name = DebugLaunch.value("openProject"), let project = found.flatMap(\.projects).first(where: { $0.name == name }) {
+            if path.isEmpty { path.append(project) }
+            // `-openProjectWorktree YES`: on into its first worktree once its host is connected.
+            if path.count == 1, UserDefaults.standard.bool(forKey: "openProjectWorktree"), let worktree = project.worktrees.first,
+               hosts.link(id: worktree.host)?.phase == .connected {
+                path.append(worktree)
+            }
         }
         #endif
     }
@@ -285,7 +319,7 @@ struct ProjectView: View {
                     let link = hosts.link(id: worktree.host)
                     let state = link.map { hosts.state($0.host) } ?? ("Offline", Theme.inkMuted)
                     let row = ListRow(title: worktree.title, detail: link?.host.name, state: state)
-                    switch link?.phase {
+                    switch hosts.phase(link) {
                     case .connected: NavigationLink(value: worktree) { row }
                     // Opens the host's screen, which says how to trust this phone.
                     case .pending: if let link { NavigationLink(value: link.host) { row } }

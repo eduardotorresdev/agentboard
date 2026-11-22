@@ -100,7 +100,12 @@ struct AccountCatalog: CatalogSource {
         (await get("v1/catalog/avatars/\(organization.uuidString.lowercased())")?["image"] as? String).flatMap { Data(base64Encoded: $0) }
     }
 
-    private func get(_ path: String) async -> [String: Any]? {
+    /// Avatar images already brought down, by organization, with their version.
+    private static var avatars: [String: (version: Int, image: Data?)] = [:]
+
+    private func get(_ path: String) async -> [String: Any]? { await getAny(path) as? [String: Any] }
+
+    private func getAny(_ path: String) async -> Any? {
         #if DEBUG
         // `-catalogServer <url> -catalogToken <token>`: the catalog alone from another server (a
         // local `wrangler dev`) with its own session; the real token never goes there.
@@ -109,10 +114,10 @@ struct AccountCatalog: CatalogSource {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             guard let (data, response) = try? await URLSession.shared.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return try? JSONSerialization.jsonObject(with: data)
         }
         #endif
-        return (try? await server.call("GET", path)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return (try? await server.call("GET", path)).flatMap { try? JSONSerialization.jsonObject(with: $0) }
     }
 
     func browse(_ links: [HostLink]) async -> Browse {
@@ -126,10 +131,22 @@ struct AccountCatalog: CatalogSource {
                 worktrees += Self.listed(on: link.host.id, in: document)
             }
         }
+        // Avatars by version: only the ones that changed since the last look come down again.
+        var versions: [String: Int] = [:]
+        if let list = await getAny("v1/catalog/avatars") as? [[String: Any]] {
+            for row in list { if let id = row["organization"] as? String, let version = row["version"] as? Int { versions[id] = version } }
+        }
         var organizations: [Organization] = []
         for organization in document?.organizations ?? [] {
-            organizations.append(Organization(id: organization.id, name: organization.name, color: organization.color ?? 0,
-                                              image: await avatar(organization.id)))
+            let key = organization.id.uuidString.lowercased()
+            var image: Data?
+            if let version = versions[key] {
+                if let cached = Self.avatars[key], cached.version == version { image = cached.image } else {
+                    image = await avatar(organization.id)
+                    Self.avatars[key] = (version, image)
+                }
+            }
+            organizations.append(Organization(id: organization.id, name: organization.name, color: organization.color ?? 0, image: image))
         }
         return Browse(organizations: organizations, worktrees: worktrees)
     }
