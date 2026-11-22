@@ -190,7 +190,7 @@ struct BrowseView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     // As the Mac's bar: every organization's avatar, even when there is only one.
-                    if groups.contains(where: { $0.organization.id != nil }) {
+                    if !groups.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
                                 ForEach(groups) { group in

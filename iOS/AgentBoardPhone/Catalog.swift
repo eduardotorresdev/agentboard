@@ -24,6 +24,12 @@ struct Organization: Hashable, Identifiable {
     var image: Data? = nil
 }
 
+extension Organization {
+    /// Where worktrees no catalog organization claims go: the Mac's own first organization
+    /// (`OrganizationHome.defaultID`, "Default", the first palette color), which it always has.
+    static let local = Organization(id: OrganizationHome.defaultID, name: "Default")
+}
+
 struct Worktree: Identifiable, Hashable {
     let path: String
     var branch: String? = nil
@@ -48,14 +54,14 @@ struct OrganizationGroup: Identifiable, Equatable {
     var id: String { organization.id?.uuidString ?? "" }
 
     /// Grouped by organization then project, worktrees from every host together. Worktrees whose
-    /// organization nothing names go last, under one with no id.
+    /// organization no catalog entry names go in the Mac's own Default one.
     static func group(_ browse: Browse) -> [OrganizationGroup] {
         let known = Set(browse.organizations.map(\.id))
         var result = browse.organizations.map { OrganizationGroup(organization: $0, projects: []) }
         for worktree in browse.worktrees {
-            let key = known.contains(worktree.organization) ? worktree.organization : nil
+            let key = known.contains(worktree.organization) ? worktree.organization : Organization.local.id
             if !result.contains(where: { $0.organization.id == key }) {
-                result.append(OrganizationGroup(organization: Organization(id: nil, name: "Other"), projects: []))
+                result.append(OrganizationGroup(organization: .local, projects: []))
             }
             let index = result.firstIndex { $0.organization.id == key }!
             let name = worktree.project.isEmpty ? "Other folders" : worktree.project
@@ -92,6 +98,19 @@ struct AccountCatalog: CatalogSource {
 
     /// Nil when the server has no catalog (not deployed, or nothing written yet).
     func document() async -> Document? {
+        #if DEBUG
+        // Whether the server has a catalog for this account at all: status and counts, never the token or contents.
+        do {
+            let data = try await server.call("GET", "v1/catalog")
+            let text = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["document"] as? String
+            let decoded = text.flatMap { Data(base64Encoded: $0) }.flatMap { try? JSONDecoder().decode(Document.self, from: $0) }
+            DebugTerm.log("catalog: 200, \(decoded?.organizations.count ?? -1) organizations, \(decoded?.projects.count ?? -1) projects")
+        } catch let error as AccountServer.ServerError {
+            DebugTerm.log("catalog: \(error.status)")
+        } catch {
+            DebugTerm.log("catalog: no answer")
+        }
+        #endif
         guard let text = await get("v1/catalog")?["document"] as? String, let data = Data(base64Encoded: text) else { return nil }
         return try? JSONDecoder().decode(Document.self, from: data)
     }

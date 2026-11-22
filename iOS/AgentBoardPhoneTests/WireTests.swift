@@ -68,13 +68,13 @@ final class WireTests: XCTestCase {
                 Worktree(path: "/b/stray", organization: UUID(), host: "h2"),
             ])
         let groups = OrganizationGroup.group(browse)
-        XCTAssertEqual(groups.map(\.organization.name), ["Work", "Home", "Other"])
+        XCTAssertEqual(groups.map(\.organization.name), ["Work", "Home", "Default"])
         XCTAssertEqual(groups[0].projects.map(\.name), ["api", "app"])
         // The same branch on two hosts stays two worktrees.
         XCTAssertEqual(groups[0].projects[1].worktrees.map(\.host), ["h1", "h2"])
         XCTAssertEqual(Set(groups[0].projects[1].worktrees.map(\.id)).count, 2)
         XCTAssertEqual(groups[1].projects.map(\.name), ["blog"])
-        XCTAssertNil(groups[2].organization.id)
+        XCTAssertEqual(groups[2].organization, .local)
         XCTAssertEqual(groups[2].projects.map(\.name), ["loose", "Other folders"])
     }
 
@@ -123,5 +123,16 @@ final class WireTests: XCTestCase {
         link.addPostIt("plan", to: "/w")
         XCTAssertEqual(link.cards(in: "/w").map { $0.runner == nil }, [true, false])
         XCTAssertEqual(link.postIts.map(\.text), ["plan"])
+    }
+
+    /// No catalog (or an empty one): every worktree is in the Mac's own Default organization.
+    func testWithoutACatalogEverythingIsInTheLocalOrganization() {
+        let groups = OrganizationGroup.group(Browse(organizations: [], worktrees: [
+            Worktree(path: "/a/app", project: "app", host: "h1"),
+            Worktree(path: "/b/api", project: "api", organization: UUID(), host: "h2"),
+        ]))
+        XCTAssertEqual(groups.map(\.organization), [.local])
+        XCTAssertEqual(groups.first?.organization.id, OrganizationHome.defaultID)
+        XCTAssertEqual(groups.first?.projects.map(\.name), ["api", "app"])
     }
 }
