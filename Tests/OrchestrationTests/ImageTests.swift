@@ -231,6 +231,7 @@ struct ImageTests {
 
         // The user's image: a board is asked first (whichever the core picks), and allows it here.
         for (board, events) in [(client, inbox), (other, otherInbox)] {
+            board.send(.elements([]))  // boards that run board tools say which elements they have
             board.onService { data in
                 guard let event = BoardEvent(data) else { return }
                 events.add(event)

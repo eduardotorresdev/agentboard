@@ -11,6 +11,7 @@ private final class Asked: @unchecked Sendable {
     var questions: [[String: Any]] { lock.withLock { _questions } }
 
     func attach(to client: CoreClient, answer: String) {
+        client.send(.elements([]))  // a board that runs board tools says which elements it has
         client.onService { [self] data in
             guard case .toolCall(let call, "board_confirm_removal", let arguments, _)? = BoardEvent(data) else { return }
             lock.withLock { _questions.append((try? JSONSerialization.jsonObject(with: arguments)) as? [String: Any] ?? [:]) }

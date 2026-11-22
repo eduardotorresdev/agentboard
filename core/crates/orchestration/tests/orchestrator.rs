@@ -889,6 +889,8 @@ fn browser_calls_go_to_the_board() {
     let mut board = Board::open(&core);
     let a = agent("Ada", &core.folder);
     board.add(&[&a]);
+    // A board that runs browsers says which elements it has.
+    board.send(BoardRequest::Elements(only(vec![])));
     wait_until("the card", || core.card("Ada").is_some());
     let call = |tool: &'static str, arguments: Value| {
         let (core, caller) = (core.clone(), a.id);
@@ -1490,4 +1492,26 @@ fn elements_reach_the_other_boards_only() {
     phone.wait("the elements", |events| events.contains(&BoardEvent::Elements(only(vec![browser.clone()]))));
     mac.read(Duration::from_millis(300));
     assert!(!mac.events.iter().any(|event| matches!(event, BoardEvent::Elements(_))), "echoed back: {:?}", mac.events);
+}
+
+/// A browser tool goes to a board that runs browsers (it said which elements it has), never to a
+/// phone, which can't, even when the phone connected first.
+#[test]
+fn board_only_tools_go_to_a_board_that_runs_them() {
+    let core = std::sync::Arc::new(Core::new());
+    let mut phone = Board::open(&core);
+    let mut mac = Board::open(&core);
+    let a = agent("Ada", &core.folder);
+    mac.add(&[&a]);
+    mac.send(BoardRequest::Elements(only(vec![])));
+    mac.read(Duration::from_millis(200));
+    let (asker, caller) = (core.clone(), a.id);
+    let asking = std::thread::spawn(move || asker.call("browser_open", json!({"url": "about:blank"}), caller));
+    mac.wait("the tool call", |events| events.iter().any(|event| matches!(event, BoardEvent::ToolCall { .. })));
+    let call = mac.events.iter().find_map(|event| if let BoardEvent::ToolCall { call, .. } = event { Some(*call) } else { None }).unwrap();
+    mac.send(BoardRequest::ToolResult { call, result: WireToolResult::new(&ToolResult::error("answered by the Mac")) });
+    let (answer, _) = asking.join().unwrap();
+    assert!(answer.contains("answered by the Mac"), "{answer}");
+    phone.read(Duration::from_millis(100));
+    assert!(!phone.events.iter().any(|event| matches!(event, BoardEvent::ToolCall { .. })), "the phone was asked");
 }

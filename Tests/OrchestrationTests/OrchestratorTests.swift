@@ -274,6 +274,34 @@ struct OrchestratorTests {
         phone.disconnect()
     }
 
+    /// A browser tool goes to a board that runs browsers (it said which elements it has), never
+    /// to a phone, which can't, even when the phone connected first.
+    @Test func boardOnlyToolsGoToABoardThatRunsThem() async throws {
+        let core = try await MainActor.run { try Core() }
+        defer { Task { @MainActor in core.stop() } }
+        let folder = await MainActor.run { core.folder }
+        let phone = try await board(core)
+        let mac = try await board(core)
+        let macInbox = Inbox(), phoneInbox = Inbox()
+        mac.onService { data in if let event = BoardEvent(data) { macInbox.add(event) } }
+        phone.onService { data in if let event = BoardEvent(data) { phoneInbox.add(event) } }
+        let a = agent("Ada", in: folder)
+        mac.send(.addCard(a))
+        mac.send(.elements([]))
+        try await Task.sleep(for: .milliseconds(200))
+        let asked = Task { try await call("browser_open", ["url": "about:blank"], as: a.id, on: core) }
+        func calls(_ inbox: Inbox) -> [UUID] {
+            inbox.events.compactMap { event -> UUID? in if case .toolCall(let call, _, _, _) = event { call } else { nil } }
+        }
+        try await waitUntil { !calls(macInbox).isEmpty }
+        mac.send(.toolResult(call: calls(macInbox)[0], result: WireToolResult(.error("answered by the Mac"))))
+        let answer = try await asked.value
+        #expect(answer.text.contains("answered by the Mac"))
+        #expect(calls(phoneInbox).isEmpty)
+        mac.disconnect()
+        phone.disconnect()
+    }
+
     /// An agent's notifications queue it for the developer: its hooks raise and clear the
     /// request, a later signal keeps its place, and dismissing or removing it takes it out.
     @Test func agentsAskForTheDeveloper() async throws {
@@ -520,6 +548,7 @@ struct OrchestratorTests {
         let a = agent("Ada", in: folder)
         let client = try await board(core)
         client.send(.addCard(a))
+        client.send(.elements([]))  // a board that runs board tools says which elements it has
         try await waitUntil { core.card(named: "Ada") != nil }
         client.onService { data in
             guard case .toolCall(let call, let name, let arguments, let caller)? = BoardEvent(data) else { return }

@@ -44,6 +44,9 @@ public final class Orchestrator: CoreService {
     private var elements: [UUID: ElementInfo] = [:]
     /// Boards that got their welcome, which then get every change.
     private var boards: Set<CoreBoard> = []
+    /// Boards that run the board-only tools (browsers, simulators): the ones that said which
+    /// elements they have. A phone never does, and would leave a tool call unanswered.
+    private var toolBoards: Set<CoreBoard> = []
     /// The board serving card streams, and how to reach them.
     private var streams: (board: CoreBoard, port: Int, token: String)?
     private var toolCalls: [UUID: (board: CoreBoard, done: CheckedContinuation<ToolResult, Never>)] = [:]
@@ -284,6 +287,7 @@ public final class Orchestrator: CoreService {
 
     public func boardDisconnected(_ board: CoreBoard) {
         boards.remove(board)
+        toolBoards.remove(board)
         if streams?.board == board { streams = nil }
         for (call, pending) in toolCalls where pending.board == board {
             toolCalls[call] = nil
@@ -321,6 +325,7 @@ public final class Orchestrator: CoreService {
         case .disconnect(let id):
             bus.disconnect(id)
         case .elements(let list):
+            toolBoards.insert(board)
             let listed = Set(list.map(\.id))
             for id in elements.keys where !listed.contains(id) {
                 elements[id] = nil
@@ -403,7 +408,7 @@ public final class Orchestrator: CoreService {
 
     /// Runs a tool only a board can (a browser's) on a connected one.
     func relay(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
-        guard let board = boards.first else {
+        guard let board = boards.first(where: toolBoards.contains) else {
             let place = name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_") ? "Projects live"
                 : name.hasPrefix("simulator_") ? "Simulators run" : name.hasPrefix("board_") ? "The user confirms removals" : "Browsers run"
             return .error("\(place) in the board, which isn't open right now. Ask the user to open it, then try again.")

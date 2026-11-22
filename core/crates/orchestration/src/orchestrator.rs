@@ -73,6 +73,9 @@ pub struct Store {
     elements: HashMap<Uuid, ElementInfo>,
     /// Boards that got their welcome, which then get every change.
     boards: Vec<CoreBoard>,
+    /// Boards that run the board-only tools (browsers, simulators): the ones that said which
+    /// elements they have. A phone never does, and would leave a tool call unanswered.
+    tool_boards: Vec<CoreBoard>,
     tool_calls: HashMap<Uuid, (CoreBoard, Reply)>,
     /// What the bus did since it was last asked (see `Turn::flush_bus`).
     bus_events: Arc<Mutex<Vec<BusEvent>>>,
@@ -244,6 +247,7 @@ impl Orchestrator {
             connections_read_only: read_failed,
             elements: HashMap::new(),
             boards: Vec::new(),
+            tool_boards: Vec::new(),
             tool_calls: HashMap::new(),
             bus_events,
             runner_stats: HashMap::new(),
@@ -923,6 +927,7 @@ impl CoreService for Orchestrator {
 
     fn board_disconnected(&mut self, _server: &mut CoreServer<Self>, board: &CoreBoard) {
         self.store.boards.retain(|other| other != board);
+        self.store.tool_boards.retain(|other| other != board);
         let calls: Vec<Uuid> = self.store.tool_calls.iter().filter(|(_, pending)| &pending.0 == board).map(|(call, _)| *call).collect();
         for call in calls {
             if let Some((_, reply)) = self.store.tool_calls.remove(&call) {
@@ -1059,6 +1064,9 @@ impl Turn<'_> {
                 self.flush_bus();
             }
             BoardRequest::Elements(Unlabelled { value: list }) => {
+                if !self.tool_boards.contains(board) {
+                    self.tool_boards.push(board.clone());
+                }
                 let listed: HashSet<Uuid> = list.iter().map(|info| info.id).collect();
                 let gone: Vec<Uuid> = self.elements.keys().filter(|id| !listed.contains(id)).copied().collect();
                 for id in gone {
@@ -1131,7 +1139,7 @@ impl Turn<'_> {
 
     /// Runs a tool only a board can (a browser's) on a connected one.
     pub(crate) fn relay(&mut self, name: &str, arguments: &Map<String, Value>, caller: Uuid, reply: Reply) {
-        let Some(board) = self.boards.first().cloned() else {
+        let Some(board) = self.boards.iter().find(|board| self.tool_boards.contains(board)).cloned() else {
             let lives_in_sidebar = ["project_", "worktree_", "host_"].iter().any(|prefix| name.starts_with(prefix));
             let place = if lives_in_sidebar {
                 "Projects live"
