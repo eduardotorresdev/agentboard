@@ -41,6 +41,11 @@ final class AgentStore {
     @ObservationIgnored var onMediaNote: ((String) -> Void)?
     /// Called each time the host's core answers (see `HostStores`).
     @ObservationIgnored var onConnect: (() -> Void)?
+    /// The card streams this board serves (StreamServer), told to the core on every connection
+    /// so it can answer a remote board's `streamTicket`.
+    @ObservationIgnored var servedStreams: (port: Int, token: String)? {
+        didSet { if let streams = servedStreams { send(.servesStreams(port: streams.port, token: streams.token)) } }
+    }
     /// Agents waiting on the developer, in every organization, oldest first.
     private(set) var attention: [AttentionRequest] = []
     /// What agents asked the developer, oldest first. One the agent closed with an echo stays
@@ -309,6 +314,7 @@ final class AgentStore {
         if host != nil { client.subscribeToHost() }
         onConnect?()
         client.send(.elements(elements()))
+        if let streams = servedStreams { client.send(.servesStreams(port: streams.port, token: streams.token)) }
         for (id, session) in sessions {
             guard let record = record(id) else {
                 sessions[id] = nil
@@ -357,6 +363,9 @@ final class AgentStore {
 
     func received(_ event: BoardEvent) {
         switch event {
+        case .streamTicket:
+            // For boards that show another host's cards; this one serves its own.
+            return
         case .cardAdded(let record):
             guard self.record(record.id) == nil else { return }
             agents.append(record)

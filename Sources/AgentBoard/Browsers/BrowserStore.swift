@@ -199,6 +199,7 @@ final class BrowserStore {
             do {
                 _ = try await host.request("setProfile", ["block": id.uuidString, "profileState": profileState(profileID).path])
                 pages[id]?.phase = .open
+                resumeStream(id)
             } catch {
                 pages[id]?.phase = .failed(error.localizedDescription)
                 throw error
@@ -283,6 +284,7 @@ final class BrowserStore {
                 do {
                     _ = try await host.request("setProfile", ["block": id.uuidString, "profileState": profileState(profileID).path])
                     pages[id]?.phase = .open
+                    resumeStream(id)
                 } catch {
                     pages[id]?.phase = .failed(error.localizedDescription)
                     throw error
@@ -408,6 +410,7 @@ final class BrowserStore {
             do {
                 _ = try await host.request("reconfigure", ["block": id.uuidString, "device": device.wire])
                 pages[id]?.phase = .open
+                resumeStream(id)
             } catch {
                 pages[id]?.phase = .failed(error.localizedDescription)
                 throw error
@@ -485,6 +488,7 @@ final class BrowserStore {
                 _ = try await host.request("open", params)
                 guard pages[id] != nil else { return }
                 pages[id]?.phase = .open
+                resumeStream(id)
                 if pages[id]?.url.isEmpty == true { pages[id]?.url = record.url }
                 onPageChange?(id)
             } catch {

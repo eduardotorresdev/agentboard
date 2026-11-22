@@ -63,7 +63,10 @@ final class IOSSimulators: SimulatorBackend {
     var onScreen: ((UUID, SimulatorScreen.Content?, CGSize?) -> Void)?
     var onFailure: ((UUID, SimulatorHost.Failure) -> Void)?
     let host = SimulatorHost()
-    private var cards: Set<UUID> = []
+    var cards: Set<UUID> = []
+    /// Watched cards the sidecar was asked to stream; a restarted one forgets them, and is
+    /// asked again once the card's screen is back.
+    private(set) var streaming: Set<UUID> = []
     private var types: [String] = []
     /// Card streams (StreamServer) watching each card.
     let taps = StreamTaps()
@@ -71,7 +74,9 @@ final class IOSSimulators: SimulatorBackend {
     init() {
         host.onEvent = { [weak self] event in self?.received(event) }
         host.onStateChange = { [weak self] state in
-            guard let self, case .failed(let reason) = state else { return }
+            guard let self else { return }
+            if state != .running { self.sidecarEnded() }
+            guard case .failed(let reason) = state else { return }
             for card in self.cards { self.onFailure?(card, SimulatorHost.Failure(message: reason)) }
         }
     }
@@ -146,14 +151,27 @@ final class IOSSimulators: SimulatorBackend {
     func stream(_ card: UUID, to sink: @escaping StreamTaps.Sink) -> (() -> Void)? {
         guard cards.contains(card) else { return nil }
         let id = taps.add(card, sink)
-        host.post("stream", ["card": card.uuidString, "on": true])
+        requestKeyFrame(card)
         return { [weak self] in
             guard let self, self.taps.remove(card, id) else { return }
+            self.streaming.remove(card)
             self.host.post("stream", ["card": card.uuidString, "on": false])
         }
     }
 
-    private func received(_ event: [String: Any]) {
+    /// Asks the sidecar to stream the card, which also sends a keyframe now.
+    func requestKeyFrame(_ card: UUID) {
+        streaming.insert(card)
+        host.post("stream", ["card": card.uuidString, "on": true])
+    }
+
+    /// The sidecar stopped: its screens and their encoders are gone.
+    func sidecarEnded() {
+        for card in streaming { taps.reset(card) }
+        streaming.removeAll()
+    }
+
+    func received(_ event: [String: Any]) {
         guard let card = (event["card"] as? String).flatMap(UUID.init(uuidString:)) else { return }
         if event["event"] as? String == "video" {
             if let data = (event["data"] as? String).flatMap({ Data(base64Encoded: $0) }) { taps.send(card, .video(data)) }
@@ -162,6 +180,8 @@ final class IOSSimulators: SimulatorBackend {
         guard event["event"] as? String == "surface", let context = (event["contextID"] as? NSNumber)?.uint32Value else { return }
         let size = (event["width"] as? Double).flatMap { width in (event["height"] as? Double).map { CGSize(width: width, height: $0) } }
         if let size { taps.send(card, .header(.init(kind: "h264", width: size.width, height: size.height, units: "points"))) }
+        // The screen is back after the sidecar restarted: stream it again.
+        if taps.watched(card), !streaming.contains(card) { requestKeyFrame(card) }
         onScreen?(card, .context(context), size)
     }
 }

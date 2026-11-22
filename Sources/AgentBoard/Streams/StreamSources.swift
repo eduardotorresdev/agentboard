@@ -21,6 +21,14 @@ extension SimulatorStore: StreamSource {
         case .button(let name): button(card, name)
         }
     }
+
+    func requestKeyFrame(_ card: UUID) {
+        switch record(card)?.platform {
+        case .ios: ios.requestKeyFrame(card)
+        case .android: android.requestKeyFrame(card)
+        case nil: break
+        }
+    }
 }
 
 /// Browser cards: the page's screencast, input as the card's own.
@@ -45,5 +53,16 @@ extension BrowserStore: StreamSource {
         case .text(let text): input(card, ["kind": "text", "text": text])
         case .button: break
         }
+    }
+
+    /// Every JPEG stands alone.
+    func requestKeyFrame(_ card: UUID) {}
+
+    /// The card's page opened again (its sidecar restarted, its profile changed): a stream
+    /// watching it starts over on the new page, header first.
+    func resumeStream(_ card: UUID) {
+        guard taps.watched(card) else { return }
+        taps.reset(card)
+        host.post("screencast", ["block": card.uuidString, "on": true])
     }
 }

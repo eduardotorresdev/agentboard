@@ -6,8 +6,8 @@ import VideoToolbox
 @testable import AgentBoard
 @testable import simulator_host
 
-/// Card streams (docs/streams.md): the framing, the hello and its token, input parsing, and a
-/// real server on the loopback whose H.264 a client decodes.
+/// Card streams (docs/streams.md): the framing, the hello and its token, input parsing, a real
+/// server on the loopback whose H.264 a client decodes, a slow client, a restarted sidecar.
 struct StreamTests {
     @Test func messagesSurviveAnyChunking() throws {
         let header = StreamWire.Out.header(.init(kind: "h264", width: 402, height: 874, units: "points"))
@@ -53,22 +53,56 @@ struct StreamTests {
         #expect(parse(#"{"type":"launch"}"#) == nil)
     }
 
-    @Test @MainActor func theAdvertisedFileIsPrivate() async throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let file = folder.appendingPathComponent("streams.json")
-        let server = try StreamServer(sources: [], advertise: file)
+    @Test @MainActor func aSlowClientSkipsToTheNextKeyframe() async throws {
+        let source = FloodSource()
+        let server = try StreamServer(sources: [source])
         let port = try await server.start()
         defer { server.stop() }
-        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
-        #expect(object?["port"] as? Int == Int(port))
-        #expect(object?["token"] as? String == server.token)
-        let mode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
-        #expect(mode == 0o600)
+        // A small receive buffer, and nothing read while the card floods: the server backs up.
+        let client = try Client(port: port, receiveBuffer: 16 << 10)
+        client.write(Data(#"{"token":"\#(server.token)","card":"\#(source.card.uuidString)"}"#.utf8 + [0x0a]))
+        try await Task.sleep(for: .seconds(2))
+        let outs = await Task.detached { client.messages(count: FloodSource.count + 1, timeout: 3) }.value
+        let units = outs.compactMap { out -> Data? in if case .video(let unit) = out { unit } else { nil } }
+        let indices = units.map(FloodSource.index)
+        #expect(units.count < FloodSource.count, "nothing was dropped")
+        #expect(source.keyFrameRequests > 0)
+        #expect(indices == indices.sorted())
+        // Wherever frames were skipped, what comes next is a keyframe a decoder can start at.
+        #expect(units.first.map(StreamWire.isKeyFrame) == true)
+        for (previous, next) in zip(units, units.dropFirst()) where FloodSource.index(next) != FloodSource.index(previous) + 1 {
+            #expect(StreamWire.isKeyFrame(next), "frame \(FloodSource.index(next)) follows a gap but isn't a keyframe")
+        }
+    }
+
+    @Test @MainActor func anIOSStreamRecoversWhenTheSidecarRestarts() {
+        let ios = IOSimulators()
+        let card = UUID()
+        ios.cards.insert(card)
+        let got = Outs()
+        let stop = ios.stream(card) { got.add($0) }
+        #expect(stop != nil)
+        let surface: [String: Any] = ["event": "surface", "card": card.uuidString, "contextID": 7, "width": 402.0, "height": 874.0]
+        let header = StreamWire.Out.header(.init(kind: "h264", width: 402, height: 874, units: "points"))
+        ios.received(surface)
+        ios.received(["event": "video", "card": card.uuidString, "data": Data([0, 0, 0, 1, 0x65]).base64EncodedString()])
+        #expect(got.all == [header, .video(Data([0, 0, 0, 1, 0x65]))])
+        #expect(ios.streaming.contains(card))
+        ios.sidecarEnded()
+        #expect(!ios.streaming.contains(card))
+        // The restarted sidecar shows the screen again: the stream is asked for again and the
+        // client hears a fresh header, though the size is the same.
+        ios.received(surface)
+        #expect(got.all.last == header)
+        #expect(got.all.filter { if case .header = $0 { true } else { false } }.count == 2)
+        #expect(ios.streaming.contains(card))
+        stop?()
+        #expect(!ios.streaming.contains(card))
     }
 
     @Test @MainActor func aWrongTokenIsClosedAndItsInputNeverArrives() async throws {
         let source = FakeSource()
-        let server = try StreamServer(sources: [source], advertise: nil)
+        let server = try StreamServer(sources: [source])
         let port = try await server.start()
         defer { server.stop() }
         let touch = StreamWire.frame(Data(#"{"type":"touch","phase":"down","x":1,"y":2}"#.utf8))
@@ -83,7 +117,7 @@ struct StreamTests {
 
     @Test @MainActor func aClientWatchesACardAndDrivesIt() async throws {
         let source = FakeSource()
-        let server = try StreamServer(sources: [source], advertise: nil)
+        let server = try StreamServer(sources: [source])
         let port = try await server.start()
         defer { server.stop() }
         let client = try Client(port: port)
@@ -178,14 +212,66 @@ private final class FakeSource: StreamSource {
     }
 
     func input(_ card: UUID, _ event: StreamWire.Input) { inputs.append(event) }
+    func requestKeyFrame(_ card: UUID) {}
+}
+
+/// A card that sends numbered H.264-shaped units as fast as it can, a keyframe every 25, and
+/// more often once asked.
+@MainActor
+private final class FloodSource: StreamSource {
+    static let count = 400
+    let card = UUID()
+    private(set) var keyFrameRequests = 0
+    private let taps = StreamTaps()
+    private let asked = Flag()
+
+    static func index(_ unit: Data) -> Int { unit.dropFirst(5).prefix(4).reduce(0) { $0 << 8 | Int($1) } }
+
+    func stream(_ card: UUID, to sink: @escaping StreamTaps.Sink) -> (() -> Void)? {
+        guard card == self.card else { return nil }
+        let id = taps.add(card, sink)
+        let taps = taps, asked = asked
+        DispatchQueue.global().async {
+            for index in 0..<Self.count {
+                let key = index % 25 == 0 || asked.take()
+                var unit = Data([0, 0, 0, 1, key ? 0x65 : 0x41])
+                unit += withUnsafeBytes(of: UInt32(index).bigEndian) { Data($0) }
+                unit += Data(repeating: 0x55, count: 64 << 10)
+                taps.send(card, .video(unit))
+            }
+        }
+        return { [weak self] in self?.taps.remove(card, id) }
+    }
+
+    func input(_ card: UUID, _ event: StreamWire.Input) {}
+
+    func requestKeyFrame(_ card: UUID) {
+        keyFrameRequests += 1
+        asked.set()
+    }
+}
+
+private final class Flag: @unchecked Sendable {
+    private var value = false
+    private let lock = NSLock()
+    func set() { lock.withLock { value = true } }
+    func take() -> Bool { lock.withLock { defer { value = false }; return value } }
+}
+
+private final class Outs: @unchecked Sendable {
+    private var list: [StreamWire.Out] = []
+    private let lock = NSLock()
+    func add(_ out: StreamWire.Out) { lock.withLock { list.append(out) } }
+    var all: [StreamWire.Out] { lock.withLock { list } }
 }
 
 /// A blocking loopback TCP client, as a phone's would be past the channel.
 private final class Client: @unchecked Sendable {
     private var fd: Int32
 
-    init(port: UInt16) throws {
+    init(port: UInt16, receiveBuffer: Int32? = nil) throws {
         fd = socket(AF_INET, SOCK_STREAM, 0)
+        if var size = receiveBuffer { setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &size, socklen_t(MemoryLayout<Int32>.size)) }
         var address = sockaddr_in()
         address.sin_family = sa_family_t(AF_INET)
         address.sin_port = port.bigEndian

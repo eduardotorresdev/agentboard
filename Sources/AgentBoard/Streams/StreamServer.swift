@@ -9,24 +9,23 @@ protocol StreamSource: AnyObject {
     /// the result stops it.
     func stream(_ card: UUID, to sink: @escaping StreamTaps.Sink) -> (() -> Void)?
     func input(_ card: UUID, _ event: StreamWire.Input)
+    /// A client dropped frames to catch up and waits for a keyframe.
+    func requestKeyFrame(_ card: UUID)
 }
 
 /// Serves cards as live video on this Mac's loopback, one TCP connection per card
-/// (docs/streams.md). A remote board reaches it through a channel's `tcp:<port>`; the port and
-/// the token every connection must open with are in `streams.json` in the data folder.
+/// (docs/streams.md). A remote board reaches it through a channel's `tcp:<port>`, after asking
+/// the core for the port and the token every connection must open with (`streamTicket`).
 @MainActor
 final class StreamServer {
     let token: String
     private(set) var port: UInt16 = 0
     var sources: [StreamSource]
     private let listener: NWListener
-    private let advertised: URL?
     private let queue = DispatchQueue(label: "agentboard.streams")
 
-    /// `advertise`: the file the port and token are written to (nil: none).
-    init(sources: [StreamSource], advertise: URL?) throws {
+    init(sources: [StreamSource]) throws {
         self.sources = sources
-        advertised = advertise
         var bytes = [UInt8](repeating: 0, count: 32)
         guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw POSIXError(.EIO) }
         token = Data(bytes).base64EncodedString()
@@ -36,7 +35,7 @@ final class StreamServer {
         listener = try NWListener(using: parameters)
     }
 
-    /// Listens and advertises; returns the port.
+    /// Listens; returns the port.
     @discardableResult
     func start() async throws -> UInt16 {
         let token = token
@@ -48,7 +47,8 @@ final class StreamServer {
                     for source in self.sources {
                         guard let stop = source.stream(card, to: sink) else { continue }
                         // Only the source that streams the card gets its input.
-                        return StreamConnection.Found(stop: stop, input: { event in Task { @MainActor in source.input(card, event) } })
+                        return StreamConnection.Found(stop: stop, input: { event in Task { @MainActor in source.input(card, event) } },
+                                                      keyFrame: { Task { @MainActor in source.requestKeyFrame(card) } })
                     }
                     return nil
                 }
@@ -67,39 +67,28 @@ final class StreamServer {
             listener.start(queue: queue)
         }
         self.port = port
-        if let advertised { try Self.advertise(port: port, token: token, at: advertised) }
         return port
     }
 
-    func stop() {
-        listener.cancel()
-        if let advertised { try? FileManager.default.removeItem(at: advertised) }
-    }
-
-    /// `{port, token}`, readable by this user only: whoever has the token can drive the cards.
-    nonisolated static func advertise(port: UInt16, token: String, at url: URL) throws {
-        let data = try JSONSerialization.data(withJSONObject: ["port": Int(port), "token": token])
-        let temporary = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        guard FileManager.default.createFile(atPath: temporary.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
-            throw POSIXError(.EACCES)
-        }
-        guard rename(temporary.path, url.path) == 0 else { throw POSIXError(.EIO) }
-    }
+    func stop() { listener.cancel() }
 
     /// The app's server, kept for its lifetime.
     private static var running: StreamServer?
 
-    /// Starts the app's server on a free port, advertised in the data folder.
-    static func launch(sources: [StreamSource]) {
-        guard let server = try? StreamServer(sources: sources, advertise: defaultFile) else { return }
+    /// Starts the app's server on a free port and tells `agents`' core how to reach it. The
+    /// token stays in memory: it leaves only in the core's answer to a board's `streamTicket`.
+    static func launch(sources: [StreamSource], agents: AgentStore) {
+        guard let server = try? StreamServer(sources: sources) else { return }
         running = server
         Task {
-            do { try await server.start() } catch { NSLog("AgentBoard: card streams didn't start: \(error.localizedDescription)") }
+            do {
+                let port = try await server.start()
+                agents.servedStreams = (Int(port), server.token)
+            } catch {
+                NSLog("AgentBoard: card streams didn't start: \(error.localizedDescription)")
+            }
         }
     }
-
-    nonisolated static var defaultFile: URL { DataFolder.url.appendingPathComponent("streams.json") }
 }
 
 private final class OnceFlag: @unchecked Sendable {
@@ -113,6 +102,7 @@ private final class StreamConnection: @unchecked Sendable {
     struct Found: @unchecked Sendable {
         let stop: () -> Void
         let input: @Sendable (StreamWire.Input) -> Void
+        let keyFrame: @Sendable () -> Void
     }
     var find: (@Sendable (UUID, @escaping StreamTaps.Sink) async -> Found?)?
     private let connection: NWConnection
@@ -122,9 +112,13 @@ private final class StreamConnection: @unchecked Sendable {
     private var found: Found?
     private var ended = false
     private var pending = 0
+    /// Frames are being dropped until a keyframe, after the client fell behind.
+    private var skipping = false
     private let lock = NSLock()
-    /// Past this many bytes not yet sent, JPEG frames are dropped (the next one replaces them).
-    private static let backlog = 1 << 20
+    /// Past this many bytes not yet sent, frames are dropped: JPEG ones until the backlog
+    /// clears, H.264 ones until the next keyframe (asked for at once), so a slow client catches
+    /// up instead of lagging.
+    static let backlog = 1 << 20
 
     init(_ connection: NWConnection, token: String) {
         self.connection = connection
@@ -188,13 +182,28 @@ private final class StreamConnection: @unchecked Sendable {
 
     private func send(_ out: StreamWire.Out) {
         let data = StreamWire.encode(out)
-        let drop = lock.withLock { () -> Bool in
-            if case .jpeg = out, pending > Self.backlog { return true }
+        enum Verdict { case send, drop, dropAndAsk }
+        let verdict = lock.withLock { () -> Verdict in
+            switch out {
+            case .header: break
+            case .jpeg: if pending > Self.backlog { return .drop }
+            case .video(let unit):
+                if skipping {
+                    // A gap breaks decoding until a keyframe: resume only at one.
+                    let key = StreamWire.isKeyFrame(unit)
+                    // A keyframe that comes while still behind is dropped too: ask for the next.
+                    guard pending <= Self.backlog, key else { return key ? .dropAndAsk : .drop }
+                    skipping = false
+                } else if pending > Self.backlog {
+                    skipping = true
+                    return .dropAndAsk
+                }
+            }
             pending += data.count
-            return false
+            return .send
         }
-        // shortcut: H.264 units are never dropped (a gap breaks decoding until the next keyframe); a slow client lags instead. Upgrade: drop to the next keyframe and ask for one.
-        guard !drop else { return }
+        if verdict == .dropAndAsk { lock.withLock { found }?.keyFrame() }
+        guard verdict == .send else { return }
         connection.send(content: data, completion: .contentProcessed { [weak self] error in
             guard let self else { return }
             self.lock.withLock { self.pending -= data.count }

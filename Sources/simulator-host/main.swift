@@ -234,8 +234,12 @@ final class Screen {
     // Drags faster than ~60 Hz come back NULL from SimulatorKit: keep the newest and send it when allowed.
     private var pendingMove: CGPoint?
     private var moveTimer: DispatchWorkItem?
-    /// Set while a card stream watches this screen.
+    /// Made, off the main queue, once the screen's size is known and kept while the card is
+    /// open: starting one takes about 2 s, which a card stream would otherwise wait.
     private var encoder: VideoEncoder?
+    private var warming = false
+    /// A card stream watches this screen.
+    private var streaming = false
 
     init(card: String, udid: String, device: AnyObject, hid: HIDClient, bootedHere: Bool) {
         self.card = card
@@ -273,7 +277,7 @@ final class Screen {
         self.context = context
         display?.registerScreenCallbacksWithUUID(callbacks, callbackQueue: .main, frameCallback: { [weak self] in
             self?.layer.perform(NSSelectorFromString("setContentsChanged"))
-            if let self, let encoder = self.encoder, let unmasked = self.unmasked { encoder.encode(unmasked) }
+            if let self, self.streaming, let encoder = self.encoder, let unmasked = self.unmasked { encoder.encode(unmasked) }
         }, surfacesChangedCallback: { [weak self] masked, unmasked in
             self?.show(masked ?? unmasked, unmasked: unmasked ?? masked)
         }, propertiesChangedCallback: { _ in })
@@ -291,27 +295,41 @@ final class Screen {
         CATransaction.commit()
         emit(["event": "surface", "card": card, "contextID": context.contextId,
               "width": size.width, "height": size.height, "scale": scale])
+        warmEncoder()
+    }
+
+    // shortcut: a screen that changes size later (rotation) makes its new session on the main queue, a ~2 s stall while streaming; warm the new size off the main queue if that bites.
+    private func warmEncoder() {
+        guard encoder == nil, !warming, let unmasked else { return }
+        warming = true
+        let card = card, width = unmasked.width, height = unmasked.height
+        DispatchQueue.global(qos: .utility).async {
+            let encoder = VideoEncoder { data, key in
+                DispatchQueue.main.async { emit(["event": "video", "card": card, "data": data.base64EncodedString(), "key": key]) }
+            }
+            encoder.prepare(width: width, height: height)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.context != nil else { return encoder.invalidate() }
+                self.encoder = encoder
+                self.warming = false
+                if self.streaming { self.stream(true) }
+            }
+        }
     }
 
     /// Starts or stops encoding the screen for card streams; on again asks for a keyframe now,
     /// which a still screen would otherwise not send.
     func stream(_ on: Bool) {
-        guard on else {
-            encoder?.invalidate()
-            encoder = nil
-            return
-        }
-        let card = card
-        let encoder = self.encoder ?? VideoEncoder { data, key in
-            DispatchQueue.main.async { emit(["event": "video", "card": card, "data": data.base64EncodedString(), "key": key]) }
-        }
-        self.encoder = encoder
+        streaming = on
+        guard on, let encoder else { return }
         encoder.requestKeyFrame()
         if let unmasked { encoder.encode(unmasked) }
     }
 
     func detach() {
-        stream(false)
+        streaming = false
+        encoder?.invalidate()
+        encoder = nil
         display?.unregisterScreenCallbacksWithUUID(callbacks)
         moveTimer?.cancel()
         context?.layer = nil

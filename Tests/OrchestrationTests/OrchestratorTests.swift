@@ -211,6 +211,40 @@ struct OrchestratorTests {
         client.disconnect()
     }
 
+    /// A remote board learns how to reach a card's stream from the core, which only boards
+    /// reach (a remote one through a channel its host trusted): the answer goes to the asker
+    /// alone, and says none while no board serves streams.
+    @Test func boardsAskTheCoreForAStreamTicket() async throws {
+        let core = try await MainActor.run { try Core() }
+        defer { Task { @MainActor in core.stop() } }
+        let mac = try await board(core), phone = try await board(core)
+        let macInbox = Inbox(), phoneInbox = Inbox()
+        mac.onService { data in if let event = BoardEvent(data) { macInbox.add(event) } }
+        phone.onService { data in if let event = BoardEvent(data) { phoneInbox.add(event) } }
+        let card = UUID()
+        func tickets(_ inbox: Inbox) -> [(Int?, String?)] {
+            inbox.events.compactMap { event -> (Int?, String?)? in
+                if case .streamTicket(let asked, let port, let token) = event, asked == card { (port, token) } else { nil }
+            }
+        }
+        phone.send(.streamTicket(card: card))
+        try await waitUntil { tickets(phoneInbox).count == 1 }
+        #expect(tickets(phoneInbox).first.map { $0.0 == nil && $0.1 == nil } == true)
+
+        mac.send(.servesStreams(port: 52731, token: "secret"))
+        phone.send(.streamTicket(card: card))
+        try await waitUntil { tickets(phoneInbox).count == 2 }
+        #expect(tickets(phoneInbox).last.map { $0.0 == 52731 && $0.1 == "secret" } == true)
+        #expect(tickets(macInbox).isEmpty)
+
+        mac.disconnect()
+        try await Task.sleep(for: .milliseconds(300))
+        phone.send(.streamTicket(card: card))
+        try await waitUntil { tickets(phoneInbox).count == 3 }
+        #expect(tickets(phoneInbox).last.map { $0.0 == nil && $0.1 == nil } == true)
+        phone.disconnect()
+    }
+
     /// An agent's notifications queue it for the developer: its hooks raise and clear the
     /// request, a later signal keeps its place, and dismissing or removing it takes it out.
     @Test func agentsAskForTheDeveloper() async throws {

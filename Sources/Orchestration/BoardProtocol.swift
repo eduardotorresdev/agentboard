@@ -55,6 +55,11 @@ public enum BoardRequest: Codable, Sendable {
     case deliverHeld(UUID)
     /// The developer answered the agent's decision (after the board's undo window).
     case answerDecision(id: UUID, answer: Decision.Answer)
+    /// This board serves card streams on the host's loopback (docs/streams.md); the core keeps
+    /// it in memory, while the board stays, to answer `streamTicket`.
+    case servesStreams(port: Int, token: String)
+    /// Asks how to reach a card's stream: answered to this board alone with `streamTicket`.
+    case streamTicket(card: UUID)
 }
 
 /// Core → board.
@@ -69,6 +74,9 @@ public enum BoardEvent: Codable, Sendable {
     case runners(RunnerReport)
     /// A tool only the board can run (the browser tools): answer with `toolResult`.
     case toolCall(call: UUID, name: String, arguments: Data, caller: UUID)
+    /// The answer to a `streamTicket` request: the loopback port to open with the channel's
+    /// `tcp:<port>` and the token to say first; nil when no board serves streams.
+    case streamTicket(card: UUID, port: Int?, token: String?)
     case postItAdded(PostItRecord)
     /// Its name, frame or text changed.
     case postItUpdated(PostItRecord)

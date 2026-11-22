@@ -10,13 +10,19 @@ connection per card. A remote board reaches it through a channel's `tcp:<port>` 
 
 ## Finding it
 
-`streams.json` in the data folder, mode 0600, rewritten at every launch:
+The port and token are only ever handed out over the core's own protocol, never written to disk:
 
-```json
-{"port": 52731, "token": "<base64 of 32 random bytes>"}
-```
+1. Once its server listens, the Mac app tells its core `servesStreams {port, token}`
+   (`BoardRequest`), again on every reconnection. The core keeps them in memory while that board
+   stays connected.
+2. A remote board, connected to the core through a `core` channel, asks
+   `streamTicket {card}`. The core answers that board alone with `streamTicket {card, port,
+   token}` (`BoardEvent`); `port` and `token` are null while no board serves streams.
+3. The remote board opens a second channel carrying `tcp:<port>` and says the hello below.
 
-The token is new each launch and is meant to reach the phone only through the sealed channel.
+Only boards reach the core: a remote one through a channel its host trusted (hosts.md, "Board
+identity"). An untrusted board gets `pending <n>` and no channel, so it can't ask. The token is
+32 random bytes, new each launch.
 
 ## Protocol
 
@@ -33,8 +39,11 @@ The token is new each launch and is meant to reach the phone only through the se
      is a keyframe with SPS and PPS in front, and every keyframe carries them (Android's come
      as their own unit just before, as scrcpy sends them). Display each as soon as it's
      decoded: there is no reordering and no timing to follow.
-   - `J` (0x4a): one JPEG frame (browsers). Once about 1 MiB waits unsent, new JPEG frames are
-     dropped, so a slow client sees fewer frames rather than falling behind.
+   - `J` (0x4a): one JPEG frame (browsers).
+
+   A client that falls behind (about 1 MiB waiting unsent) loses frames rather than lag: JPEG
+   frames until it catches up; H.264 units until the next keyframe once caught up, which the
+   server asks the source for at once (and again if one comes while still behind).
 3. **Client → server.** Messages framed the same way (4-byte length), each a JSON input event
    in the header's units:
    - `{"type":"touch","phase":"down"|"move"|"up","x","y"}`
@@ -47,7 +56,9 @@ The token is new each launch and is meant to reach the phone only through the se
    - `{"type":"button","name":"home"|"lock"|...}`, simulators only.
    Unknown events are ignored. Messages over 16 MiB close the connection.
 
-Closing the connection stops the card's encoding once nobody else watches it.
+Closing the connection stops the card's encoding once nobody else watches it. If a card's
+sidecar (simulator-host, the browser sidecar) restarts, its streams resume by themselves once the
+card's screen or page is back: the client gets a fresh `H`, then a keyframe.
 
 ## Where frames come from
 
@@ -58,7 +69,11 @@ Closing the connection stops the card's encoding once nobody else watches it.
   time, no frame reordering, low-latency rate control, a keyframe at least every 4 s) on every
   frame the simulator draws, while `stream {card, on}` is on, and sends each unit to the app as
   a `video` event over its stdout. A still screen sends nothing; a new watcher forces a keyframe.
+  The encoder session is made off the main queue as soon as the card's screen is up and kept
+  while the card is open: making one takes 2–3 s, which a first viewer would otherwise wait.
+  Warm, the first keyframe comes about 0.2 s after a viewer joins, later frames 3 ms after the
+  screen draws them (320×240 test frames, load average ~170).
 - **Browsers**: Playwright's `page.screencast` (WebKit), JPEG at quality 70, at the viewport's
-  size. Measured on an M-series Mac with a page animating every frame, 390×844: about 19 fps,
-  11 KB a frame, frames delivered within ~10 ms of capture; a click shows in the next frame
-  23–86 ms later.
+  size. Measured straight from Playwright (not yet through the app) with a page animating
+  every frame, 390×844: about 19 fps, 11 KB a frame, frames delivered within ~10 ms of capture;
+  a click shows in the next frame 23–86 ms later. Taken under heavy load: provisional.

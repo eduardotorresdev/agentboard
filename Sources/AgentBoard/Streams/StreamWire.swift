@@ -82,6 +82,12 @@ enum StreamWire {
         }
     }
 
+    /// Whether an Annex B unit starts a picture a decoder can begin at: an IDR slice, or the
+    /// parameter sets sent in front of one.
+    static func isKeyFrame(_ unit: Data) -> Bool {
+        ScrcpyStream.nalUnits(unit).contains { [5, 7].contains(($0.first ?? 0) & 0x1f) }
+    }
+
     /// The card a hello asks for, or nil when it isn't one or its token isn't `token`.
     static func card(inHello line: Data, token: String) -> UUID? {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
@@ -163,6 +169,10 @@ final class StreamTaps: @unchecked Sendable {
     }
 
     func watched(_ card: UUID) -> Bool { lock.withLock { sinks[card] != nil } }
+
+    /// Forgets the card's header, so the next one goes out even if unchanged: a restarted
+    /// source's clients learn to start over.
+    func reset(_ card: UUID) { lock.withLock { headers[card] = nil } }
 
     /// Sends to every sink of `card`; a header is also kept for those added later, and only
     /// sent when it changed.

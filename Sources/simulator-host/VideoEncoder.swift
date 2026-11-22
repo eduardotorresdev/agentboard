@@ -28,16 +28,19 @@ final class VideoEncoder {
         encode(pixels)
     }
 
+    /// Makes the session for frames of this size ahead of the first: starting one takes about
+    /// 2 s, which a viewer would otherwise wait.
+    func prepare(width: Int, height: Int) {
+        guard session == nil || width != self.width || height != self.height else { return }
+        invalidate()
+        session = Self.makeSession(width: width, height: height)
+        self.width = width
+        self.height = height
+        forceKey = true
+    }
+
     func encode(_ pixels: CVPixelBuffer) {
-        let width = CVPixelBufferGetWidth(pixels), height = CVPixelBufferGetHeight(pixels)
-        if session == nil || width != self.width || height != self.height {
-            invalidate()
-            guard let session = Self.makeSession(width: width, height: height) else { return }
-            self.session = session
-            self.width = width
-            self.height = height
-            forceKey = true
-        }
+        prepare(width: CVPixelBufferGetWidth(pixels), height: CVPixelBufferGetHeight(pixels))
         guard let session else { return }
         let now = CACurrentMediaTime()
         let time = CMTime(seconds: now - (start ?? now), preferredTimescale: 1_000_000)

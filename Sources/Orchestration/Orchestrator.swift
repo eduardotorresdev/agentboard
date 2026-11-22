@@ -44,6 +44,8 @@ public final class Orchestrator: CoreService {
     private var elements: [UUID: ElementInfo] = [:]
     /// Boards that got their welcome, which then get every change.
     private var boards: Set<CoreBoard> = []
+    /// The board serving card streams, and how to reach them.
+    private var streams: (board: CoreBoard, port: Int, token: String)?
     private var toolCalls: [UUID: (board: CoreBoard, done: CheckedContinuation<ToolResult, Never>)] = [:]
 
     // Runners (see Orchestrator+Runners.swift).
@@ -282,6 +284,7 @@ public final class Orchestrator: CoreService {
 
     public func boardDisconnected(_ board: CoreBoard) {
         boards.remove(board)
+        if streams?.board == board { streams = nil }
         for (call, pending) in toolCalls where pending.board == board {
             toolCalls[call] = nil
             pending.done.resume(returning: .error("The board closed before the browser answered. Try again once it is open."))
@@ -384,6 +387,11 @@ public final class Orchestrator: CoreService {
             answerQuestions(id, answers)
         case .answerDecision(let id, let answer):
             answerDecision(id, answer)
+        case .servesStreams(let port, let token):
+            streams = (board, port, token)
+        case .streamTicket(let card):
+            // Only boards reach the core: a remote one through a channel its host trusted.
+            board.send(BoardEvent.streamTicket(card: card, port: streams?.port, token: streams?.token).encoded)
         }
     }
 

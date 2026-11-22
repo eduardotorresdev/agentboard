@@ -162,6 +162,8 @@ final class AndroidEmulators: SimulatorBackend {
         }
     }
 
+    func requestKeyFrame(_ card: UUID) { sessions[card]?.stream?.send(ScrcpyStream.resetVideo()) }
+
     func close(_ record: SimulatorRecord, deleting: Bool) async {
         let session = sessions.removeValue(forKey: record.id)
         wanted[record.id] = nil
