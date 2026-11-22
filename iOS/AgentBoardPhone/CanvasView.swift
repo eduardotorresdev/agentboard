@@ -31,6 +31,7 @@ struct CanvasView: View {
     @State private var rasterZoom: CGFloat?
     @State private var dragging: (id: UUID, frame: CGRect)?
     @State private var opened: Card?
+    @Environment(\.dismiss) private var leave
     @State private var watching: Element?
     @State private var adding: Adding?
     @State private var draft = ""
@@ -142,6 +143,16 @@ struct CanvasView: View {
         }
         .navigationTitle(worktree.title)
         .onAppear { WaitingBanner.board = worktree }
+        #if DEBUG
+        // `-leaveAfterTyping YES`: the terminal closed after typing; leave the board too, so the
+        // agent's decision finds the user on another screen.
+        .onChange(of: opened) { before, now in
+            if before != nil, now == nil, UserDefaults.standard.bool(forKey: "leaveAfterTyping"), !DebugOnce.left {
+                DebugOnce.left = true
+                leave()
+            }
+        }
+        #endif
         .onDisappear { if WaitingBanner.board == worktree { WaitingBanner.board = nil } }
         .toolbarBackground(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
@@ -158,7 +169,7 @@ struct CanvasView: View {
             DebugOnce.canvas = true
             await debugTestBoard()
             // `-answerDecision <ok|letter>`: once an agent here opens a decision, answers it as its
-            // balloon's button does (after 10 s, for a screenshot), then logs the agent's lines
+            // balloon's button does (after `-answerDelay` seconds, 10 by default, for screenshots), then logs the agent's lines
             // that say ANSWER.
             if let answer = DebugLaunch.value("answerDecision") { Task { @MainActor [link, worktree] in
                 var asked: Decision?
@@ -168,7 +179,7 @@ struct CanvasView: View {
                 }
                 if let asked {
                     DebugTerm.log("decision: opened \"\(asked.ask.question)\"")
-                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    try? await Task.sleep(nanoseconds: UInt64(DebugLaunch.value("answerDelay").flatMap(Double.init) ?? 10) * 1_000_000_000)
                     link.send(BoardSay.answerDecision(asked.id, answer))
                     DebugTerm.log("decision: answered \(answer)")
                     for _ in 0..<120 {
@@ -255,6 +266,7 @@ struct CanvasView: View {
 #if DEBUG
 /// What a DEBUG launch does only once, though its screen shows again.
 @MainActor enum DebugOnce {
+    static var left = false
     static var canvas = false
     static var typed = false
 }

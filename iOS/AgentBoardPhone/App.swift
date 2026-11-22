@@ -125,9 +125,15 @@ struct Fingerprint: View {
     func load(account: Account) async {
         do {
             let hosts = try await account.server.hosts()
+            #if DEBUG
+            DebugTerm.log("hosts: 200, \(hosts.count) hosts, \(hosts.filter(\.online).count) online")
+            #endif
             withAnimation(.smooth) { list = hosts.sorted { ($0.online ? 0 : 1, $0.name) < ($1.online ? 0 : 1, $1.name) }; error = nil }
             for host in hosts where host.online { link(host).connect(account: account) }
         } catch let failure as AccountServer.ServerError where failure.status == 401 {
+            #if DEBUG
+            DebugTerm.log("hosts: 401")
+            #endif
             account.signOut()
         } catch {
             self.error = error.localizedDescription
