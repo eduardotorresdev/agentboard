@@ -266,6 +266,7 @@ public final class CoreServer: @unchecked Sendable {
         case .takeOver:
             handOff(to: client)
         case .run(let call, let executable, let arguments, let directory, let input):
+            #if os(macOS)
             // Off the queue: the program may take as long as it likes.
             Thread.detachNewThread {
                 let process = Process()
@@ -301,6 +302,9 @@ public final class CoreServer: @unchecked Sendable {
                 process.waitUntilExit()
                 client.socket.send(CoreEvent.ran(call: call, status: process.terminationStatus, output: printed, error: failed))
             }
+            #else
+            client.socket.send(CoreEvent.ran(call: call, status: -1, output: Data(), error: Data("Running programs needs a Mac.".utf8)))
+            #endif
         case .subscribeHost:
             // This Mac's board doesn't show its own machine's stats; the hosts' core reports them.
             break
