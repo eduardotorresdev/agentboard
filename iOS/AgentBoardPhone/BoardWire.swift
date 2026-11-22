@@ -21,6 +21,24 @@ struct Line: Decodable, Identifiable, Equatable {
     let b: UUID
 }
 
+struct PostIt: Decodable, Identifiable, Equatable {
+    let id: UUID
+    let worktree: String
+    var name: String
+    var frame: CGRect
+    var text: String
+}
+
+/// A picture or a video; its file lives in the host's data folder, under `images/`.
+struct Media: Decodable, Identifiable, Equatable {
+    let id: UUID
+    let worktree: String
+    var name: String
+    var frame: CGRect
+    var file: String
+    var isVideo: Bool { ["mp4", "mov", "m4v"].contains((file as NSString).pathExtension.lowercased()) }
+}
+
 struct Attention: Decodable, Identifiable, Equatable {
     enum Reason: Decodable, Equatable { case turnEnded, waiting, said(String) }
     let id: UUID
@@ -47,6 +65,8 @@ struct Decision: Decodable, Identifiable, Equatable {
 struct BoardSnapshot: Decodable {
     let cards: [Card]
     let connections: [Line]
+    let postIts: [PostIt]?
+    let images: [Media]?
     let attention: [Attention]?
     let decisions: [Decision]?
 }
@@ -58,12 +78,35 @@ enum BoardUpdate: Decodable {
     case connections([Line])
     case attention([Attention])
     case decisions([Decision])
+    case postItAdded(PostIt)
+    case postItUpdated(PostIt)
+    case postItRemoved(UUID)
+    case imageAdded(Media)
+    case imageUpdated(Media)
+    case imageRemoved(UUID)
 }
 
 /// Board → core requests, written as Swift's synthesized Codable writes `BoardRequest`.
 enum BoardSay {
-    static func open(_ id: UUID, cols: Int, rows: Int) -> Data {
-        json(["open": ["id": id.uuidString, "cols": cols, "rows": rows, "start": false]])
+    static func open(_ id: UUID, cols: Int, rows: Int, start: Bool = false) -> Data {
+        json(["open": ["id": id.uuidString, "cols": cols, "rows": rows, "start": start]])
+    }
+
+    /// An agent card (`command` nil) or a runner card, as `AgentRecord` encodes.
+    static func addCard(_ id: UUID, worktree: String, providerID: String, name: String, frame: CGRect,
+                        command: String? = nil, organization: String?) -> Data {
+        var card: [String: Any] = ["id": id.uuidString, "worktree": worktree, "providerID": providerID, "name": name,
+                                   "frame": rect(frame)]
+        if let command { card["runner"] = ["command": command, "directory": worktree] }
+        if let organization { card["organization"] = organization }
+        return json(["addCard": ["_0": card]])
+    }
+
+    static func addPostIt(_ id: UUID, worktree: String, name: String, frame: CGRect, text: String, organization: String?) -> Data {
+        var record: [String: Any] = ["id": id.uuidString, "worktree": worktree, "name": name, "frame": rect(frame),
+                                     "text": text, "editorName": ""]
+        if let organization { record["organization"] = organization }
+        return json(["addPostIt": ["_0": record]])
     }
 
     static func prompt(_ id: UUID, _ text: String) -> Data { json(["prompt": ["id": id.uuidString, "text": text]]) }
@@ -79,9 +122,11 @@ enum BoardSay {
     /// The card as the core sent it, with `frame` replaced: nothing the phone doesn't know is lost.
     static func move(_ raw: [String: Any], to frame: CGRect) -> Data {
         var card = raw
-        card["frame"] = [[frame.origin.x, frame.origin.y], [frame.width, frame.height]]
+        card["frame"] = rect(frame)
         return json(["updateCard": ["_0": card]])
     }
+
+    static func rect(_ r: CGRect) -> [[Double]] { [[r.origin.x, r.origin.y], [r.width, r.height]] }
 
     static func json(_ object: Any) -> Data { (try? JSONSerialization.data(withJSONObject: object)) ?? Data() }
 }

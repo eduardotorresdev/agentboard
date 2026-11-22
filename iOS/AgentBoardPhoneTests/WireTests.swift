@@ -46,6 +46,26 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(((option["answerDecision"]?["answer"] as? [String: Any])?["option"] as? [String: String])?["_0"], "B")
     }
 
+    func testParsesHostWorktreesPerProject() {
+        let output = "project app\nworktree /h/agentboard/projects/app\nHEAD 1\nbranch refs/heads/main\n\nworktree /h/w/feat\nHEAD 2\ndetached\n\n\nproject api\nworktree /h/agentboard/projects/api\nbranch refs/heads/dev\n\n"
+        let list = AccountCatalog.parse(output)
+        XCTAssertEqual(list.map(\.path), ["/h/agentboard/projects/app", "/h/w/feat", "/h/agentboard/projects/api"])
+        XCTAssertEqual(list.map(\.project), ["app", "app", "api"])
+        XCTAssertEqual(list.map(\.branch), ["main", nil, "dev"])
+    }
+
+    func testNewCardNamesAreUnique() {
+        XCTAssertEqual(HostLink.unique("Post-it", among: ["post-it", "Post-it 2"]), "Post-it 3")
+        XCTAssertEqual(HostLink.unique("npm", among: []), "npm")
+    }
+
+    func testAddingARunnerWritesAnAgentRecord() throws {
+        let data = BoardSay.addCard(UUID(), worktree: "/w", providerID: "runner", name: "npm", frame: .zero, command: "npm run dev", organization: nil)
+        let card = (try JSONSerialization.jsonObject(with: data) as! [String: [String: [String: Any]]])["addCard"]!["_0"]!
+        XCTAssertEqual((card["runner"] as? [String: String])?["directory"], "/w")
+        XCTAssertNil(card["organization"])
+    }
+
     func testFingerprintIsFiveGroupsOfFour() {
         let print = HostChannel.fingerprint(of: Data(repeating: 0, count: 32))
         XCTAssertEqual(print.split(separator: " ").count, 5)

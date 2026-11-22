@@ -16,6 +16,13 @@ struct PhoneApp: App {
 }
 
 /// GitHub's device flow: a code here, confirmed on any device.
+#if DEBUG
+/// Launch arguments that walk the app to a screen by themselves (`-name value`). Debug builds only.
+enum DebugLaunch {
+    static func value(_ name: String) -> String? { UserDefaults.standard.string(forKey: name) }
+}
+#endif
+
 struct SignInView: View {
     let account: Account
     @State private var code: AccountServer.DeviceCode?
@@ -25,6 +32,8 @@ struct SignInView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Spacer()
+            // Its frame is wider than the body: pulled left so the body lines up with the text.
+            SkyBlob().padding(.leading, -41)
             Text("Sign in").font(Theme.Font.headline).tracking(Theme.Font.headlineTracking).foregroundStyle(Theme.ink)
             if let code {
                 Text("Enter this code on GitHub, from any device.").font(Theme.Font.body).foregroundStyle(Theme.inkMuted)
@@ -45,6 +54,10 @@ struct SignInView: View {
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface)
+        #if DEBUG
+        // `-autoSignIn YES`: asks for a device code at launch.
+        .task { if UserDefaults.standard.bool(forKey: "autoSignIn"), code == nil { await start() } }
+        #endif
     }
 
     private func start() async {
@@ -94,9 +107,11 @@ struct HostsView: View {
     @State private var hosts: [Host] = []
     @State private var error: String?
     @State private var links: [String: HostLink] = [:]
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(hosts) { host in
@@ -121,8 +136,10 @@ struct HostsView: View {
                 }
             }
             .refreshable { await load() }
+            // Back from the background: channels that died while the app slept open again.
+            .onChange(of: scenePhase) { _, phase in if phase == .active { links.values.forEach { $0.resume() } } }
             .task { await load() }
-            .navigationDestination(for: Host.self) { host in WorktreesView(account: account, link: link(host)) }
+            .navigationDestination(for: Host.self) { host in WorktreesView(account: account, link: link(host), path: $path) }
         }
     }
 
@@ -137,6 +154,12 @@ struct HostsView: View {
         do {
             let list = try await account.server.hosts()
             withAnimation(.smooth) { hosts = list.sorted { ($0.online ? 0 : 1, $0.name) < ($1.online ? 0 : 1, $1.name) }; error = nil }
+            #if DEBUG
+            // `-openHost <id>`: straight to that host, for screenshots nobody taps through.
+            if path.isEmpty, let id = DebugLaunch.value("openHost"), let host = list.first(where: { $0.id.lowercased() == id.lowercased() }) {
+                path.append(host)
+            }
+            #endif
         } catch let failure as AccountServer.ServerError where failure.status == 401 {
             account.signOut()
         } catch {
@@ -168,7 +191,8 @@ struct HostRow: View {
 struct WorktreesView: View {
     let account: Account
     let link: HostLink
-    var catalog: any CatalogSource = HostCardsCatalog()
+    @Binding var path: NavigationPath
+    @State private var worktrees: [Worktree] = []
 
     var body: some View {
         ScrollView {
@@ -183,6 +207,8 @@ struct WorktreesView: View {
                             .font(Theme.Font.body).foregroundStyle(Theme.inkMuted)
                         Text("agentboard trust \(account.publicKeyBase64)").font(Theme.Font.caption.monospaced())
                             .foregroundStyle(Theme.ink).textSelection(.enabled)
+                        Text("Or approve it from a computer this host already trusts: it lists this phone as waiting.")
+                            .font(Theme.Font.body).foregroundStyle(Theme.inkMuted)
                         Button("Try again") { link.connect(account: account) }.buttonStyle(SolidButton())
                     }
                     Fingerprint(account: account)
@@ -195,13 +221,16 @@ struct WorktreesView: View {
                         Text("NEEDS YOU").font(Theme.Font.eyebrow).tracking(0.8).foregroundStyle(Theme.deep)
                         ForEach(waiting) { card in
                             NavigationLink(value: card) {
-                                row(card.name, detail: Worktree(path: card.worktree).title, fill: Theme.accentSoft)
+                                row(card.name, detail: (card.worktree as NSString).lastPathComponent, fill: Theme.accentSoft)
                             }
                         }
                     }
                     Text("WORKTREES").font(Theme.Font.eyebrow).tracking(0.8).foregroundStyle(Theme.inkMuted).padding(.top, 8)
-                    ForEach(catalog.worktrees(on: link)) { worktree in
-                        NavigationLink(value: worktree) { row(worktree.title, detail: worktree.project, fill: Theme.surface) }
+                    ForEach(worktrees) { worktree in
+                        NavigationLink(value: worktree) {
+                            row(worktree.title, detail: [worktree.organization, worktree.project].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "),
+                                fill: Theme.surface)
+                        }
                     }
                 }
             }
@@ -213,6 +242,23 @@ struct WorktreesView: View {
         .navigationDestination(for: Worktree.self) { CanvasView(link: link, worktree: $0) }
         .navigationDestination(for: Card.self) { TerminalPage(link: link, card: $0) }
         .task { if link.phase != .connected { link.connect(account: account) } }
+        .task(id: link.phase) {
+            guard link.phase == .connected else { return }
+            let catalog: any CatalogSource = AccountCatalog(server: account.server)
+            let list = await catalog.worktrees(on: link)
+            withAnimation(.smooth) { worktrees = list }
+            #if DEBUG
+            // `-openWorktree <path>` and `-openCard <uuid>`, once.
+            if path.count == 1 {
+                if let wanted = DebugLaunch.value("openWorktree") {
+                    path.append(list.first { $0.path == wanted } ?? Worktree(path: wanted))
+                }
+                if let id = DebugLaunch.value("openCard").flatMap(UUID.init), let card = link.cards.first(where: { $0.id == id }) {
+                    path.append(card)
+                }
+            }
+            #endif
+        }
     }
 
     private func row(_ title: String, detail: String, fill: Color) -> some View {

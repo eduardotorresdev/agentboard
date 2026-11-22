@@ -8,6 +8,8 @@ enum Theme {
         static let accentSoft: UInt32 = 0xE6F4FE
         static let sky: UInt32 = 0xF4FAFF
         static let accentTint: UInt32 = 0xC2E5FF
+        /// Blue 6: decorative light blue (the blob's little clouds).
+        static let blueLight: UInt32 = 0xACD8FC
         static let deep: UInt32 = 0x113264
         static let ink: UInt32 = 0x1C2024
         static let inkMuted: UInt32 = 0x60646C
@@ -26,6 +28,7 @@ enum Theme {
     static let accentTint = color(Hex.accentTint)
     static let sky = color(Hex.sky)
     static let deep = color(Hex.deep)
+    static let blueLight = color(Hex.blueLight)
     static let onAccent = Color.white
     static let ink = color(Hex.ink)
     static let inkMuted = color(Hex.inkMuted)

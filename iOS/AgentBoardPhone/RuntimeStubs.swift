@@ -27,3 +27,8 @@ public final class AgentSession {
         case stopped
     }
 }
+
+// AgentProvider.swift reads it (for Mac-only checks the phone never makes); unavailable on iOS.
+extension FileManager {
+    var homeDirectoryForCurrentUser: URL { URL(fileURLWithPath: NSHomeDirectory()) }
+}
