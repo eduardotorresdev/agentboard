@@ -6,6 +6,8 @@ import SwiftUI
 struct SkyBlob: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    /// What floats around it, picked once per appearance as the Mac picks its outfit.
+    @State private var sparkles = Bool.random()
 
     struct Pose: Hashable {
         var lift: CGFloat = 0, look: CGFloat = 0, eyes: CGFloat = 1, trail: CGFloat = 0, wobble: CGFloat = 0
@@ -32,11 +34,11 @@ struct SkyBlob: View {
     var body: some View {
         Group {
             if reduceMotion || scenePhase != .active {
-                BlobFigure(pose: Pose(), breath: 0.5)
+                BlobFigure(pose: Pose(), breath: 0.5, sparkles: sparkles)
             } else {
                 PhaseAnimator(Self.loop) { pose in
                     // The outline breathes slowly on its own spring, under the hop.
-                    PhaseAnimator([0.0, 1.0]) { breath in BlobFigure(pose: pose, breath: breath) }
+                    PhaseAnimator([0.0, 1.0]) { breath in BlobFigure(pose: pose, breath: breath, sparkles: sparkles) }
                         animation: { _ in .spring(duration: 1.9, bounce: 0) }
                 } animation: { $0.animation }
             }
@@ -50,6 +52,7 @@ struct SkyBlob: View {
 private struct BlobFigure: View, Animatable {
     var pose: SkyBlob.Pose
     var breath: CGFloat
+    var sparkles: Bool
 
     var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, CGFloat>>> {
         get { AnimatablePair(AnimatablePair(pose.lift, pose.look), AnimatablePair(AnimatablePair(pose.eyes, pose.trail), AnimatablePair(pose.wobble, breath))) }
@@ -83,7 +86,8 @@ private struct BlobFigure: View, Animatable {
                 .float2(Float(breath), Float(pose.wobble)),
                 .float4(t.chubby, t.tall, t.tilt, t.settle),
                 .float(t.phase),
-                .color(Theme.deep), .color(.white), .color(Theme.blueLight)))
+                .color(Theme.deep), .color(.white), .color(Theme.blueLight),
+                .float(sparkles ? 1 : 0), .color(Theme.accent)))
     }
 }
 

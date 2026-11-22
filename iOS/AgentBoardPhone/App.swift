@@ -32,8 +32,8 @@ struct SignInView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             Spacer()
-            // Its frame is wider than the body: pulled left so the body lines up with the text.
-            SkyBlob().padding(.leading, -41)
+            // The whole scene, clouds included, stays inside the margin.
+            SkyBlob()
             Text("Sign in").font(Theme.Font.headline).tracking(Theme.Font.headlineTracking).foregroundStyle(Theme.ink)
             if let code {
                 Text("Enter this code on GitHub, from any device.").font(Theme.Font.body).foregroundStyle(Theme.inkMuted)

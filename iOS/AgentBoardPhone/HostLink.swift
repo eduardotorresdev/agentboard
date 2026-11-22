@@ -157,6 +157,12 @@ import UIKit
         send(BoardSay.open(id, cols: 75, rows: 20, start: true))
     }
 
+    /// Shown at once; the core's `postItUpdated` confirms it.
+    func writePostIt(_ id: UUID, _ text: String) {
+        if let index = postIts.firstIndex(where: { $0.id == id }) { postIts[index].text = text }
+        send(BoardSay.writePostIt(id, text))
+    }
+
     func addPostIt(_ text: String, to worktree: String) {
         let name = Self.unique("Post-it", among: postIts.filter { $0.worktree == worktree }.map(\.name))
         send(BoardSay.addPostIt(UUID(), worktree: worktree, name: name, frame: CGRect(origin: freeSpot(in: worktree), size: CGSize(width: 340, height: 320)),

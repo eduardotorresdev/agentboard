@@ -44,6 +44,14 @@ static float cloud(float2 p, float2 c, float k) {
     return d;
 }
 
+// SparkleShape: four quadratic curves through the 14 x 14 box's edge midpoints with the center
+// as control point, which are parabolas: sqrt|x| + sqrt|y| = sqrt(h). Approximate distance.
+static float sparkle(float2 p, float2 c, float k) {
+    float h = 7 * k;
+    float2 q = abs(p - c) / h;
+    return (sqrt(q.x) + sqrt(q.y) - 1) * h * 0.5;
+}
+
 static half4 over(half4 below, half4 color, float coverage) {
     half a = half(coverage) * color.a;
     return half4(color.rgb * a, a) + below * (1 - a);
@@ -51,7 +59,7 @@ static half4 over(half4 below, half4 color, float coverage) {
 
 // pose: lift, look, eyes, trail. motion: breath, wobble. traits: chubby, tall, tilt, settle.
 [[ stitchable ]] half4 blob(float2 p, half4 current, float4 pose, float2 motion, float4 traits, float phase,
-                            half4 deep, half4 white, half4 cloudColor) {
+                            half4 deep, half4 white, half4 cloudColor, float sparkles, half4 sparkleColor) {
     float lift = pose.x, look = pose.y, eyes = pose.z, trail = pose.w;
     float breath = motion.x, wobble = motion.y;
     half4 color = half4(0);
@@ -62,7 +70,8 @@ static half4 over(half4 below, half4 color, float coverage) {
         float k = spots[i].z;
         float side = (i % 2 == 0) ? 1 : -1;
         float2 c = float2(85 + spots[i].x + look * 3 * k, 160 - 8 - 9 + spots[i].y + trail * k * side);
-        color = over(color, cloudColor, cover(cloud(p, c, k)));
+        color = sparkles > 0.5 ? over(color, sparkleColor, cover(sparkle(p, c, k)))
+                               : over(color, cloudColor, cover(cloud(p, c, k)));
     }
 
     // The body: an 88 x 76 box resting on the frame's bottom, lifted by the hop.

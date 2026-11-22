@@ -29,6 +29,8 @@ struct CanvasView: View {
     @State private var opened: Card?
     @State private var adding: Adding?
     @State private var draft = ""
+    @State private var editing: PostIt?
+    @State private var text = ""
 
     enum Adding: Identifiable { case postIt, runner; var id: Self { self } }
 
@@ -62,6 +64,7 @@ struct CanvasView: View {
                 ForEach(notes) { note in
                     let rect = place(note.frame)
                     PostItView(note: note, scale: scale).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
+                        .onTapGesture { text = note.text; editing = note }
                 }
                 ForEach(media) { item in
                     let rect = place(item.frame)
@@ -104,6 +107,26 @@ struct CanvasView: View {
         .navigationTitle(worktree.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $opened) { card in TerminalPage(link: link, card: card) }
+        .sheet(item: $editing) { note in
+            NavigationStack {
+                TextEditor(text: $text)
+                    .font(Theme.Font.body).foregroundStyle(Theme.ink)
+                    .padding(12)
+                    .background(Theme.surface)
+                    .navigationTitle(note.name)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editing = nil } }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Save") {
+                                link.writePostIt(note.id, text)
+                                editing = nil
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.medium, .large])
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

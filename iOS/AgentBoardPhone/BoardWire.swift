@@ -109,6 +109,9 @@ enum BoardSay {
         return json(["addPostIt": ["_0": record]])
     }
 
+    /// The user rewrote the post-it's text (`BoardRequest.writePostIt`).
+    static func writePostIt(_ id: UUID, _ text: String) -> Data { json(["writePostIt": ["id": id.uuidString, "text": text]]) }
+
     static func prompt(_ id: UUID, _ text: String) -> Data { json(["prompt": ["id": id.uuidString, "text": text]]) }
 
     static func dismissAttention(_ id: UUID) -> Data { json(["dismissAttention": ["_0": id.uuidString]]) }
