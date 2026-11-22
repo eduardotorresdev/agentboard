@@ -68,9 +68,11 @@ safely() { env -u AGENTBOARD_HOME sandbox-exec -p "$POLICY" /usr/bin/env "${ENVI
 # starves the suites whose cores answer on the main queue when they run alongside.
 safely "$HELPER" --test-bundle-path "$BUNDLE" "$BUNDLE" --testing-library swift-testing --no-parallel "$@"
 STATUS=$?
-# The few XCTest suites run whole: their filter syntax differs. XCTEST=0 skips them.
-if [ "${XCTEST:-1}" = 1 ]; then
-    safely "$DEV/usr/bin/xctest" "${BUNDLE%/Contents/MacOS/*}" 2>&1 | grep -E "error:|failed|Executed .* tests"
+# The few XCTest suites run whole: their filter syntax differs. XCTEST=0 skips them. Named one by
+# one: a bare xctest run also reruns every Swift Testing test, unfiltered and in parallel.
+SUITES=$(grep -rhoE "class [A-Za-z0-9_]+: XCTestCase" Tests | awk '{print $2}' | tr -d : | sort -u | paste -sd, -)
+if [ "${XCTEST:-1}" = 1 ] && [ -n "$SUITES" ]; then
+    safely "$DEV/usr/bin/xctest" -XCTest "$SUITES" "${BUNDLE%/Contents/MacOS/*}" 2>&1 | grep -E "error:|failed|Executed .* tests"
     [ "${PIPESTATUS[0]}" -eq 0 ] || STATUS=1
 fi
 fingerprint > "$WORK/after"

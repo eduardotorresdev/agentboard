@@ -29,6 +29,9 @@ struct ImageMarksTests {
             if wheel != 0 {
                 let scroll = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: wheel, wheel2: 0, wheel3: 0))
                 scroll.flags = .maskCommand
+                // Zoom around the picture, not wherever the real pointer is, or it can zoom the Mark button out of the window.
+                let center = window.convertPoint(toScreen: host.convert(CGPoint(x: host.bounds.midX, y: host.bounds.midY), to: nil))
+                scroll.location = CGPoint(x: center.x, y: (NSScreen.screens.first?.frame.height ?? 0) - center.y)
                 board.scrollWheel(with: try #require(NSEvent(cgEvent: scroll)))
             }
             // The zoom springs: wait until it has settled, not a fixed time, so a loaded machine doesn't click mid-animation.
