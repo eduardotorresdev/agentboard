@@ -78,16 +78,16 @@ impl Api {
 }
 
 /// Runs the device flow to its end: the token and the account's login. `say` shows the user
-/// what to do; `wait` sleeps between polls.
+/// the page and the code; `wait` sleeps between polls.
 /// `host` is this host's id: the session it gets serves this host only.
-pub fn device_flow(api: &Api, host: &str, say: &mut dyn FnMut(&str), wait: &mut dyn FnMut(Duration)) -> Result<(String, String), String> {
+pub fn device_flow(api: &Api, host: &str, say: &mut dyn FnMut(&str, &str), wait: &mut dyn FnMut(Duration)) -> Result<(String, String), String> {
     let device = api.call("POST", "/v1/login/device", None, None).map_err(|failed| failed.to_string())?;
     let (Some(device_code), Some(user_code), Some(uri)) = (device["device_code"].as_str(), device["user_code"].as_str(), device["verification_uri"].as_str()) else {
         return Err("the account server's reply made no sense".into());
     };
     let mut interval = device["interval"].as_u64().unwrap_or(5).max(1);
     let mut left = device["expires_in"].as_u64().unwrap_or(900);
-    say(&format!("To sign in, open this page on any device:\n\n    {uri}\n\nand enter the code:\n\n    {user_code}\n\nWaiting for you to confirm..."));
+    say(uri, user_code);
 
     while left > 0 {
         wait(Duration::from_secs(interval));
@@ -118,7 +118,7 @@ pub fn login() -> Result<(), String> {
     let folder = config::data_folder();
     let mut config = Config::load(&folder)?;
     let api = Api::new(&config::server());
-    let (token, login) = device_flow(&api, &config.id.to_string(), &mut |text| println!("{text}"), &mut std::thread::sleep)?;
+    let (token, login) = device_flow(&api, &config.id.to_string(), &mut |uri, code| println!("To sign in, open this page on any device:\n\n    {uri}\n\nand enter the code:\n\n    {code}\n\nWaiting for you to confirm..."), &mut std::thread::sleep)?;
     config.token = Some(token);
     config.login = Some(login);
     // Saved before registering: a failed registration is retried by the daemon, a lost token isn't.
@@ -127,6 +127,27 @@ pub fn login() -> Result<(), String> {
     // A running daemon sees the new login in host.json and registers again, with its addresses.
     api.register(&config, config.token.as_deref().unwrap_or(""), &[]).map_err(|failed| format!("Could not register this host: {failed}"))?;
     println!("This host is registered as \"{}\".", config.name);
+    Ok(())
+}
+
+/// `agentboard relay`: signs this machine in as a host unless it is already, for the app that
+/// launched it. Says `sign-in <page> <code>` and then `signed-in <login>`, a line each, on stdout.
+/// Never opens a first-use window: every board waits until approved.
+pub fn sign_in_as_host() -> Result<(), String> {
+    let folder = config::data_folder();
+    let mut config = Config::load(&folder)?;
+    if config.token.is_some() {
+        return Ok(());
+    }
+    let say = &mut |uri: &str, code: &str| {
+        println!("sign-in {uri} {code}");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    };
+    let (token, login) = device_flow(&Api::new(&config::server()), &config.id, say, &mut std::thread::sleep)?;
+    config.token = Some(token);
+    config.login = Some(login);
+    config.save(&folder)?;
+    println!("signed-in {}", config.login.as_deref().unwrap_or(""));
     Ok(())
 }
 
@@ -167,7 +188,7 @@ mod tests {
     fn run(replies: &[(u16, &str)]) -> (Result<(String, String), String>, Vec<u64>, String, Vec<String>) {
         let (server, requests) = http_stub(replies.iter().map(|(status, body)| (*status, body.to_string())).collect());
         let (mut waits, mut said) = (Vec::new(), String::new());
-        let result = device_flow(&Api::new(&server), "0f8fad5b-d9cb-469f-a165-70867728950e", &mut |text| said.push_str(text), &mut |time| waits.push(time.as_secs()));
+        let result = device_flow(&Api::new(&server), "0f8fad5b-d9cb-469f-a165-70867728950e", &mut |uri, code| said.push_str(&format!("{uri} {code}")), &mut |time| waits.push(time.as_secs()));
         let requests = requests.try_iter().collect();
         (result, waits, said, requests)
     }

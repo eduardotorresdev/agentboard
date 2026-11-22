@@ -7,6 +7,7 @@ fn main() {
     match arguments.first().map(String::as_str) {
         Some("core") => core::run(&arguments[1..]),
         Some("host") => core::host(),
+        Some("relay") => core::relay(&arguments[1..]),
         Some("data-folder") => println!("{}", runtime::data_folder::url().display()),
         Some("login") => finish(host::login().and_then(|()| host::install_service()).and_then(|()| host::first_board())),
         Some("logout") => finish(host::logout()),
