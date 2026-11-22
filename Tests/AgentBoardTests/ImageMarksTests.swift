@@ -31,8 +31,14 @@ struct ImageMarksTests {
                 scroll.flags = .maskCommand
                 board.scrollWheel(with: try #require(NSEvent(cgEvent: scroll)))
             }
-            board.syncLayers()
-            try await Task.sleep(for: .milliseconds(300))
+            // The zoom springs: wait until it has settled, not a fixed time, so a loaded machine doesn't click mid-animation.
+            var last = CGFloat.nan
+            for _ in 0..<100 {
+                board.syncLayers()
+                try await Task.sleep(for: .milliseconds(100))
+                if host.zoom == last { break }
+                last = host.zoom
+            }
             host.state.marking = false
             let button = host.layout.button
             let point = host.convert(CGPoint(x: button.midX * host.zoom, y: button.midY * host.zoom), to: nil)
