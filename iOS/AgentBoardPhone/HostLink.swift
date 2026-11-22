@@ -343,7 +343,11 @@ import UIKit
             sessions[id]?.onChange = nil
             sessions[id] = nil
         case .connections(let lines): self.lines = lines
-        case .attention(let list): attention = list
+        case .attention(let list):
+            attention = list
+            #if DEBUG
+            for asked in list where !(asked.questions ?? []).isEmpty { DebugTerm.log("attention: \(asked.id) asks \(asked.questions!.map(\.question))") }
+            #endif
         case .decisions(let list): decisions = list.filter { $0.state == .open }
         case .postItAdded(let note), .postItUpdated(let note): upsert(note, in: &postIts)
         case .postItRemoved(let id): postIts.removeAll { $0.id == id }

@@ -150,6 +150,8 @@ extension Theme {
 #if DEBUG
 /// Appends to Documents/term.txt, which `simctl get_app_container … data` reaches.
 enum DebugTerm {
+    /// Back to the start of the browsing stack (`-leaveAfterTyping`).
+    static let leaveBoard = Notification.Name("debugLeaveBoard")
     static func log(_ line: String) {
         guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("term.txt") else { return }
         if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }

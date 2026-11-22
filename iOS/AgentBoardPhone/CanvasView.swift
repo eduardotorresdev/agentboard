@@ -31,7 +31,6 @@ struct CanvasView: View {
     @State private var rasterZoom: CGFloat?
     @State private var dragging: (id: UUID, frame: CGRect)?
     @State private var opened: Card?
-    @Environment(\.dismiss) private var leave
     @State private var watching: Element?
     @State private var adding: Adding?
     @State private var draft = ""
@@ -149,7 +148,12 @@ struct CanvasView: View {
         .onChange(of: opened) { before, now in
             if before != nil, now == nil, UserDefaults.standard.bool(forKey: "leaveAfterTyping"), !DebugOnce.left {
                 DebugOnce.left = true
-                leave()
+                // After the terminal's own pop has settled: a dismiss during it is dropped.
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    DebugTerm.log("test: leaving the board")
+                    NotificationCenter.default.post(name: DebugTerm.leaveBoard, object: nil)
+                }
             }
         }
         #endif

@@ -301,11 +301,23 @@ struct BrowseView: View {
             let arrived = WaitingBanner.arrived(before: before, now: now, shown: WaitingBanner.shown(hosts.waitingAgents))
             guard let first = arrived.first, let found = hosts.waitingAgents.first(where: { $0.card.id == first }) else { return }
             withAnimation(.snappy) { banner = (found.card, found.link, arrived.count - 1) }
+            #if DEBUG
+            DebugTerm.log("banner: \(found.card.name), board open: \(WaitingBanner.board?.path ?? "none")")
+            #endif
             Task {
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 if banner?.card.id == first { withAnimation(.snappy) { banner = nil } }
             }
         }
+        // A banner shown before its board opened goes once the board is on screen.
+        .onChange(of: path.count) {
+            Task { @MainActor in
+                if let shown = banner, WaitingBanner.shown(hosts.waitingAgents).contains(shown.card.id) { withAnimation(.snappy) { banner = nil } }
+            }
+        }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: DebugTerm.leaveBoard)) { _ in path = NavigationPath() }
+        #endif
         .overlay(alignment: .top) {
             if let banner {
                 Button {
