@@ -1,0 +1,67 @@
+name: AgentBoardPhone
+options:
+  bundleIdPrefix: dev.agentboard
+  deploymentTarget:
+    iOS: "26.0"
+packages:
+  AgentBoard:
+    path: ..
+targets:
+  AgentBoardPhone:
+    type: application
+    platform: iOS
+    sources:
+      - AgentBoardPhone
+    dependencies:
+      - package: AgentBoard
+        product: TerminalCore
+      - package: AgentBoard
+        product: TerminalRenderer
+      - package: AgentBoard
+        product: AgentRuntime
+      - package: AgentBoard
+        product: Connections
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.agentboard.phone
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIUserInterfaceStyle: Light
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_CFBundleDisplayName: AgentBoard
+        # Ad-hoc signed: an unsigned simulator app can't keep Keychain items, so its key changed every launch.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+  AgentBoardPhoneTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [AgentBoardPhoneTests]
+    dependencies:
+      - target: AgentBoardPhone
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/AgentBoardPhone.app/AgentBoardPhone
+  AgentBoardPhoneUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [AgentBoardPhoneUITests]
+    dependencies:
+      - target: AgentBoardPhone
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AgentBoardPhone
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+schemes:
+  AgentBoardPhone:
+    build:
+      targets:
+        AgentBoardPhone: all
+    test:
+      targets: [AgentBoardPhoneTests, AgentBoardPhoneUITests]
