@@ -49,13 +49,47 @@ POLICY="(version 1)(allow default)(deny file-write* (subpath \"$SUPPORT/AgentBoa
 # hosts, organizations, and any new file.
 # shortcut: a fixed list of the app's own files; extend it when the app starts rewriting another
 # while in use (a false alarm names it).
-installed_app_files() {
-    pgrep -qf "^/Applications/AgentBoard.app/" || return 0
-    printf '%s\n' ./agentboard.sqlite ./agentboard.sqlite-wal ./agentboard.sqlite-shm ./makers.json ./composer-drafts.json \
-        ./workspace.json ./tools.port ./images/ ./attachments/ ./Browsers/ ./Simulators/
+# Pictures agents put on other hosts' boards come down into hosts/<host>/images/ the same way.
+installed_app_running() {
+    # TEST_SAFE_APP_RUNNING (1 or 0) stands in for the check in --self-test only: it never stops
+    # or looks at the user's app.
+    if [ -n "${TEST_SAFE_APP_RUNNING:-}" ]; then [ "$TEST_SAFE_APP_RUNNING" = 1 ]; return; fi
+    pgrep -qf "^/Applications/AgentBoard.app/"
 }
-installed_app_files_only() { awk 'NR == FNR { owned[$0]; next }
-    { path = $0; sub(/^[0-9a-f]+  /, "", path); for (o in owned) if (path == o || (o ~ /\/$/ && index(path, o) == 1)) next; print }' "$WORK/installed" "$1"; }
+installed_app_files() {
+    installed_app_running || return 0
+    printf '%s\n' ./agentboard.sqlite ./agentboard.sqlite-wal ./agentboard.sqlite-shm ./makers.json ./composer-drafts.json \
+        ./workspace.json ./tools.port ./images/ ./hosts/*/images/ ./attachments/ ./Browsers/ ./Simulators/
+}
+# An entry ending in / is a folder: everything under it. `*` stands for one path component.
+installed_app_files_only() { awk 'FILENAME == ARGV[1] { owned[$0]; next }
+    { path = $0; sub(/^[0-9a-f]+  /, "", path)
+      for (o in owned) {
+          if (path == o) next
+          if (o ~ /\/$/) { pattern = o; gsub(/[.]/, "[.]", pattern); gsub(/[*]/, "[^/]+", pattern); if (path ~ ("^" pattern)) next }
+      }
+      print }' "$WORK/installed" "$1"; }
+
+# --self-test: the filter above on throwaway folders, with the app's check stood in for.
+if [ "${1:-}" = "--self-test" ]; then
+    FAKE="$WORK/fake"; mkdir -p "$FAKE/hosts/X/images" "$FAKE/images"
+    listing() { (cd "$FAKE" && find . -type f -exec shasum {} + | sort -k2); }
+    listing > "$WORK/before"
+    echo picture > "$FAKE/hosts/X/images/new.png"
+    echo picture > "$FAKE/images/new.png"
+    echo secret > "$FAKE/hosts/X/host.json"
+    listing > "$WORK/after"
+    failed=0
+    check() {  # $1: running, $2: the paths that must be flagged
+        TEST_SAFE_APP_RUNNING=$1 installed_app_files > "$WORK/installed"
+        flagged=$(diff <(installed_app_files_only "$WORK/before") <(installed_app_files_only "$WORK/after") | sed -n 's/^> [0-9a-f]*  //p' | sort | tr '\n' ' ')
+        if [ "$flagged" = "$2" ]; then echo "self-test: running=$1 flags: $flagged"; else echo "self-test FAILED: running=$1 flags '$flagged', expected '$2'"; failed=1; fi
+    }
+    check 1 "./hosts/X/host.json "
+    check 0 "./hosts/X/host.json ./hosts/X/images/new.png ./images/new.png "
+    rm -rf "$WORK"
+    exit $failed
+fi
 
 # --fingerprint-only: prints the same fingerprint this script compares (less the running installed
 # app's own files) and exits, to check the real data around a run made outside it.
