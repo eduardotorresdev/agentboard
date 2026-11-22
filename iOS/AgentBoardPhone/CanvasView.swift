@@ -61,7 +61,7 @@ struct CanvasView: View {
             let place = { (rect: CGRect) in rect.offsetBy(dx: -board.minX, dy: -board.minY) }
 
             ZStack(alignment: .topLeading) {
-                Theme.sky.ignoresSafeArea()
+                Theme.sky
                 // The board, laid out once in its own points; panning and zooming only move and
                 // scale it as a whole.
                 ZStack(alignment: .topLeading) {
@@ -77,7 +77,7 @@ struct CanvasView: View {
                     .stroke(Theme.accent, lineWidth: 2)  // board points: thickens with zoom, as on the Mac
                     ForEach(notes) { note in
                         let rect = place(note.frame)
-                        PostItView(note: note, scale: 1).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
+                        PostItView(note: note).frame(width: rect.width, height: rect.height).offset(x: rect.minX, y: rect.minY)
                             .onTapGesture { text = note.text; editing = note }
                     }
                     ForEach(media) { item in
@@ -103,6 +103,7 @@ struct CanvasView: View {
                 .offset(x: board.minX * scale - origin.x, y: board.minY * scale - origin.y)
             }
             .clipped()  // nothing of the board under the top bar
+            .background(Theme.sky.ignoresSafeArea())
             .contentShape(Rectangle())
             .gesture(DragGesture()
                 .onChanged { value in
@@ -235,23 +236,28 @@ extension CanvasView {
 }
 #endif
 
-/// A post-it: its text on light paper. Read-only here.
+/// A post-it; tapping it edits its text.
 struct PostItView: View {
     let note: PostIt
-    let scale: CGFloat
 
+    /// As the Mac's post-it card: a translucent title bar, the text at board size on the card,
+    /// cut off at its edges.
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(note.name).font(Theme.Font.label).foregroundStyle(Theme.inkMuted)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "note.text").foregroundStyle(Theme.inkMuted)
+                Text(note.name).foregroundStyle(Theme.ink).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(Theme.Font.label)
+            .padding(.horizontal, 12).frame(height: 34)
+            .background(.ultraThinMaterial)
             Text(LocalizedStringKey(note.text)).font(Theme.Font.body).foregroundStyle(Theme.ink)
-            Spacer(minLength: 0)
+                .padding(EdgeInsets(top: 4, leading: 16, bottom: 16, trailing: 16))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Theme.surface)
         }
-        .padding(12)
-        .frame(width: 340, height: note.frame.height * 340 / max(1, note.frame.width), alignment: .topLeading)
-        .scaleEffect(scale * note.frame.width / 340, anchor: .topLeading)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }
 
@@ -260,17 +266,29 @@ struct MediaView: View {
     let link: HostLink
     let item: Media
 
+    /// As the Mac's image card: a translucent title bar over the sky, the picture filling the rest.
     var body: some View {
-        ZStack {
-            Theme.surfaceDeep
-            if let data = link.files[item.file] {
-                if item.isVideo {
-                    VideoCard(data: data, name: item.file)
-                } else if let image = Thumbnails.image(item.file, data: data, width: item.frame.width) {
-                    Image(uiImage: image).resizable().scaledToFit()
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: item.isVideo ? "film" : "photo").foregroundStyle(Theme.inkMuted)
+                Text(item.name).foregroundStyle(Theme.ink).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .font(Theme.Font.label)
+            .padding(.horizontal, 12).frame(height: 32)
+            .background(.ultraThinMaterial)
+            ZStack {
+                Theme.surfaceDeep
+                if let data = link.files[item.file] {
+                    if item.isVideo {
+                        VideoCard(data: data, name: item.file)
+                    } else if let image = Thumbnails.image(item.file, data: data, width: item.frame.width) {
+                        // The card keeps the picture's proportions, so filling it doesn't crop.
+                        Image(uiImage: image).resizable()
+                    }
                 }
-            } else {
-                ProgressView()
+                // Until it arrives the card stays a plain fill: a spinner per card would keep a
+                // still board busy.
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))

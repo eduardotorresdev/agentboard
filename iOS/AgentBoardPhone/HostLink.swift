@@ -245,9 +245,6 @@ import UIKit
         rawCards = [:]
         for card in raw { if let id = (card["id"] as? String).flatMap(UUID.init) { rawCards[id] = card } }
         cards = state.cards
-        #if DEBUG
-        for card in cards { DebugTerm.log("card \(card.id) runner=\(card.runner != nil) \(card.worktree) | \(card.name)") }
-        #endif
         lines = state.connections
         postIts = state.postIts ?? []
         media = state.images ?? []
