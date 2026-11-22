@@ -146,6 +146,35 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(Set(WaitingBanner.arrived(before: [], now: [b, c], shown: [c])), [b])
     }
 
+    /// An agent's questions come with its attention, and are answered as the Mac answers them.
+    func testAgentQuestionsDecodeAndAnswerAsTheMacDoes() throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../core/fixtures/orchestration/event_attention.json"))
+        guard case .attention(let list) = try JSONDecoder().decode(BoardUpdate.self, from: data) else { return XCTFail("not attention") }
+        let questions = try XCTUnwrap(list.first { $0.questions != nil }?.questions)
+        XCTAssertEqual(questions.map(\.question), ["Which layout?", "Ship it?"])
+        XCTAssertEqual(questions[0].header, "Layout")
+        XCTAssertTrue(questions[0].multiSelect)
+        XCTAssertEqual(questions[0].options.map(\.label), ["Grid", "List"])
+        // Checked options in the order shown, then what was written; single: what was written wins.
+        XCTAssertEqual(questions[0].answer(picked: ["List", "Grid"], written: " Cards "), "Grid, List, Cards")
+        XCTAssertEqual(questions[1].answer(picked: [], written: "  "), nil)
+        let single = AgentQuestion(question: "Which?", options: [.init(label: "A"), .init(label: "B")])
+        XCTAssertEqual(single.answer(picked: ["B"], written: ""), "B")
+        XCTAssertEqual(single.answer(picked: ["B"], written: "Neither"), "Neither")
+    }
+
+    /// Answering sends the Mac's request: the answers by question, or none for the terminal.
+    func testAnsweringQuestionsSendsTheMacsRequest() throws {
+        let id = UUID(uuidString: "00000001-ABCD-4EF0-8A1B-000000000001")!
+        for (name, answers) in [("request_answerQuestions", ["Which layout?": "Grid"]), ("request_answerQuestions_in_the_terminal", nil)] as [(String, [String: String]?)] {
+            let fixture = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                .appendingPathComponent("../../core/fixtures/orchestration/\(name).json"))
+            let sent = try JSONSerialization.jsonObject(with: BoardSay.answerQuestions(id, answers)) as? NSDictionary
+            XCTAssertEqual(sent, try JSONSerialization.jsonObject(with: fixture) as? NSDictionary, name)
+        }
+    }
+
     /// An agent is on the open board when its folder and host are the board's; any other board, or none, isn't.
     func testAnAgentIsOnTheOpenBoardOnlyWhenFolderAndHostMatch() {
         let board = Worktree(path: "/w/phone-test-a", host: "abc")

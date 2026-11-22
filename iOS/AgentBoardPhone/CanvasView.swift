@@ -426,6 +426,8 @@ struct CardView: View {
         .overlay(alignment: .top) {
             if let decision = link.decisions.first(where: { $0.agent == card.id }) {
                 DecisionBalloon(link: link, decision: decision).offset(y: -12).alignmentGuide(.top) { $0[.bottom] }
+            } else if let asked = link.attention.first(where: { $0.id == card.id }), let questions = asked.questions, !questions.isEmpty {
+                QuestionBalloon(link: link, agent: card.id, questions: questions).offset(y: -12).alignmentGuide(.top) { $0[.bottom] }
             }
         }
     }
@@ -467,6 +469,117 @@ struct DecisionBalloon: View {
     private func answer(_ title: String, _ value: String) -> some View {
         Button(title) { link.send(BoardSay.answerDecision(decision.id, value)) }
             .buttonStyle(SolidButton(fill: Theme.surface, text: Theme.deep))
+    }
+}
+
+/// An agent's questions, held by the core until they are answered: tapping opens them as a sheet.
+struct QuestionBalloon: View {
+    let link: HostLink
+    let agent: UUID
+    let questions: [AgentQuestion]
+    @State private var reading = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(questions[0].question).font(Theme.Font.heading).foregroundStyle(Theme.onAccent)
+            Text(questions.count == 1 ? "Tap to answer." : "And \(questions.count - 1) more. Tap to answer.")
+                .font(Theme.Font.caption).foregroundStyle(Theme.onAccent)
+        }
+        .padding(12)
+        .frame(maxWidth: 320, alignment: .leading)
+        .background(Theme.deep, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { reading = true }
+        .sheet(isPresented: $reading) { QuestionSheet(link: link, agent: agent, questions: questions) }
+        #if DEBUG
+        // `-readQuestions YES`: opens the sheet as a tap would; `-answerQuestions <label>` then
+        // picks that option for every question and sends, after 8 s, for screenshots.
+        .task { if UserDefaults.standard.bool(forKey: "readQuestions") || DebugLaunch.value("answerQuestions") != nil { reading = true } }
+        #endif
+    }
+}
+
+/// An agent's questions at reading size: each with its options as full-width buttons and a
+/// field for an answer of one's own; Send answers them all, and the other button leaves them
+/// to the agent's terminal.
+struct QuestionSheet: View {
+    let link: HostLink
+    let agent: UUID
+    let questions: [AgentQuestion]
+    @State private var picked: [Int: Set<String>] = [:]
+    @State private var written: [Int: String] = [:]
+    @Environment(\.dismiss) private var dismiss
+
+    private var answers: [String: String] {
+        var result: [String: String] = [:]
+        for (index, question) in questions.enumerated() {
+            result[question.question] = question.answer(picked: picked[index] ?? [], written: written[index] ?? "")
+        }
+        return result
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let header = question.header {
+                            Text(header.uppercased()).font(Theme.Font.eyebrow).foregroundStyle(Theme.inkMuted)
+                        }
+                        Text(question.question).font(Theme.Font.title).foregroundStyle(Theme.ink)
+                        if question.multiSelect { Text("Pick any.").font(Theme.Font.caption).foregroundStyle(Theme.inkMuted) }
+                        ForEach(question.options, id: \.label) { option in
+                            let on = picked[index, default: []].contains(option.label)
+                            Button {
+                                withAnimation(.snappy) {
+                                    if question.multiSelect { picked[index, default: []].formSymmetricDifference([option.label]) } else { picked[index] = on ? [] : [option.label] }
+                                }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(option.label)
+                                    if let description = option.description { Text(description).font(Theme.Font.caption).opacity(0.85) }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(SolidButton(fill: on ? Theme.accent : Theme.surfaceDeep, text: on ? Theme.onAccent : Theme.ink))
+                            .accessibilityIdentifier("questionOption-\(option.label)")
+                        }
+                        TextField("Your own answer", text: Binding(get: { written[index] ?? "" }, set: { written[index] = $0 }))
+                            .font(Theme.Font.body)
+                            .padding(10)
+                            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous).stroke(Theme.inkMuted.opacity(0.4)))
+                    }
+                }
+                VStack(spacing: 10) {
+                    Button { send(answers) } label: { Text("Send").frame(maxWidth: .infinity) }
+                        .buttonStyle(SolidButton())
+                        .disabled(answers.isEmpty)
+                        .accessibilityIdentifier("questionsSend")
+                    Button { send(nil) } label: { Text("Answer in its terminal").frame(maxWidth: .infinity) }
+                        .buttonStyle(SolidButton(fill: Theme.surfaceDeep, text: Theme.ink))
+                    Text("The agent asks again in its terminal, where you answer it.").font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                }
+            }
+            .padding(20)
+        }
+        .background(Theme.surface)
+        .presentationDetents([.medium, .large])
+        .presentationCornerRadius(Theme.Radius.dialog)
+        #if DEBUG
+        .task {
+            guard let label = DebugLaunch.value("answerQuestions") else { return }
+            DebugTerm.log("questions: shown \(questions.map(\.question))")
+            for (index, question) in questions.enumerated() where question.options.contains(where: { $0.label == label }) { picked[index] = [label] }
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            DebugTerm.log("questions: answered \(answers)")
+            send(answers)
+        }
+        #endif
+    }
+
+    private func send(_ answers: [String: String]?) {
+        link.send(BoardSay.answerQuestions(agent, answers))
+        withAnimation(.snappy) { dismiss() }
     }
 }
 

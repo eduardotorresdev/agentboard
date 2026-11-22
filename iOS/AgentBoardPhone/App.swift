@@ -315,7 +315,8 @@ struct BrowseView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "hand.raised.fill").font(Theme.Font.label)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(banner.card.name) is waiting for you").font(Theme.Font.heading)
+                            let asks = banner.link.attention.contains { $0.id == banner.card.id && !($0.questions ?? []).isEmpty }
+                            Text(asks ? "\(banner.card.name) has a question for you" : "\(banner.card.name) is waiting for you").font(Theme.Font.heading)
                             Text(banner.more == 0 ? "Tap to open its board." : "And \(banner.more) more. Tap to open its board.")
                                 .font(Theme.Font.caption)
                         }

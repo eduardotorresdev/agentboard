@@ -61,6 +61,26 @@ struct Attention: Decodable, Identifiable, Equatable {
     let id: UUID
     let reason: Reason
     let context: String?
+    /// What the agent is asking with its question tool, while the core holds the call for an answer.
+    var questions: [AgentQuestion]? = nil
+}
+
+/// One question an agent asks (AskUserQuestion), as the core sends it.
+struct AgentQuestion: Decodable, Equatable {
+    struct Option: Decodable, Equatable { let label: String; var description: String? = nil }
+    let question: String
+    var header: String? = nil
+    let options: [Option]
+    var multiSelect = false
+
+    /// The answer the Mac sends for it: the option picked; the options checked (in the order
+    /// shown, then what was written) joined by commas; or what was written. Nil when empty.
+    func answer(picked: Set<String>, written: String) -> String? {
+        let own = written.trimmingCharacters(in: .whitespacesAndNewlines)
+        let checked = options.map(\.label).filter(picked.contains)
+        let answer = multiSelect ? (checked + (own.isEmpty ? [] : [own])).joined(separator: ", ") : own.isEmpty ? checked.first ?? "" : own
+        return answer.isEmpty ? nil : answer
+    }
 }
 
 struct Decision: Decodable, Identifiable, Equatable {
@@ -136,6 +156,13 @@ enum BoardSay {
     static func prompt(_ id: UUID, _ text: String) -> Data { json(["prompt": ["id": id.uuidString, "text": text]]) }
 
     static func dismissAttention(_ id: UUID) -> Data { json(["dismissAttention": ["_0": id.uuidString]]) }
+
+    /// The agent's questions answered, keyed by question text; nil leaves them to its terminal.
+    static func answerQuestions(_ id: UUID, _ answers: [String: String]?) -> Data {
+        var request: [String: Any] = ["id": id.uuidString]
+        if let answers { request["answers"] = answers }
+        return json(["answerQuestions": request])
+    }
 
     /// `answer`: "ok", "useRecommended", or a variant's letter.
     /// Takes a card off the board.
