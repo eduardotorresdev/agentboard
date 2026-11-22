@@ -1,0 +1,54 @@
+name: AgentBoardPhone
+options:
+  bundleIdPrefix: dev.agentboard
+  deploymentTarget:
+    iOS: "26.0"
+packages:
+  AgentBoard:
+    path: ..
+targets:
+  AgentBoardPhone:
+    type: application
+    platform: iOS
+    sources:
+      - AgentBoardPhone
+      # Shared with the Mac board as file references: the sealed channel and the core's framing.
+      # shortcut: AgentRuntime as a whole doesn't build for iOS yet (AppKit in AgentSession);
+      # link the package product instead once it does, and drop RuntimeStubs.swift.
+      - path: ../Sources/AgentRuntime/HostChannel.swift
+      - path: ../Sources/AgentRuntime/CoreSocket.swift
+      - path: ../Sources/AgentRuntime/CoreProtocol.swift
+      - path: ../Sources/AgentRuntime/DataFolder.swift
+    dependencies:
+      - package: AgentBoard
+        product: TerminalCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.agentboard.phone
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIUserInterfaceStyle: Light
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_CFBundleDisplayName: AgentBoard
+        CODE_SIGNING_ALLOWED: NO
+  AgentBoardPhoneTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [AgentBoardPhoneTests]
+    dependencies:
+      - target: AgentBoardPhone
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
+        BUNDLE_LOADER: $(TEST_HOST)
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/AgentBoardPhone.app/AgentBoardPhone
+schemes:
+  AgentBoardPhone:
+    build:
+      targets:
+        AgentBoardPhone: all
+    test:
+      targets: [AgentBoardPhoneTests]
