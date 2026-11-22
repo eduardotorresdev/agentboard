@@ -1,4 +1,8 @@
+#if canImport(AppKit)
 import AppKit
+#else
+import Foundation
+#endif
 import TerminalCore
 
 /// What to run for a session; built by `AgentStore` from an `AgentProvider`.
@@ -388,12 +392,14 @@ public final class AgentSession {
         if started { reportStatus() }
         if notify { scheduleChange() }
         if !notifications.isEmpty { onNotify?(notifications) }
+        #if canImport(AppKit)
         if let clipboard {
             DispatchQueue.main.async {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(clipboard, forType: .string)
             }
         }
+        #endif
     }
 
     private func exited(_ status: Int32?) {
