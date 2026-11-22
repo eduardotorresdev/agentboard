@@ -119,7 +119,7 @@ final class BrowserHost {
     /// AGENTBOARD_PLAYWRIGHT_MODULES: a `node_modules` holding this build's Playwright (another
     /// instance's), used in place so an isolated data folder doesn't download its own; WebKit
     /// comes from PLAYWRIGHT_BROWSERS_PATH when set. Nil when unset or another version.
-    nonisolated private static var reusablePlaywright: URL? {
+    nonisolated static var reusablePlaywright: URL? {
         guard let path = ProcessInfo.processInfo.environment["AGENTBOARD_PLAYWRIGHT_MODULES"] else { return nil }
         let modules = URL(fileURLWithPath: path)
         let manifest = modules.appendingPathComponent("playwright-core/package.json")
@@ -223,11 +223,20 @@ final class BrowserHost {
         try? files.removeItem(at: installed)
         try files.copyItem(at: script, to: installed)
 
-        let loginPath = Orchestrator.loginShellPath()
-        let node = try await findOrInstallNode(searchPath: loginPath, progress: progress)
-        let path = node.deletingLastPathComponent().path + ":" + loginPath
-
+        // Nothing is installed when an existing Playwright was named, nor under tests: an installer
+        // run from a test once wrote into the user's Playwright cache and pruned it.
+        let environment = ProcessInfo.processInfo.environment
         let reused = reusablePlaywright
+        if environment["AGENTBOARD_PLAYWRIGHT_MODULES"] != nil, reused == nil {
+            throw Failure(message: "AGENTBOARD_PLAYWRIGHT_MODULES holds no Playwright \(playwrightVersion); nothing was installed.")
+        }
+        if reused == nil, environment["AGENTBOARD_TEST"] == "1" {
+            throw Failure(message: "Tests don't install Playwright: set AGENTBOARD_PLAYWRIGHT_MODULES to an existing one.")
+        }
+
+        let loginPath = Orchestrator.loginShellPath()
+        let node = try await findOrInstallNode(searchPath: loginPath, mayInstall: reused == nil, progress: progress)
+        let path = node.deletingLastPathComponent().path + ":" + loginPath
         let modules = reused ?? folder.appendingPathComponent("node_modules")
         let manifest = modules.appendingPathComponent("playwright-core/package.json")
         let current = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])?["version"] as? String
@@ -251,7 +260,7 @@ final class BrowserHost {
     }
 
     /// Node 18 or newer from `searchPath`, else the copy this app installed, else a fresh one.
-    nonisolated private static func findOrInstallNode(searchPath: String, progress: @escaping @Sendable (String) -> Void) async throws -> URL {
+    nonisolated private static func findOrInstallNode(searchPath: String, mayInstall: Bool, progress: @escaping @Sendable (String) -> Void) async throws -> URL {
         // The process's own PATH too: a run with an isolated home has a login shell without the user's.
         let inherited = ProcessInfo.processInfo.environment["PATH"] ?? ""
         let candidates = (searchPath + ":" + inherited).split(separator: ":").map { URL(fileURLWithPath: String($0)).appendingPathComponent("node") }
@@ -261,6 +270,7 @@ final class BrowserHost {
                 return node
             }
         }
+        guard mayInstall else { throw Failure(message: "Node 18 or newer wasn't found, and this run installs nothing.") }
         progress(L("Downloading Node…"))
         try await installNode(into: own.deletingLastPathComponent().deletingLastPathComponent())
         return own

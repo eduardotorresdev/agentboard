@@ -145,7 +145,7 @@ struct StreamTests {
     /// A real browser card through the real sidecar (Playwright's WebKit, reused from another
     /// install: AGENTBOARD_PLAYWRIGHT_MODULES), streamed over the loopback: measures frames a
     /// second and input-to-picture latency, then kills the sidecar and expects the stream back.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_PLAYWRIGHT_MODULES"] != nil), .timeLimit(.minutes(3)))
+    @Test(.enabled(if: BrowserHost.reusablePlaywright != nil, "needs AGENTBOARD_PLAYWRIGHT_MODULES with this build's Playwright"), .timeLimit(.minutes(3)))
     @MainActor func aBrowserStreamLivesThroughItsSidecarRestarting() async throws {
         let browsers = BrowserStore(database: nil)
         let record = browsers.add(.desktop, to: NSTemporaryDirectory(), at: .zero, url: "about:blank")
@@ -215,6 +215,21 @@ struct StreamTests {
         let back = try #require(again.1, "no frame after the sidecar restarted")
         print("stream-live browser: back \(back.timeIntervalSince(killed)) s after the sidecar was killed")
         client.close()
+    }
+
+    /// Tests never run an installer: with no existing Playwright named, the sidecar refuses to
+    /// start rather than download Node, Playwright or WebKit.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_PLAYWRIGHT_MODULES"] == nil))
+    @MainActor func aTestNeverInstallsPlaywright() async {
+        let host = BrowserHost()
+        do {
+            _ = try await host.request("devices", [:])
+            Issue.record("the sidecar started")
+        } catch {
+            #expect(error.localizedDescription.contains("Tests don't install Playwright"))
+        }
+        #expect(!FileManager.default.fileExists(atPath: BrowserHost.folder.appendingPathComponent("Host/node_modules").path))
+        host.stop()
     }
 
     /// A real iOS Simulator (a device made for the test, booted headless by the real

@@ -28,6 +28,8 @@ fingerprint() {
         defaults read "$domain" 2>/dev/null | grep -E "/private/tmp|/var/folders|/tmp/" | sed "s|^|$domain: |"
     done
     security dump-keychain 2>/dev/null | grep -c "Claude Code-credentials"
+    # Playwright's browsers: an installer run against them once added a link and pruned a build.
+    (cd "$HOME/Library/Caches/ms-playwright" 2>/dev/null && find . -type f -print0 | sort -z | xargs -0 stat -f "%N %z %m" | shasum)
 }
 
 NO_HOME=false

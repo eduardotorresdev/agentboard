@@ -103,3 +103,9 @@ round trip through the real encoder. Two live tests run only when asked, through
   booted headless, streamed, then shut down and deleted.
 
 Both print `stream-live …` lines with the load average they ran under.
+
+No test runs an installer against the real home. Under `AGENTBOARD_TEST=1`, or with
+`AGENTBOARD_PLAYWRIGHT_MODULES` set, the browser sidecar installs nothing (no Node, no npm, no
+`playwright install`): it reuses what it was given or refuses to start, and the live test is
+skipped. `scripts/test-safe` and `scripts/run-safe` fingerprint `~/Library/Caches/ms-playwright`
+with the other real data.
