@@ -442,8 +442,8 @@ struct Rig {
     let list = text(await tools.call("host_list", arguments: [:], caller: caller.id))
     #expect(list.contains("This Mac") && list.contains("the host you run on"))
     #expect(list.contains("builder") && list.contains("0b6f0d6e-5f0a-4a55-9a37-0d5b8f1c2e11") && list.contains("online"))
-    // An online host this board wasn't connected to is connected to for its stats, and the list says when it has none.
-    #expect(rig.hosts[rig.host] != nil && list.contains("stats: not connected"))
+    // An online host this board wasn't connected to is connected to for its stats (the Swift core reports them).
+    #expect(rig.hosts[rig.host] != nil && list.contains("CPU ") && !list.contains("stats: not connected"))
     #expect(list.contains("laptop") && list.contains("offline"))
 
     #expect(await tools.call("worktree_create", arguments: [:], caller: caller.id).isError)
