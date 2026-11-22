@@ -40,7 +40,7 @@ struct Host: Decodable, Identifiable, Hashable {
 /// The account server (docs/hosts.md, "Account server").
 struct AccountServer {
     static let url = URL(string: ProcessInfo.processInfo.environment["AGENTBOARD_SERVER"]
-        ?? "https://agentboard-account.agentboard-account-server.workers.dev")!
+        ?? "https://agentboard.eduardotorres.dev")!
 
     var token: String?
 

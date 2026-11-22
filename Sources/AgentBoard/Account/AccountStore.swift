@@ -194,7 +194,7 @@ final class AccountStore {
     @ObservationIgnored private var refreshing: Task<Void, Never>?
 
     /// The deployed account server.
-    static let deployedServer = URL(string: "https://agentboard-account.agentboard-account-server.workers.dev")!
+    static let deployedServer = URL(string: "https://agentboard.eduardotorres.dev")!
     static let serverKey = "accountServer"
 
     /// `AGENTBOARD_SERVER`, else the `accountServer` preference, else the deployed server.
