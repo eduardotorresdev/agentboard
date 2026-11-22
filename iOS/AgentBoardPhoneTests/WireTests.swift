@@ -54,6 +54,29 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(list.map(\.branch), ["main", nil, "dev"])
     }
 
+    func testGroupsWorktreesByOrganizationThenProjectAcrossHosts() {
+        let work = UUID(), home = UUID()
+        let browse = Browse(
+            organizations: [Organization(id: work, name: "Work"), Organization(id: home, name: "Home", color: 1)],
+            worktrees: [
+                Worktree(path: "/a/app", branch: "main", project: "app", organization: work, host: "h1"),
+                Worktree(path: "/b/app", branch: "main", project: "app", organization: work, host: "h2"),
+                Worktree(path: "/a/api", branch: "dev", project: "api", organization: work, host: "h1"),
+                Worktree(path: "/a/blog", project: "blog", organization: home, host: "h1"),
+                Worktree(path: "/b/loose", project: "loose", host: "h2"),
+                Worktree(path: "/b/stray", organization: UUID(), host: "h2"),
+            ])
+        let groups = OrganizationGroup.group(browse)
+        XCTAssertEqual(groups.map(\.organization.name), ["Work", "Home", "Other"])
+        XCTAssertEqual(groups[0].projects.map(\.name), ["api", "app"])
+        // The same branch on two hosts stays two worktrees.
+        XCTAssertEqual(groups[0].projects[1].worktrees.map(\.host), ["h1", "h2"])
+        XCTAssertEqual(Set(groups[0].projects[1].worktrees.map(\.id)).count, 2)
+        XCTAssertEqual(groups[1].projects.map(\.name), ["blog"])
+        XCTAssertNil(groups[2].organization.id)
+        XCTAssertEqual(groups[2].projects.map(\.name), ["loose", "Other folders"])
+    }
+
     func testNewCardNamesAreUnique() {
         XCTAssertEqual(HostLink.unique("Post-it", among: ["post-it", "Post-it 2"]), "Post-it 3")
         XCTAssertEqual(HostLink.unique("npm", among: []), "npm")
