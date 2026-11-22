@@ -192,6 +192,7 @@ private let attachedCard: UUID? = {
 /// screenshot. Needs the Android SDK and an emulator a board started, already running; skipped
 /// otherwise. It leaves that emulator running, as it found it: nothing is booted or left behind.
 @Suite(.enabled(if: androidSDK != nil, "No Android SDK with an arm64 system image."),
+       .enabled(if: ProcessInfo.processInfo.environment["AGENTBOARD_EMULATOR_TESTS"] == "1", "Types into a running board emulator: set AGENTBOARD_EMULATOR_TESTS=1 with one attached (adb devices) to run it."),
        .enabled(if: attachedCard != nil, "No board emulator is running (adb devices): this test drives one already attached and never boots one."),
        .serialized)
 @MainActor
