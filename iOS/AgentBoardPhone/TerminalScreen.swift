@@ -44,7 +44,7 @@ struct TerminalPage: View {
     var body: some View {
         VStack(spacing: 0) {
             MetalTerminal(session: link.session(card.id), showsCursor: true)
-                .padding(8)
+                .padding(12)  // the Mac card's inset
                 .contentShape(Rectangle())
                 .onTapGesture { typing.toggle() }
                 .background(KeyCatcher(active: $typing) { text in
@@ -69,7 +69,7 @@ struct TerminalPage: View {
         .task {
             link.open(card.id)
             while !Task.isCancelled {
-                let now = link.session(card.id).state == .stopped
+                let now = ![.running, .starting].contains(link.session(card.id).state)
                 if now != stopped { withAnimation(.smooth) { stopped = now } }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -79,8 +79,8 @@ struct TerminalPage: View {
         .task {
             guard let text = DebugLaunch.value("typeText") else { return }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
-            // A stopped agent is started first, as tapping Start would.
-            if link.session(card.id).state == .stopped {
+            // An agent not running is started first, as tapping Start would.
+            if ![.running, .starting].contains(link.session(card.id).state) {
                 link.send(BoardSay.restart(card.id))
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
             }
@@ -126,7 +126,7 @@ struct TerminalPage: View {
             Button {
                 link.send(BoardSay.prompt(card.id, prompt))
                 prompt = ""
-            } label: { Image(systemName: "arrow.up").font(.system(size: 15, weight: .bold)) }
+            } label: { Image(systemName: "arrow.up").font(Theme.Font.label) }
                 .buttonStyle(.glassProminent)
                 .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Send")

@@ -125,6 +125,14 @@ import UIKit
 
     func send(_ request: Data) { client?.send(service: request) }
 
+    /// Sends an add, and shows it at once: the core tells every board but the sender.
+    private func add(_ request: Data, as event: String) {
+        send(request)
+        guard let object = try? JSONSerialization.jsonObject(with: request) as? [String: Any], let body = object.values.first,
+              let echoed = try? JSONSerialization.data(withJSONObject: [event: body]) else { return }
+        serviced(echoed)
+    }
+
     /// The organization the worktree's cards belong to, so a new one lands on the same board.
     private func organization(in worktree: String) -> String? {
         rawCards.values.first { $0["worktree"] as? String == worktree }?["organization"] as? String
@@ -141,9 +149,9 @@ import UIKit
     func addAgent(_ provider: any AgentProvider, to worktree: String) {
         let name = Self.unique(provider.title, among: cards(in: worktree).map(\.name))
         let id = UUID()
-        send(BoardSay.addCard(id, worktree: worktree, providerID: provider.id, name: name,
+        add(BoardSay.addCard(id, worktree: worktree, providerID: provider.id, name: name,
                               frame: CGRect(origin: freeSpot(in: worktree), size: CGSize(width: 640, height: 420)),
-                              organization: organization(in: worktree)))
+                              organization: organization(in: worktree)), as: "cardAdded")
         send(BoardSay.open(id, cols: 80, rows: 24, start: true))
     }
 
@@ -151,9 +159,9 @@ import UIKit
         let words = command.split(separator: " ").filter { !$0.contains("=") }
         let base = words.first.map { ($0 as NSString).lastPathComponent } ?? "terminal"
         let id = UUID()
-        send(BoardSay.addCard(id, worktree: worktree, providerID: "runner", name: Self.unique(base, among: cards(in: worktree).map(\.name)),
+        add(BoardSay.addCard(id, worktree: worktree, providerID: "runner", name: Self.unique(base, among: cards(in: worktree).map(\.name)),
                               frame: CGRect(origin: freeSpot(in: worktree), size: CGSize(width: 600, height: 340)),
-                              command: command, organization: organization(in: worktree)))
+                              command: command, organization: organization(in: worktree)), as: "cardAdded")
         send(BoardSay.open(id, cols: 75, rows: 20, start: true))
     }
 
@@ -165,8 +173,8 @@ import UIKit
 
     func addPostIt(_ text: String, to worktree: String) {
         let name = Self.unique("Post-it", among: postIts.filter { $0.worktree == worktree }.map(\.name))
-        send(BoardSay.addPostIt(UUID(), worktree: worktree, name: name, frame: CGRect(origin: freeSpot(in: worktree), size: CGSize(width: 340, height: 320)),
-                                text: text, organization: organization(in: worktree)))
+        add(BoardSay.addPostIt(UUID(), worktree: worktree, name: name, frame: CGRect(origin: freeSpot(in: worktree), size: CGSize(width: 340, height: 320)),
+                                text: text, organization: organization(in: worktree)), as: "postItAdded")
     }
 
     /// `base`, or `base 2`, `base 3`…, as `AgentRecord.uniqueName` picks.
