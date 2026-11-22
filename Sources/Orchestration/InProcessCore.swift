@@ -12,13 +12,20 @@ public final class InProcessCore {
     private let orchestrator: Orchestrator
 
     public init(database: URL? = nil) throws {
-        socketPath = (NSTemporaryDirectory() as NSString).appendingPathComponent("agentboard-local-\(getpid()).sock")
+        socketPath = Self.socketPath(ProcessInfo.processInfo.environment)
         server = CoreServer(socketPath: socketPath, idleTimeout: .greatestFiniteMagnitude, queue: .main)
         // Its key, port and media live beside the database it was given, never in the user's folder.
         orchestrator = Orchestrator(server: server, database: database,
                                     dataFolder: database?.deletingLastPathComponent() ?? DataFolder.url)
         server.service = orchestrator
         try server.start()
+    }
+
+    /// `AGENTBOARD_CORE_SOCKET` when set, as the real core takes it (a host relay is pointed at
+    /// it); otherwise a socket of this process's own, so it never meets the real core's.
+    nonisolated static func socketPath(_ environment: [String: String]) -> String {
+        if let path = environment["AGENTBOARD_CORE_SOCKET"], !path.isEmpty { return path }
+        return (NSTemporaryDirectory() as NSString).appendingPathComponent("agentboard-local-\(getpid()).sock")
     }
 
     deinit {
