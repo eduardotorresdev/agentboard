@@ -162,9 +162,38 @@ private let androidSDK: String? = {
     return nil
 }()
 
-/// An emulator on this Mac through the whole card path: boot, first frame, snapshot, typing,
-/// screenshot, close. Needs the Android SDK and an arm64 system image; skipped without them.
-@Suite(.enabled(if: androidSDK != nil, "No Android SDK with an arm64 system image."), .serialized)
+/// A card's emulator already running on this Mac (`adb devices`), as a card id that reattaches to
+/// it (a card's AVD is named after its id's first 8 hex digits). Never boots one.
+private let attachedCard: UUID? = {
+    guard let sdk = androidSDK else { return nil }
+    func adb(_ arguments: [String]) -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: sdk + "/platform-tools/adb")
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return "" }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+    for line in adb(["devices"]).split(separator: "\n") {
+        let fields = line.split(whereSeparator: \.isWhitespace)
+        guard fields.count == 2, fields[0].hasPrefix("emulator-"), fields[1] == "device" else { continue }
+        let name = adb(["-s", String(fields[0]), "shell", "getprop", "ro.boot.qemu.avd_name"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name.hasPrefix("agentboard_"), name.count == 19 else { continue }
+        if let id = UUID(uuidString: name.dropFirst(11).uppercased() + "-0000-4000-8000-000000000000") { return id }
+    }
+    return nil
+}()
+
+/// A card's emulator on this Mac through the card path: reattach, first frame, snapshot, typing,
+/// screenshot. Needs the Android SDK and an emulator a board started, already running; skipped
+/// otherwise. It leaves that emulator running, as it found it: nothing is booted or left behind.
+@Suite(.enabled(if: androidSDK != nil, "No Android SDK with an arm64 system image."),
+       .enabled(if: attachedCard != nil, "No board emulator is running (adb devices): this test drives one already attached and never boots one."),
+       .serialized)
 @MainActor
 struct AndroidEmulatorTests {
     @Test(.timeLimit(.minutes(10))) func drivesAnEmulator() async throws {
@@ -174,15 +203,11 @@ struct AndroidEmulatorTests {
         var content: SimulatorScreen.Content?
         var size: CGSize?
         emulators.onScreen = { _, shown, screen in content = shown; size = screen }
-        let record = SimulatorRecord(id: UUID(), worktree: "/w", name: "Pixel 7", udid: nil, deviceType: "Pixel 7", frame: .zero, platform: .android)
-        let avd = (ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()) + "/.android/avd/\(AndroidEmulators.avdName(for: record.id)).avd"
-        var closed = false
-        defer { if !closed { Task { await emulators.close(record, deleting: true) } } }
+        let record = SimulatorRecord(id: try #require(attachedCard), worktree: "/w", name: "Pixel 7", udid: nil, deviceType: "Pixel 7", frame: .zero, platform: .android)
 
         let opened = try await emulators.open(record, pixels: 1200)
         #expect(opened.address.hasPrefix("emulator-"))
         #expect(opened.persistent == AndroidEmulators.avdName(for: record.id))
-        #expect(FileManager.default.fileExists(atPath: avd))
         guard case .layer? = content else { Issue.record("no video layer"); return }
         #expect(size == CGSize(width: 1080, height: 2400))
 
@@ -234,9 +259,5 @@ struct AndroidEmulatorTests {
             typed = try await emulators.snapshot(record.id).contains { ($0["label"] as? String ?? "").contains("Clock é") || ($0["value"] as? String ?? "").contains("Clock é") }
         }
         #expect(typed, "the pasted text isn't in the search field")
-
-        await emulators.close(record, deleting: true)
-        closed = true
-        #expect(!FileManager.default.fileExists(atPath: avd))
     }
 }
