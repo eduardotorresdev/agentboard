@@ -202,7 +202,7 @@ final class HostStores {
             }
         }
         account.onSignOut = { [weak self] in
-            self?.macHost.stop()
+            self?.macHost.signOut()
             self?.remote.values.forEach { $0.quit() }
             self?.bulk.values.forEach { $0.client.disconnect() }
             self?.bulk = [:]

@@ -265,7 +265,7 @@ struct AccountMenu: View {
         .accessibilityAddTraits(host.isWanted ? .isSelected : [])
         if let signIn = host.signIn {
             MenuAction(title: L("Confirm code \(signIn.code)"),
-                       caption: L("Opens the sign-in page: this Mac signs in once more, as a host.")) {
+                       caption: L("The host signs in on its own, apart from this board: open the page and enter this code.")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(signIn.code, forType: .string)
                 NSWorkspace.shared.open(signIn.page)

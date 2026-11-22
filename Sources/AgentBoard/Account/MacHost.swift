@@ -30,7 +30,14 @@ final class MacHost {
     @ObservationIgnored private var watching: Task<Void, Never>?
 
     /// The relay keeps its identity, its account session and its boards here (`agentboard relay`).
-    private static var folder: URL { DataFolder.url.appendingPathComponent("host") }
+    nonisolated private static var folder: URL { DataFolder.url.appendingPathComponent("host") }
+
+    /// The id this Mac registered with as a host, once it did.
+    nonisolated static var hostID: UUID? {
+        struct Config: Decodable { var id: UUID }
+        let data = try? Data(contentsOf: folder.appendingPathComponent("host.json"))
+        return data.flatMap { try? JSONDecoder().decode(Config.self, from: $0) }?.id
+    }
     private static var executable: URL? { Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("agentboard") }
 
     func setWanted(_ wanted: Bool, signedIn: Bool) {
@@ -95,12 +102,25 @@ final class MacHost {
         waiting = []
     }
 
+    /// Signing out of the account: the host signs out too, forgetting its boards, and leaves
+    /// the account's hosts.
+    func signOut() {
+        stop()
+        guard FileManager.default.fileExists(atPath: Self.folder.appendingPathComponent("host.json").path) else { return }
+        tool(["logout"])
+    }
+
     /// Lets the board holding `key` use this Mac, as `agentboard trust` at its terminal does.
     func approve(_ board: Waiting) {
+        tool(["trust", board.key])
+    }
+
+    /// `agentboard` on the host's folder, as at a host's terminal.
+    private func tool(_ arguments: [String]) {
         guard let executable = Self.executable else { return }
         let process = Process()
         process.executableURL = executable
-        process.arguments = ["trust", board.key]
+        process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
         environment["AGENTBOARD_HOME"] = Self.folder.path
         process.environment = environment
