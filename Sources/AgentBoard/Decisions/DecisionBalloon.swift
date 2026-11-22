@@ -169,6 +169,8 @@ struct DecisionBalloon: View {
                     } else {
                         unavailable(L("This image is no longer on the board."))
                     }
+                case .diagram(let svg):
+                    DiagramView(svg: svg).padding(12)
                 case .browser(let id), .video(let id):
                     unavailable(L("The evidence is the card “\(store.image(id)?.name ?? L("Browser"))”, connected to this agent."))
                 }

@@ -17,6 +17,7 @@ struct Zoomed<Content: View>: View {
 
     var body: some View {
         content
+            .environment(\.boardZoom, host.zoom)
             .frame(width: host.size.width, height: host.size.height)
             .scaleEffect(host.zoom, anchor: .topLeading)
             .frame(width: host.size.width * host.zoom, height: host.size.height * host.zoom, alignment: .topLeading)

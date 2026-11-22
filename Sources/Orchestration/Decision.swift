@@ -1,3 +1,4 @@
+import AgentRuntime
 import Foundation
 
 /// Something an agent shows the developer and asks about: a few cards of evidence that end in
@@ -18,6 +19,8 @@ public struct Decision: Codable, Equatable, Identifiable, Sendable {
         case image(before: UUID?, after: UUID)
         case browser(id: UUID)
         case video(id: UUID)
+        /// An SVG the agent drew, checked by `SVGDiagram` (what passes is what gets drawn).
+        case diagram(svg: String)
     }
 
     /// A doubt at an exact place of the evidence, `x` and `y` from 0 to 1 from its top left.
@@ -154,6 +157,7 @@ struct DecisionDraft: Equatable {
         /// One of `kinds`.
         var kind: String
         var before: String?
+        /// The image to evaluate, or a diagram's SVG.
         var target: String
         var reference: String?
         var pins: [Decision.Pin]
@@ -171,8 +175,8 @@ struct DecisionDraft: Equatable {
     static let maxLabelWords = 3
     static let variantCount = 2...4
     static let families = ["surface", "flow", "foundation"]
-    // shortcut: only images have a renderer in the balloon; add browser and video here when they get one.
-    static let kinds = ["image"]
+    // shortcut: only images and diagrams have a renderer in the balloon; add browser and video here when they get one.
+    static let kinds = ["image", "diagram"]
 
     /// The draft in a `decision_open` call's arguments, or why it is refused.
     init(_ arguments: [String: Any]) throws {
@@ -208,10 +212,24 @@ struct DecisionDraft: Equatable {
             guard let evidence = card["evidence"] as? [String: Any], let kind = text(evidence["type"]), Self.kinds.contains(kind) else {
                 throw refuse("Card \(number) has no `evidence`: an object with `type` (\(Self.kinds.joined(separator: ", "))) and the board element it shows.")
             }
-            guard let target = text(evidence["after"]) else {
-                throw refuse("Card \(number): give the image to evaluate in `after` (and the one it replaces in `before`).")
+            let target: String
+            let before: String?
+            if kind == "diagram" {
+                guard let svg = text(evidence["svg"]) else {
+                    throw refuse("Card \(number): give the diagram's SVG in `svg`.")
+                }
+                do { _ = try SVGDiagram(svg) } catch let refused as SVGDiagram.Refused {
+                    throw refuse("Card \(number): the diagram can't be drawn. \(refused.reason)")
+                }
+                target = svg
+                before = nil
+            } else {
+                guard let after = text(evidence["after"]) else {
+                    throw refuse("Card \(number): give the image to evaluate in `after` (and the one it replaces in `before`).")
+                }
+                target = after
+                before = text(evidence["before"])
             }
-            let before = text(evidence["before"])
             let reference = text(card["reference"])
             guard before != nil || reference != nil else {
                 throw refuse("Card \(number) is evaluated in a vacuum: give `before`, or a `reference` line with the justification or the alternative. Precedent is not a justification.")

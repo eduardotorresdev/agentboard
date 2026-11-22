@@ -66,8 +66,9 @@ final class DecisionTools: ToolProvider {
                     "cards": ["type": "array", "description": "1 to \(DecisionDraft.maxCards) cards, one idea each.", "items": [
                         "type": "object", "properties": [
                             "claim": ["type": "string", "description": "What the evidence shows, e.g. `The screen ended up like this`."],
-                            "evidence": ["type": "object", "description": "An image on the board, \(element).", "properties": [
+                            "evidence": ["type": "object", "description": "An image on the board, \(element); or a diagram you draw as SVG.", "properties": [
                                 "type": ["type": "string", "enum": DecisionDraft.kinds],
+                                "svg": ["type": "string", "description": "A diagram's SVG (type diagram): the subset decision_guide describes, at most 64 KB."],
                                 "after": ["type": "string", "description": "The image to evaluate (put a screenshot on the board with image_create)."],
                                 "before": ["type": "string", "description": "The image it replaces, shown behind a draggable divider."],
                             ] as [String: Any], "required": ["type"]] as [String: Any],
@@ -145,6 +146,10 @@ final class DecisionTools: ToolProvider {
         } catch { return .error("\(error)") }
         var cards: [Decision.Card] = []
         for (index, card) in draft.cards.enumerated() {
+            if card.kind == "diagram" {
+                cards.append(Decision.Card(claim: card.claim, evidence: .diagram(svg: card.target), reference: card.reference, pins: card.pins))
+                continue
+            }
             let connected = store.bus.peers(of: agent.id, kind: .image)
             func find(_ name: String) -> Result<UUID, DecisionDraft.Refused> {
                 if let found = findElement(name, among: connected) { return .success(found.id) }

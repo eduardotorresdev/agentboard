@@ -44,7 +44,7 @@ private func refusal(_ change: (inout [String: Any]) -> Void) -> String {
     #expect(refusal { $0["cards"] = Array(repeating: card, count: 7) }.contains("at most 6 cards; you gave 7"))
     #expect(refusal { $0["cards"] = [[String: Any]]() }.contains("Give `cards`"))
     #expect(refusal { $0["cards"] = [card.merging(["reference": " "]) { $1 }] }.contains("evaluated in a vacuum"))
-    #expect(refusal { $0["cards"] = [["claim": "A page", "evidence": ["type": "browser"], "reference": "New"]] }.contains("Card 1 has no `evidence`: an object with `type` (image)"))
+    #expect(refusal { $0["cards"] = [["claim": "A page", "evidence": ["type": "browser"], "reference": "New"]] }.contains("Card 1 has no `evidence`: an object with `type` (image, diagram)"))
     #expect(refusal { $0["family"] = "layout" }.contains("Give `family`"))
     #expect(refusal { $0["cards"] = [card.merging(["pins": [["x": 1.5, "y": 0.2, "question": "Here?"]]]) { $1 }] }.contains("a pin takes"))
     #expect(refusal { $0["ask"] = ["question": "Which?", "variants": [["name": "Only one"]]] }.contains("2 to 4 variants"))
@@ -53,6 +53,26 @@ private func refusal(_ change: (inout [String: Any]) -> Void) -> String {
     #expect(refusal { $0["intent"] = nil }.contains("Give `intent`"))
     #expect(refusal { $0["family"] = nil }.contains("Give `family`"))
     #expect(refusal { $0["framing"] = "Two\nlines" }.contains("Give `framing`"))
+}
+
+private let guideDiagram = (try? String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    .appendingPathComponent("../../core/fixtures/diagrams/guide.svg"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+/// A diagram is checked by the renderer's own parser: the guide's example passes, and what the
+/// renderer can't draw is refused with its reason.
+@Test func aDiagramIsCheckedByWhatDrawsIt() throws {
+    let diagram: [String: Any] = ["claim": "The answer goes to the core", "evidence": ["type": "diagram", "svg": guideDiagram], "reference": "Before, the Mac answered alone."]
+    let draft = try DecisionDraft(arguments { $0["cards"] = [diagram] })
+    #expect(draft.cards.first?.kind == "diagram" && draft.cards.first?.target == guideDiagram)
+    #expect(refusal { $0["cards"] = [["claim": "x", "evidence": ["type": "diagram"], "reference": "r"]] }.contains("give the diagram's SVG in `svg`"))
+    #expect(refusal { $0["cards"] = [["claim": "x", "evidence": ["type": "diagram", "svg": "<svg viewBox='0 0 9 9'><image/></svg>"], "reference": "r"]] }
+        .contains("Card 1: the diagram can't be drawn. `<image>` isn't drawn"))
+    #expect(refusal { $0["cards"] = [["claim": "x", "evidence": ["type": "diagram", "svg": guideDiagram]]] }.contains("evaluated in a vacuum"))
+}
+
+/// The guide shows one complete diagram, and it is the fixture that passes above.
+@Test func theGuidesDiagramIsTheFixture() {
+    #expect(!guideDiagram.isEmpty && DecisionTools.guide.contains(guideDiagram.trimmingCharacters(in: .newlines)))
 }
 
 @Test @MainActor func theGuideIsTheSkillsSection() {
@@ -117,6 +137,15 @@ struct DecisionTests {
         link.send(.answerDecision(id: decision.id, answer: .ok))
         try await waitUntil { core.orchestrator.decisions.isEmpty }
         try await waitUntil { core.screen(a.id).contains("OK. Carry on.") }
+
+        // A diagram needs nothing on the board: its SVG is the evidence.
+        let drawn = try await call("decision_open", arguments {
+            $0["cards"] = [["claim": "The answer goes to the core", "evidence": ["type": "diagram", "svg": guideDiagram], "reference": "Before, the Mac answered alone."]]
+        }, as: a.id, on: core)
+        #expect(!drawn.isError, "\(drawn.text)")
+        #expect(core.orchestrator.decisions.first?.cards.map(\.evidence) == [.diagram(svg: guideDiagram)])
+        link.send(.answerDecision(id: try #require(core.orchestrator.decisions.first).id, answer: .ok))
+        try await waitUntil { core.orchestrator.decisions.isEmpty }
         try await waitUntil { inbox.events.contains { if case .decisions(let list) = $0 { list.first?.state == .closed && list.first?.answer == .ok } else { false } } }
         #expect(inbox.events.contains { if case .decisions(let list) = $0 { list.first?.state == .closed && list.first?.answer == .ok } else { false } })
         #expect(core.orchestrator.attention.isEmpty)
