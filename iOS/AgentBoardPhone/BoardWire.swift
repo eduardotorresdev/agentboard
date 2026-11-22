@@ -121,6 +121,11 @@ enum BoardSay {
     static func dismissAttention(_ id: UUID) -> Data { json(["dismissAttention": ["_0": id.uuidString]]) }
 
     /// `answer`: "ok", "useRecommended", or a variant's letter.
+    /// Takes a card off the board.
+    static func removeCard(_ id: UUID) -> Data {
+        json(["removeCard": ["_0": id.uuidString]])
+    }
+
     /// Starts a stopped agent again, or restarts a runner, as the Mac's restart does.
     static func restart(_ id: UUID) -> Data {
         json(["restart": ["id": id.uuidString]])

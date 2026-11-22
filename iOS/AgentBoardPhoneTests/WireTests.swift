@@ -85,4 +85,10 @@ final class WireTests: XCTestCase {
         let object = try JSONSerialization.jsonObject(with: BoardSay.restart(id)) as? [String: [String: String]]
         XCTAssertEqual(object, ["restart": ["id": id.uuidString]])
     }
+
+    func testRemoveCardAsSwiftEncodesIt() throws {
+        let id = UUID()
+        let object = try JSONSerialization.jsonObject(with: BoardSay.removeCard(id)) as? [String: [String: String]]
+        XCTAssertEqual(object, ["removeCard": ["_0": id.uuidString]])
+    }
 }

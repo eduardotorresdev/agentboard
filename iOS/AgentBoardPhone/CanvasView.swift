@@ -46,11 +46,14 @@ struct CanvasView: View {
         GeometryReader { geometry in
             let bounds = (cards.map(\.frame) + Array(others.values)).reduce(CGRect.null) { $0.union($1) }
             let board = bounds.isNull ? CGRect(x: 0, y: 0, width: 1, height: 1) : bounds.insetBy(dx: -40, dy: -40)
-            // Starts with the whole board in view.
-            let fit = min(1, geometry.size.width / board.width, geometry.size.height / board.height)
+            // Starts with the terminal cards in view (the whole board when there are none): a
+            // long column of screenshots shouldn't shrink the agents to specks.
+            let cardBounds = cards.map(\.frame).reduce(CGRect.null) { $0.union($1) }
+            let focus = cardBounds.isNull ? board : cardBounds.insetBy(dx: -40, dy: -40)
+            let fit = min(1, geometry.size.width / focus.width, geometry.size.height / focus.height)
             let scale = zoom == 0 ? fit : zoom
-            let origin = CGPoint(x: board.midX * scale - geometry.size.width / 2 - offset.width,
-                                 y: board.midY * scale - geometry.size.height / 2 - offset.height)
+            let origin = CGPoint(x: focus.midX * scale - geometry.size.width / 2 - offset.width,
+                                 y: focus.midY * scale - geometry.size.height / 2 - offset.height)
             // What the screen shows, in board points: only cards there draw live.
             let visible = CGRect(x: origin.x / scale, y: origin.y / scale, width: geometry.size.width / scale, height: geometry.size.height / scale)
             let frame = { (card: Card) in dragging?.id == card.id ? dragging!.frame : card.frame }
@@ -132,6 +135,7 @@ struct CanvasView: View {
         // as a finger would, for measuring without touching the simulator.
         .task {
             DebugPerf.shared.start()
+            await debugTestBoard()
             if let value = DebugLaunch.value("zoom"), let scale = Double(value) { zoom = scale; rasterZoom = scale }
             guard UserDefaults.standard.bool(forKey: "autoPan") else { return }
             let start = Date()
@@ -196,6 +200,40 @@ struct CanvasView: View {
         }
     }
 }
+
+#if DEBUG
+extension CanvasView {
+    /// A throwaway board on the host, only for worktrees named `phone-test-…`:
+    /// `-testAgent YES` makes the folder a git repository if it isn't one, adds an agent card
+    /// when there is none and opens it; `-removeTest YES` takes its cards off and deletes the folder.
+    func debugTestBoard() async {
+        let path = worktree.path
+        guard (path as NSString).lastPathComponent.hasPrefix("phone-test-") else { return }
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "testAgent") || defaults.bool(forKey: "testRunner") || defaults.bool(forKey: "removeTest") else { return }
+        while link.phase != .connected { try? await Task.sleep(nanoseconds: 300_000_000) }
+        if defaults.bool(forKey: "removeTest") {
+            for card in link.cards(in: path) { link.send(BoardSay.removeCard(card.id)) }
+            _ = await link.run("rm", ["-rf", path])
+            return
+        }
+        let setup = "[ -d \"$1/.git\" ] || { mkdir -p \"$1\" && cd \"$1\" && git init -q && git -c user.name=phone-test -c user.email=phone-test@localhost commit -q --allow-empty -m init; }"
+        DebugTerm.log("test: setting up \(path)")
+        let ran = await link.run("sh", ["-c", setup, "sh", path])
+        DebugTerm.log("test: setup status \(ran?.status ?? -1), agents \(link.cards(in: path).count), provider \(AgentCatalog.all.first?.id ?? "none")")
+        // `-testRunner YES`: a shell runner instead, for typing into a plain prompt.
+        let runner = defaults.bool(forKey: "testRunner")
+        let wanted = { (card: Card) in (card.runner != nil) == runner }
+        if !link.cards(in: path).contains(where: wanted) {
+            if runner { link.addRunner("", to: path) } else if let provider = AgentCatalog.all.first { link.addAgent(provider, to: path) }
+        }
+        for _ in 0..<100 {
+            if let card = link.cards(in: path).first(where: wanted) { DebugTerm.log("test: opening \(card.id)"); opened = card; return }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+    }
+}
+#endif
 
 /// A post-it: its text on light paper. Read-only here.
 struct PostItView: View {

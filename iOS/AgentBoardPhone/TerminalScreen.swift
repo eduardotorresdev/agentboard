@@ -84,6 +84,13 @@ struct TerminalPage: View {
                 link.send(BoardSay.restart(card.id))
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
             }
+            // `-answerFirst YES`: Down, Enter first (a fresh test folder's trust question).
+            if UserDefaults.standard.bool(forKey: "answerFirst") {
+                link.type(encode(.down), to: card.id)
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                link.type(encode(.enter), to: card.id)
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
             link.type(Array(text.utf8) + encode(.enter), to: card.id)
         }
         #endif
