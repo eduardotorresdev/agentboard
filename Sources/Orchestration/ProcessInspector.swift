@@ -84,11 +84,15 @@ public enum ProcessInspector {
 
     /// The user's processes whose executable is `url`.
     public static func processes(running url: URL) -> [pid_t] {
+        #if !os(macOS)
+        return []  // libproc is macOS-only; the phone runs no processes to inspect.
+        #else
         let path = url.resolvingSymlinksInPath().path
         var buffer = [CChar](repeating: 0, count: 4096)
         return childrenByParent().values.joined().filter { pid in
             proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 && String(cString: buffer) == path
         }
+        #endif
     }
 
     /// `root` and every process below it.
@@ -126,6 +130,9 @@ public enum ProcessInspector {
 
     /// CPU time used (nanoseconds) and physical footprint (bytes).
     private static func usage(of pid: pid_t) -> (cpu: UInt64, memory: UInt64)? {
+        #if !os(macOS)
+        return nil
+        #else
         var info = rusage_info_v2()
         let result = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V2, $0) }
@@ -134,10 +141,14 @@ public enum ProcessInspector {
         // Times are in Mach ticks, which are not nanoseconds on Apple silicon.
         let ticks = info.ri_user_time + info.ri_system_time
         return (ticks * UInt64(timebase.numer) / UInt64(timebase.denom), info.ri_phys_footprint)
+        #endif
     }
 
     /// The TCP ports `pid` listens on.
     private static func listeningPorts(of pid: pid_t) -> [ListeningPort] {
+        #if !os(macOS)
+        return []
+        #else
         let bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
         guard bytes > 0 else { return [] }
         let stride = MemoryLayout<proc_fdinfo>.stride
@@ -168,6 +179,7 @@ public enum ProcessInspector {
             ports.append(ListeningPort(port: port, exposed: exposed))
         }
         return ports
+        #endif
     }
 
     /// This Mac's address on the local network (Wi-Fi or Ethernet), for ports other devices can reach.

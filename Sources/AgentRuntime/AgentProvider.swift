@@ -169,7 +169,7 @@ public struct ClaudeCode: AgentProvider {
     /// Claude Code writes each conversation to ~/.claude/projects/<escaped cwd>/<session>.jsonl
     /// only after the first message, so an agent that was never used must start fresh.
     private static func conversationExists(_ id: String) -> Bool {
-        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
+        let root = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude/projects")
         let name = id + ".jsonl"
         let folders = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         return folders.contains { FileManager.default.fileExists(atPath: root.appendingPathComponent($0).appendingPathComponent(name).path) }
@@ -223,7 +223,7 @@ public struct Codex: AgentProvider {
     /// Codex keeps each thread in $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl.
     static func conversationExists(_ id: String) -> Bool {
         let home = ProcessInfo.processInfo.environment["CODEX_HOME"]
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".codex").path
         let suffix = "-\(id).jsonl"
         let files = FileManager.default.enumerator(atPath: home + "/sessions")
         while let file = files?.nextObject() as? String {
