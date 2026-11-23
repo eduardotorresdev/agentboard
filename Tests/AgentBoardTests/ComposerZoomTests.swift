@@ -89,11 +89,13 @@ struct ComposerZoomTests {
     }
 
     /// A click on the composer's field is routed to it at any zoom, and the field is drawn at the
-    /// board's zoom: a click where the user sees it lands in it.
+    /// board's zoom, as the rest of the composer: its text keeps the same width against the status
+    /// line beside it (the field was once scaled twice, 0.36× at 0.6 and 2.3× at 1.5).
     @Test func theFieldTakesClicksAndIsDrawnAtAnyZoom() async throws {
         let rig = try await Rig()
         defer { rig.close() }
-        let width = rig.field.convert(rig.field.bounds, to: nil).width
+        rig.store.composerNotices[rig.record.id] = "A status line beside the field"
+        var ratios: [CGFloat: CGFloat] = [:]
         for wheel: Int32 in [0, -51, 92] {
             if wheel != 0 { try await rig.scroll(wheel) }
             let zoom = rig.zoom
@@ -103,18 +105,42 @@ struct ComposerZoomTests {
             let point = rig.onScreen(CGPoint(x: 40, y: CardMetrics.composer(of: rig.record).height / 2))
             let hit = rig.window.contentView?.superview?.hitTest(point)
             #expect(hit.map { $0 === rig.field || $0.isDescendant(of: rig.field) } == true, "zoom \(zoom): \(String(describing: hit))")
-            let drawn = rig.field.convert(rig.field.bounds, to: nil)
-            #expect(abs(drawn.width - width * zoom) < 2, "zoom \(zoom): drawn \(drawn.width), \(width) at zoom 1")
+            let area = rig.container.frame.insetBy(dx: -24, dy: -24)
+            let image = try #require(rig.board.bitmapImageRepForCachingDisplay(in: area))
+            rig.board.cacheDisplay(in: area, to: image)
             // `COMPOSER_SHOTS=<folder>`: the composer as the board draws it at this zoom, for looking at.
             if let folder = ProcessInfo.processInfo.environment["COMPOSER_SHOTS"] {
-                let area = rig.container.frame.insetBy(dx: -24, dy: -24)
-                if let image = rig.board.bitmapImageRepForCachingDisplay(in: area) {
-                    rig.board.cacheDisplay(in: area, to: image)
-                    try? image.representation(using: .png, properties: [:])?
-                        .write(to: URL(fileURLWithPath: folder).appendingPathComponent(String(format: "composer-%.2f.png", zoom)))
-                }
+                try? image.representation(using: .png, properties: [:])?
+                    .write(to: URL(fileURLWithPath: folder).appendingPathComponent(String(format: "composer-%.2f.png", zoom)))
+            }
+            let runs = Self.inkRuns(image)
+            #expect(runs.count >= 2, "zoom \(zoom): the field's text and the status apart, got \(runs)")
+            if runs.count >= 2 { ratios[zoom] = CGFloat(runs[0]) / CGFloat(runs[1]) }
+        }
+        let base = try #require(ratios[1] ?? ratios.values.first)
+        for (zoom, ratio) in ratios { #expect(abs(ratio / base - 1) < 0.08, "zoom \(zoom): field/status \(ratio), \(base) at zoom 1") }
+    }
+
+    /// Widths of the dark stretches left to right, split where a gap is wider than 2% of the
+    /// image: the field's text, then the status line (word gaps are narrower).
+    static func inkRuns(_ image: NSBitmapImageRep) -> [Int] {
+        let width = image.pixelsWide, height = image.pixelsHigh
+        var runs: [Int] = [], start: Int?, last = 0
+        for x in 0..<width {
+            let ink = (0..<height).contains { y in
+                guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.alphaComponent > 0.5 else { return false }
+                return (color.redComponent + color.greenComponent + color.blueComponent) / 3 < 0.55
+            }
+            if ink {
+                if start == nil { start = x }
+                last = x
+            } else if let first = start, x - last > width / 50 {
+                runs.append(last - first)
+                start = nil
             }
         }
+        if let first = start { runs.append(last - first) }
+        return runs
     }
 
     /// The composer's SwiftUI buttons take a click where the user sees them at any zoom, never

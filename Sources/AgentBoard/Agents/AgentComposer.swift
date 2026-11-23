@@ -303,9 +303,7 @@ private struct MentionField: NSViewRepresentable {
     @Binding var isEmpty: Bool
     @Binding var notice: String?
 
-    @Environment(\.boardZoom) private var zoom
-
-    func makeNSView(context: Context) -> ZoomFollowing {
+    func makeNSView(context: Context) -> NSScrollView {
         let view = ComposerTextView()
         view.store = store
         view.agent = id
@@ -330,38 +328,11 @@ private struct MentionField: NSViewRepresentable {
         view.autoresizingMask = .width
         scroll.documentView = view
         DispatchQueue.main.async { ComposerDrafts.setLines(view.lineCount, for: id) }
-        let host = ZoomFollowing(scroll)
-        host.zoom = zoom
-        return host
+        return scroll
     }
 
-    func updateNSView(_ view: ZoomFollowing, context: Context) {
-        view.zoom = zoom
-    }
-}
-
-/// Holds the field at the board's zoom. The composer is scaled inside SwiftUI (`ZoomedView`) so
-/// its buttons take clicks where they're drawn, but SwiftUI only sizes an AppKit view, it doesn't
-/// scale it: this view's bounds do, in zoom-1 points, so AppKit draws and hit-tests the field
-/// at the zoom.
-final class ZoomFollowing: NSView {
-    private let content: NSView
-    var zoom: CGFloat = 1 { didSet { if zoom != oldValue { needsLayout = true } } }
-
-    init(_ content: NSView) {
-        self.content = content
-        super.init(frame: .zero)
-        addSubview(content)
-    }
-
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    override func layout() {
-        super.layout()
-        let zoom = max(zoom, 0.01)
-        setBoundsSize(CGSize(width: frame.width / zoom, height: frame.height / zoom))
-        content.frame = bounds
-    }
+    // SwiftUI's scale (`ZoomedView`) already draws and hit-tests the field at the board's zoom.
+    func updateNSView(_ view: NSScrollView, context: Context) {}
 }
 
 /// Hands the wheel to the board while the draft fits, so panning over a card doesn't stall here.
