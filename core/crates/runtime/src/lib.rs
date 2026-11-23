@@ -29,6 +29,7 @@ pub mod data_folder;
 mod host_stats;
 pub mod organization_home;
 mod pseudo_terminal;
+pub mod svg_diagram;
 mod uuid;
 
 pub use crate::uuid::Uuid;

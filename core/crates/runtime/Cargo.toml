@@ -10,6 +10,8 @@ serde_json.workspace = true
 libc.workspace = true
 uuid.workspace = true
 base64 = "0.22"
+# Decision diagrams: reads no DTD and expands no entity of its own (see svg_diagram.rs).
+quick-xml = "0.37"
 
 [dev-dependencies]
 libc.workspace = true

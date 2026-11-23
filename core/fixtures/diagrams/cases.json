@@ -49,6 +49,36 @@
    "svg": "<!DOCTYPE svg><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg>"
   },
   {
+   "name": "a doctype in lower case",
+   "refused": "A diagram takes no DOCTYPE or entities.",
+   "svg": "<!doctype svg><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg>"
+  },
+  {
+   "name": "an entity in mixed case",
+   "refused": "A diagram takes no DOCTYPE or entities.",
+   "svg": "<!DocType svg [<!Entity a \"x\">]><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\">&a;</text></svg>"
+  },
+  {
+   "name": "cdata text",
+   "refused": null,
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\"><![CDATA[a < b]]></text></svg>"
+  },
+  {
+   "name": "character references",
+   "refused": null,
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\">&#65;&#x42;</text></svg>"
+  },
+  {
+   "name": "a bare ampersand",
+   "refused": "The diagram isn't well-formed XML.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\">a & b</text></svg>"
+  },
+  {
+   "name": "a duplicate attribute",
+   "refused": "The diagram isn't well-formed XML.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect width=\"1\" width=\"2\" height=\"1\"/></svg>"
+  },
+  {
    "name": "an undeclared entity",
    "refused": "The diagram isn't well-formed XML.",
    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\">&a;</text></svg>"

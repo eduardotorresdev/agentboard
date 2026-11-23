@@ -30,7 +30,8 @@ public struct SVGDiagram: Equatable, Sendable {
             throw Refused(reason: "The diagram is \(data.count) bytes; the limit is \(Self.maxBytes). Draw less, or split it into cards.")
         }
         // No DTD at all: entities are the classic way to blow a small file up.
-        guard data.range(of: Data("<!DOCTYPE".utf8)) == nil, data.range(of: Data("<!ENTITY".utf8)) == nil else {
+        let lowered = Data(data.map { (65...90).contains($0) ? $0 + 32 : $0 })
+        guard lowered.range(of: Data("<!doctype".utf8)) == nil, lowered.range(of: Data("<!entity".utf8)) == nil else {
             throw Refused(reason: "A diagram takes no DOCTYPE or entities.")
         }
         let root = try XMLTree.parse(data)
