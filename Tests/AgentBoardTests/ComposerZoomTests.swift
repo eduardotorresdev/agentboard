@@ -105,6 +105,15 @@ struct ComposerZoomTests {
             #expect(hit.map { $0 === rig.field || $0.isDescendant(of: rig.field) } == true, "zoom \(zoom): \(String(describing: hit))")
             let drawn = rig.field.convert(rig.field.bounds, to: nil)
             #expect(abs(drawn.width - width * zoom) < 2, "zoom \(zoom): drawn \(drawn.width), \(width) at zoom 1")
+            // `COMPOSER_SHOTS=<folder>`: the composer as the board draws it at this zoom, for looking at.
+            if let folder = ProcessInfo.processInfo.environment["COMPOSER_SHOTS"] {
+                let area = rig.container.frame.insetBy(dx: -24, dy: -24)
+                if let image = rig.board.bitmapImageRepForCachingDisplay(in: area) {
+                    rig.board.cacheDisplay(in: area, to: image)
+                    try? image.representation(using: .png, properties: [:])?
+                        .write(to: URL(fileURLWithPath: folder).appendingPathComponent(String(format: "composer-%.2f.png", zoom)))
+                }
+            }
         }
     }
 

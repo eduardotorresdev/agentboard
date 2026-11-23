@@ -483,6 +483,7 @@ struct WorktreesView: View {
     enum Making: Equatable { case project, clone, worktree(of: String) }
     @State private var making: Making?
     @State private var draft = ""
+    @State private var name = ""
     @State private var busy = false
     @State private var refused: String?
 
@@ -545,7 +546,7 @@ struct WorktreesView: View {
                             Text("New project")
                             Text("An empty repository on this host, with a first commit.")
                         }
-                        Button { draft = ""; making = .clone } label: {
+                        Button { draft = ""; name = ""; making = .clone } label: {
                             Text("Clone a repository")
                             Text("Copies one from an https or ssh address.")
                         }
@@ -569,10 +570,13 @@ struct WorktreesView: View {
                isPresented: Binding(get: { making != nil }, set: { if !$0 { making = nil } })) {
             TextField(making == .project ? "Name" : making == .clone ? "https://… or git@…" : "Branch", text: $draft)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
+            if making == .clone {
+                TextField("Name (optional)", text: $name).textInputAutocapitalization(.never).autocorrectionDisabled()
+            }
             Button("Create") { if let making { Task { await create(making, draft) } } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(making == .project ? "Made in the host's projects folder." : making == .clone ? "Named after the repository." : "A branch name, like feature/login.")
+            Text(making == .project ? "Made in the host's projects folder." : making == .clone ? "Named after the repository unless you give a name." : "A branch name, like feature/login.")
         }
         .alert("Couldn't create it", isPresented: Binding(get: { refused != nil }, set: { if !$0 { refused = nil } })) {
             Button("OK", role: .cancel) {}
@@ -608,7 +612,7 @@ struct WorktreesView: View {
         let made = await link.create { id in
             switch making {
             case .project: BoardSay.createProject(id, name: text, clone: nil)
-            case .clone: BoardSay.createProject(id, name: nil, clone: text)
+            case .clone: BoardSay.createProject(id, name: name.isEmpty ? nil : name, clone: text)
             case .worktree(let project): BoardSay.createWorktree(id, project: project, branch: text)
             }
         }

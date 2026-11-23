@@ -23,6 +23,7 @@
 		62DB7CC674824D544054C553 /* WireTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA79EE3E87B5B3991578985D /* WireTests.swift */; };
 		9B25E078506F911356F20BE8 /* ChannelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD553EA659FDE2F43B28BE26 /* ChannelTests.swift */; };
 		9C4A417DB08ED386193D657F /* StreamPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5CBF368C6A627849C63E75C /* StreamPage.swift */; };
+		AC8162D1B63D6BC5B32D9B62 /* CreateMenuUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11E7FECD8F663DA54FCE1679 /* CreateMenuUITests.swift */; };
 		BCE44D7FC69EB683927B6E42 /* StreamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 166A3BB7E18C1E9247836D0C /* StreamTests.swift */; };
 		DB5DD0BE02734EE42E419103 /* MetalTerminal.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC0A33A4CCFD54E4E369192 /* MetalTerminal.swift */; };
 		E132F572DA376AD7F104E6F6 /* HostLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 183F64FDA7A9218A44664CDF /* HostLink.swift */; };
@@ -50,6 +51,7 @@
 
 /* Begin PBXFileReference section */
 		006833C6B2CDCFAF6099FF72 /* AddMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddMenuUITests.swift; sourceTree = "<group>"; };
+		11E7FECD8F663DA54FCE1679 /* CreateMenuUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateMenuUITests.swift; sourceTree = "<group>"; };
 		166A3BB7E18C1E9247836D0C /* StreamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamTests.swift; sourceTree = "<group>"; };
 		16B2CD1E11EC1FEBA49AA2EB /* TerminalScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalScreen.swift; sourceTree = "<group>"; };
 		183F64FDA7A9218A44664CDF /* HostLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostLink.swift; sourceTree = "<group>"; };
@@ -112,6 +114,7 @@
 			isa = PBXGroup;
 			children = (
 				006833C6B2CDCFAF6099FF72 /* AddMenuUITests.swift */,
+				11E7FECD8F663DA54FCE1679 /* CreateMenuUITests.swift */,
 			);
 			path = AgentBoardPhoneUITests;
 			sourceTree = "<group>";
@@ -275,6 +278,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				523867E0146D890B9C3001C3 /* AddMenuUITests.swift in Sources */,
+				AC8162D1B63D6BC5B32D9B62 /* CreateMenuUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
