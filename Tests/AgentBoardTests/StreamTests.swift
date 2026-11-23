@@ -456,7 +456,7 @@ private final class IOSSource: StreamSource {
 /// more often once asked.
 @MainActor
 private final class FloodSource: StreamSource {
-    static let count = 400
+    nonisolated static let count = 400
     let card = UUID()
     private(set) var keyFrameRequests = 0
     private let taps = StreamTaps()

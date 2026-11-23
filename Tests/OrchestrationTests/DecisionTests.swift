@@ -71,7 +71,7 @@ private let guideDiagram = (try? String(contentsOf: URL(fileURLWithPath: #filePa
 }
 
 /// The guide shows one complete diagram, and it is the fixture that passes above.
-@Test func theGuidesDiagramIsTheFixture() {
+@MainActor @Test func theGuidesDiagramIsTheFixture() {
     #expect(!guideDiagram.isEmpty && DecisionTools.guide.contains(guideDiagram.trimmingCharacters(in: .newlines)))
 }
 

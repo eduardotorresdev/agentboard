@@ -62,7 +62,8 @@ import Testing
         print("boards: found \(found.trusted.map(\.fingerprint)) trusted, \(found.pending.map(\.fingerprint)) pending")
         func opensCore(_ computer: HostStores) async -> Bool {
             guard let target = computer.account.channel(to: host) else { return false }
-            let channel = await Task.detached { HostChannel.open(server: target.server, token: target.token, host: host, hostKey: target.key, board: target.board).channel }.value
+            let opening = Task.detached { HostChannel.open(server: target.server, token: target.token, host: host, hostKey: target.key, board: target.board).channel }
+            let channel = await opening.value
             if let channel { close(channel) }
             return channel != nil
         }

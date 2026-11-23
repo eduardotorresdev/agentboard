@@ -53,7 +53,7 @@ final class BrowserHost {
         guard process == nil, !starting else { return }
         starting = true
         state = .preparing(L("Preparing the browser…"))
-        Task {
+        Task { [self] in
             do {
                 let launch = try await Self.prepare { [weak self] step in
                     Task { @MainActor in self?.state = .preparing(step) }

@@ -312,12 +312,12 @@ final class Screen {
         guard !warming, let unmasked, encoder?.fits(width: unmasked.width, height: unmasked.height) != true else { return }
         warming = true
         let card = card, width = unmasked.width, height = unmasked.height
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             let encoder = VideoEncoder { data, key in
                 DispatchQueue.main.async { emit(["event": "video", "card": card, "data": data.base64EncodedString(), "key": key]) }
             }
             encoder.prepare(width: width, height: height)
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async {
                 guard let self, self.context != nil else { return encoder.invalidate() }
                 self.encoder?.invalidate()
                 self.encoder = encoder

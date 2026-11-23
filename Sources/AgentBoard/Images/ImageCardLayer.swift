@@ -172,7 +172,7 @@ final class ImageCardLayer: CALayer {
                                             kCGImageSourceCreateThumbnailWithTransform: true,
                                             kCGImageSourceThumbnailMaxPixelSize: 2048]
             let image = CGImageSourceCreateWithURL(url as CFURL, nil).flatMap { CGImageSourceCreateThumbnailAtIndex($0, 0, options as CFDictionary) }
-            nonisolated(unsafe) let loaded = image
+            let loaded = image
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     done(loaded)

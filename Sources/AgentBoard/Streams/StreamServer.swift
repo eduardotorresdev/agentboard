@@ -42,9 +42,10 @@ final class StreamServer {
         listener.newConnectionHandler = { [weak self] connection in
             let stream = StreamConnection(connection, token: token)
             stream.find = { [weak self] card, sink in
-                await MainActor.run { () -> StreamConnection.Found? in
-                    guard let self else { return nil }
-                    for source in self.sources {
+                let server = self
+                return await MainActor.run { () -> StreamConnection.Found? in
+                    guard let server else { return nil }
+                    for source in server.sources {
                         guard let stop = source.stream(card, to: sink) else { continue }
                         // Only the source that streams the card gets its input.
                         return StreamConnection.Found(stop: stop, input: { event in Task { @MainActor in source.input(card, event) } },

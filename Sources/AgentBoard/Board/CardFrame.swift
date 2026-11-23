@@ -290,7 +290,7 @@ final class CardTitleBar: CALayer {
 /// that every card header shows its own patch of: frosted glass without a live blur per card.
 // Only used on the main thread: the sky draws there and the completion hops back to it.
 final class SkyBlur: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = SkyBlur()
+    static let shared = SkyBlur()
 
     /// Two surfaces taking turns, so each frame is a new `contents` the headers pick up.
     private var surfaces: [(surface: IOSurface, texture: MTLTexture)] = []
@@ -337,7 +337,7 @@ final class SkyBlur: @unchecked Sendable {
         next = 1 - next
         blur.encode(commandBuffer: commands, sourceTexture: texture, destinationTexture: target.texture)
         commands.addCompletedHandler { _ in
-            nonisolated(unsafe) let surface = target.surface
+            let surface = target.surface
             DispatchQueue.main.async {
                 self.current = surface
                 for header in self.headers.allObjects { header.refreshBackdrop() }

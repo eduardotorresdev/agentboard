@@ -90,7 +90,7 @@ private let clone = "/home/dev/agentboard/projects/repo"
     defer { try? FileManager.default.removeItem(at: repo.deletingLastPathComponent()) }
     let host = FakeHost([("refs/remotes/*/topic", 0, "refs/remotes/origin/topic\n"), ("rev-parse", 0, "def456\n")])
 
-    try Git.createWorktree(branch: "topic", in: repo.path, on: host.git)
+    _ = try Git.createWorktree(branch: "topic", in: repo.path, on: host.git)
 
     #expect(host.commands.contains("git -C \(clone) fetch origin"))
     #expect(!host.commands.contains { $0.hasPrefix("git clone") })

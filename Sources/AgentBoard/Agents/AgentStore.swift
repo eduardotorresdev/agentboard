@@ -189,7 +189,7 @@ final class AgentStore {
         link.onEvent = { [weak self] event in self?.received(event) }
         link.onDown = { [weak self] in self?.coreDown() }
         link.onIncompatible = { [weak self] core in self?.incompatible(core) }
-        Task {
+        Task { [self] in
             let started = host != nil ? await link.start(retrying: true) : await link.start { [weak self] in
                 self?.local = try? InProcessCore(database: database)
                 return self?.local?.socketPath

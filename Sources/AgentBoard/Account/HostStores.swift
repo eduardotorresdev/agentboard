@@ -537,11 +537,11 @@ extension GitHost {
     /// Git on the machine `store` mirrors, through whatever connection the store has when asked:
     /// one made before the store reconnected (onto the direct path, say) keeps working.
     init(name: String, home: String, store: AgentStore) {
-        self.init(name: name, home: home) { executable, arguments in
+        self.init(name: name, home: home) { [weak store] executable, arguments in
             // Callers are synchronous and off the main thread; the core answers on its own queue.
             let done = DispatchSemaphore(value: 0)
             let result = Answer()
-            Task.detached { [weak store] in
+            Task.detached {
                 // Git's own programs take as long as they take (a clone): given up on below, after `GitHost.patience`, not by size.
                 let ran = await store?.run(executable, arguments, patience: GitHost.patience * 2)
                 result.lock.withLock { result.value = ran }
