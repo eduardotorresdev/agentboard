@@ -102,10 +102,12 @@ struct ContentView: View {
         }
         .onAppear {
             if let path = DebugShow.worktree {
+                #if DEBUG
                 // A fresh dev home has no projects yet: the shown worktree's folder becomes one.
                 if !store.projects.contains(where: { $0.path == path }), FileManager.default.fileExists(atPath: path + "/.git") {
                     store.addProject(at: URL(fileURLWithPath: path))
                 }
+                #endif
                 OpenWorktree.set(path, in: store.organizationID)
             }
             // The account is the usual way in: asked for once per launch, and the board works without it.

@@ -441,7 +441,7 @@ final class ComposerTextView: NSTextView, NSTextViewDelegate {
         let sources = AgentStore.attachments(on: pasteboard)
         let hasFiles = sources.contains { if case .file = $0 { true } else { false } }
         guard let store, !sources.isEmpty, hasFiles || pasteboard.string(forType: .string) == nil else { return false }
-        Task { @MainActor [weak self] in
+        Task { @MainActor [weak self, agent] in
             let paths = await store.attachmentPaths(sources, for: agent)
             guard let self, !paths.isEmpty else { return NSSound.beep() }
             insertText(AgentStore.typed(paths), replacementRange: selectedRange())
