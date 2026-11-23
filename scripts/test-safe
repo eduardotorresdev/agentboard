@@ -39,7 +39,6 @@ if [ "${1:-}" = "--no-home" ]; then NO_HOME=true; shift; fi
 
 DEV=/Applications/Xcode.app/Contents/Developer
 HELPER="$DEV/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper"
-BUNDLE="$PWD/$SCRATCH/arm64-apple-macosx/debug/AgentBoardPackageTests.xctest/Contents/MacOS/AgentBoardPackageTests"
 POLICY="(version 1)(allow default)(deny file-write* (subpath \"$SUPPORT/AgentBoard\") (subpath \"$SUPPORT/AgentBoard Dev\"))"
 
 # What the installed app (/Applications) keeps rewriting while the user works, left out of the
@@ -104,6 +103,12 @@ fi
 # SwiftPM sandboxes its own manifest build and can't nest inside ours: build outside, run inside.
 swift build --build-tests --scratch-path "$SCRATCH" 2>&1 | grep -E "error:|Build complete" | sort -u
 [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+# Where this toolchain put the tests: one AgentBoardPackageTests bundle (native build system) or
+# one bundle per test target (swiftbuild, Swift 6.4). A fixed path ran a stale bundle once the
+# toolchain changed.
+BIN=$(swift build --build-tests --scratch-path "$SCRATCH" --show-bin-path)
+BUNDLES=("$BIN"/*.xctest)
+[ -d "${BUNDLES[0]}" ] || { echo "test-safe: no test bundle in $BIN" >&2; exit 1; }
 
 installed_app_files > "$WORK/installed"
 fingerprint > "$WORK/before"
@@ -115,20 +120,33 @@ mkdir -p "$WORK/home" "$WORK/user"
 safely() { env -u AGENTBOARD_HOME sandbox-exec -p "$POLICY" /usr/bin/env "${ENVIRONMENT[@]}" "$@"; }
 # Serial: WorktreeTitleTests hold the main thread for seconds each (real repositories), which
 # starves the suites whose cores answer on the main queue when they run alongside.
-safely "$HELPER" --test-bundle-path "$BUNDLE" "$BUNDLE" --testing-library swift-testing --no-parallel "$@" 2>&1 | tee "$WORK/testing.log"
-STATUS=${PIPESTATUS[0]}
-# A test process that dies mid-run can still exit 0: without the closing summary the run failed.
-if ! grep -q "Test run with" "$WORK/testing.log"; then
-    echo "test-safe: the Swift Testing run ended without its summary (the test process died?)" >&2
-    STATUS=1
-fi
+STATUS=0
+for BUNDLE in "${BUNDLES[@]}"; do
+    EXECUTABLE="$BUNDLE/Contents/MacOS/$(basename "$BUNDLE" .xctest)"
+    safely "$HELPER" --test-bundle-path "$EXECUTABLE" "$EXECUTABLE" --testing-library swift-testing --no-parallel "$@" 2>&1 | tee "$WORK/testing.log"
+    RAN=${PIPESTATUS[0]}
+    # 69 with no output: nothing in this bundle to run (no Swift Testing tests, or none the filter takes).
+    [ "$RAN" -eq 0 ] || { [ "$RAN" -eq 69 ] && ! [ -s "$WORK/testing.log" ]; } || STATUS=1
+    # A test process that dies mid-run can still exit 0: without the closing summary the run
+    # failed. A bundle with nothing to run (no Swift Testing tests, or none the filter takes)
+    # prints nothing at all.
+    if grep -q "Test run started" "$WORK/testing.log" && ! grep -q "Test run with" "$WORK/testing.log"; then
+        echo "test-safe: the Swift Testing run of $(basename "$BUNDLE") ended without its summary (the test process died?)" >&2
+        STATUS=1
+    fi
+done
 # The few XCTest suites run whole: their filter syntax differs. XCTEST=0 skips them. Named one by
 # one: a bare xctest run also reruns every Swift Testing test, unfiltered and in parallel.
-SUITES=$(grep -rhoE "class [A-Za-z0-9_]+: XCTestCase" Tests | awk '{print $2}' | tr -d : | sort -u | paste -sd, -)
-if [ "${XCTEST:-1}" = 1 ] && [ -n "$SUITES" ]; then
-    safely "$DEV/usr/bin/xctest" -XCTest "$SUITES" "${BUNDLE%/Contents/MacOS/*}" 2>&1 | grep -E "error:|failed|Executed .* tests"
-    [ "${PIPESTATUS[0]}" -eq 0 ] || STATUS=1
-fi
+for BUNDLE in "${BUNDLES[@]}"; do
+    # A per-target bundle holds only its own folder's suites; the combined one holds them all.
+    TARGET=$(basename "$BUNDLE" .xctest)
+    FOLDER=Tests/$TARGET; [ -d "$FOLDER" ] || FOLDER=Tests
+    SUITES=$(grep -rhoE "class [A-Za-z0-9_]+: XCTestCase" "$FOLDER" | awk '{print $2}' | tr -d : | sort -u | paste -sd, -)
+    if [ "${XCTEST:-1}" = 1 ] && [ -n "$SUITES" ]; then
+        safely "$DEV/usr/bin/xctest" -XCTest "$SUITES" "$BUNDLE" 2>&1 | grep -E "error:|failed|Executed .* tests"
+        [ "${PIPESTATUS[0]}" -eq 0 ] || STATUS=1
+    fi
+done
 fingerprint > "$WORK/after"
 installed_app_files >> "$WORK/installed"
 

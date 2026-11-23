@@ -80,11 +80,13 @@ struct Frameworks {
     let translator: NSObject
 
     static func load() throws -> Frameworks {
+        // Xcode 27 keeps SimulatorKit in Contents/SharedFrameworks; earlier ones in Developer/Library/PrivateFrameworks.
         guard let developer = run("/usr/bin/xcode-select", ["-p"])?.trimmingCharacters(in: .whitespacesAndNewlines),
-              FileManager.default.fileExists(atPath: developer + "/Library/PrivateFrameworks/SimulatorKit.framework") else {
+              let kitFolder = [developer + "/Library/PrivateFrameworks", developer + "/../SharedFrameworks"]
+                .map({ $0 + "/SimulatorKit.framework" }).first(where: FileManager.default.fileExists(atPath:)) else {
             throw Failure(message: "Xcode isn't installed.", code: "noXcode")
         }
-        let kitPath = developer + "/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"
+        let kitPath = kitFolder + "/SimulatorKit"
         for path in ["/Library/Developer/PrivateFrameworks/CoreSimulator.framework/CoreSimulator", kitPath,
                      "/System/Library/PrivateFrameworks/AccessibilityPlatformTranslation.framework/AccessibilityPlatformTranslation"] {
             guard dlopen(path, RTLD_NOW) != nil else {
