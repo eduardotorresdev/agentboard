@@ -200,7 +200,13 @@ struct Board {
 }
 
 impl Board {
+    /// A board that answers agents' questions, as the Mac's and the phone's say in their hello.
     fn open(core: &Core) -> Self {
+        Self::saying(core, Some(true))
+    }
+
+    /// A board whose hello says `answers_questions`.
+    fn saying(core: &Core, answers_questions: Option<bool>) -> Self {
         let socket = CoreSocket::new(core_socket::connect(&core.path).unwrap());
         let (sender, frames) = channel();
         socket.start(
@@ -209,7 +215,7 @@ impl Board {
             },
             || {},
         );
-        socket.send_message(&CoreRequest::Hello { version: 8, oldest: Some(2) });
+        socket.send_message(&CoreRequest::Hello { version: 8, oldest: Some(2), answers_questions });
         loop {
             let (kind, payload) = frames.recv_timeout(TIMEOUT).expect("a welcome");
             if kind != FrameKind::Control {
@@ -1729,4 +1735,73 @@ fn decisions_are_for_agents_and_their_guide_is_the_skill() {
     let runner = core.card("web").unwrap();
     assert_eq!(core.call("decision_guide", json!({}), runner.id).1, true);
     drop(board);
+}
+
+// MARK: Questions without a board
+
+/// Posts an AskUserQuestion hook as Claude Code would, on a thread: its output when it lets go.
+fn ask_in_background(core: &std::sync::Arc<Core>, caller: Uuid) -> JoinHandle<Value> {
+    let core = core.clone();
+    let input = json!({"questions": [{"question": "Which layout?", "header": "Layout", "multiSelect": false, "options": [{"label": "Wide"}, {"label": "Tall"}]}]});
+    std::thread::spawn(move || serde_json::from_slice::<Value>(&core.post("/question", caller, &json!({"hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion", "tool_input": input}))).unwrap())
+}
+
+/// With no board that answers questions, the hook lets go at once and the agent asks in its
+/// terminal: a board that says it doesn't, or an older one that lists no elements (a phone
+/// before its questions sheet). An older one that lists its elements (a Mac) holds them.
+#[test]
+fn questions_nobody_would_see_go_to_the_terminal_at_once() {
+    let core = std::sync::Arc::new(Core::new());
+    let a = agent("Ada", &core.folder);
+    let phone = Board::saying(&core, Some(false));
+    phone.add(&[&a]);
+    wait_until("the card", || core.card("Ada").is_some());
+    assert_eq!(ask_in_background(&core, a.id).join().unwrap(), json!({}));
+    let older = Board::saying(&core, None);
+    assert_eq!(ask_in_background(&core, a.id).join().unwrap(), json!({}));
+    assert!(core.ask(|orchestrator, _| orchestrator.attention().is_empty()));
+
+    let mut older_mac = Board::saying(&core, None);
+    older_mac.send(BoardRequest::Elements(only(vec![])));
+    std::thread::sleep(Duration::from_millis(100));
+    let held = ask_in_background(&core, a.id);
+    older_mac.wait_queue("the questions", |queue| queue.first().is_some_and(|request| request.questions.is_some()));
+    assert!(!held.is_finished());
+    older_mac.send(BoardRequest::AnswerQuestions { id: a.id, answers: None });
+    assert_eq!(held.join().unwrap(), json!({}));
+    drop((phone, older));
+}
+
+/// When the last board that answers questions leaves, held questions wait the grace period for
+/// one to come back, then go to the agent's terminal; a board back in time keeps them.
+#[test]
+fn held_questions_wait_a_grace_period_for_a_board() {
+    let core = std::sync::Arc::new(Core::new());
+    core.ask(|orchestrator, _| orchestrator.set_question_grace(Duration::from_millis(600)));
+    let a = agent("Ada", &core.folder);
+    let mut board = Board::open(&core);
+    board.add(&[&a]);
+    wait_until("the card", || core.card("Ada").is_some());
+
+    // Back within the grace: still held well past it, and answered from the board that came back.
+    let held = ask_in_background(&core, a.id);
+    board.wait_queue("the questions", |queue| queue.first().is_some_and(|request| request.questions.is_some()));
+    board.disconnect();
+    std::thread::sleep(Duration::from_millis(200));
+    let mut back = Board::open(&core);
+    std::thread::sleep(Duration::from_millis(1200));
+    assert!(!held.is_finished(), "released though a board came back");
+    back.send(BoardRequest::AnswerQuestions { id: a.id, answers: Some([("Which layout?".to_string(), "Tall".to_string())].into()) });
+    assert_eq!(held.join().unwrap()["hookSpecificOutput"]["updatedInput"]["answers"], json!({"Which layout?": "Tall"}));
+    back.wait_queue("nobody", |queue| queue.is_empty());
+
+    // Not back: held through the grace, then to the terminal, the card waiting without the form.
+    let released = ask_in_background(&core, a.id);
+    back.wait_queue("the questions", |queue| queue.first().is_some_and(|request| request.questions.is_some()));
+    back.disconnect();
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!released.is_finished(), "released before the grace ended");
+    assert_eq!(released.join().unwrap(), json!({}));
+    let queue = core.ask(|orchestrator, _| orchestrator.attention().to_vec());
+    assert!(queue.len() == 1 && queue[0].questions.is_none(), "{queue:?}");
 }

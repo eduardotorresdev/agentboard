@@ -4,7 +4,7 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicI8, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -318,7 +318,7 @@ impl<S: CoreService> CoreServer<S> {
         self.boards_accepted += 1;
         let key = self.boards_accepted;
         let client = CoreBoard {
-            inner: Arc::new(BoardInner { socket: CoreSocket::new(stream), number: key, version: AtomicI64::new(0), hears_all_statuses: AtomicBool::new(false), hears_host: AtomicBool::new(false) }),
+            inner: Arc::new(BoardInner { socket: CoreSocket::new(stream), number: key, version: AtomicI64::new(0), answers_questions: AtomicI8::new(0), hears_all_statuses: AtomicBool::new(false), hears_host: AtomicBool::new(false) }),
         };
         let (frames, closed) = (self.handle.events.clone(), self.handle.events.clone());
         client.inner.socket.start(
@@ -364,7 +364,8 @@ impl<S: CoreService> CoreServer<S> {
     fn handle_request(&mut self, request: CoreRequest, client: &CoreBoard) {
         let socket = &client.inner.socket;
         match request {
-            CoreRequest::Hello { version, oldest } => {
+            CoreRequest::Hello { version, oldest, answers_questions } => {
+                client.inner.answers_questions.store(answers_questions.map_or(0, |answers| if answers { 2 } else { 1 }), Ordering::Relaxed);
                 let Some(agreed) = self.versions.agreed(Versions { version, oldest: oldest.unwrap_or(version) }) else {
                     // It hangs up on seeing the version; closing here could drop the welcome unsent.
                     return socket.send_message(&CoreEvent::Welcome { version: self.versions.version, oldest: Some(self.versions.oldest), sessions: Vec::new(), service: None });
@@ -661,6 +662,8 @@ struct BoardInner {
     number: u64,
     /// The protocol version agreed on with it, once it said hello; 0 before.
     version: AtomicI64,
+    /// What its hello said of answering agents' questions: 0 nothing, 1 no, 2 yes.
+    answers_questions: AtomicI8,
     /// Set by `subscribeStatuses`: it then hears every session's status. Other clients (an
     /// agent's own connection) never get events they didn't ask for.
     hears_all_statuses: AtomicBool,
@@ -681,6 +684,14 @@ impl CoreBoard {
 
     pub fn number(&self) -> u64 {
         self.inner.number
+    }
+
+    /// Whether its hello said it answers agents' questions; none from a board that predates saying it.
+    pub fn answers_questions(&self) -> Option<bool> {
+        match self.inner.answers_questions.load(Ordering::Relaxed) {
+            0 => None,
+            said => Some(said == 2),
+        }
     }
 }
 

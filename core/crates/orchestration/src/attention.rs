@@ -8,7 +8,7 @@ use runtime::AgentHook;
 
 use crate::board_protocol::{now, only, BoardEvent, Unlabelled};
 use crate::cards::AgentRecord;
-use crate::orchestrator::Turn;
+use crate::orchestrator::{BoardView, Orchestrator, Turn};
 use crate::transcript_context::{objects, TranscriptContext};
 
 /// An agent waiting on the developer, across every organization and worktree: one per card,
@@ -95,6 +95,15 @@ pub(crate) struct PendingQuestions {
     input: Map<String, Value>,
     /// The hook's connection, answered with its output.
     resume: Request,
+}
+
+impl BoardView<'_> {
+    /// Whether a connected board shows agents' questions and answers them: one whose hello says
+    /// so, or one from before hellos said it that lists its elements (a Mac; an older phone
+    /// lists none and has no questions sheet).
+    pub(crate) fn questions_have_a_board(&self) -> bool {
+        self.boards.iter().any(|board| board.answers_questions().unwrap_or_else(|| self.tool_boards.contains(board)))
+    }
 }
 
 impl PendingQuestions {
@@ -188,7 +197,8 @@ impl Turn<'_> {
         let hook: Value = serde_json::from_slice(&std::mem::take(&mut request.body)).unwrap_or_default();
         let input = hook.get("tool_input").and_then(Value::as_object).cloned().unwrap_or_default();
         let questions = AgentQuestion::parse(&input);
-        if self.record(caller).is_none() || questions.is_empty() {
+        // Nobody would see them: the agent asks in its terminal at once.
+        if self.record(caller).is_none() || questions.is_empty() || !self.board.questions_have_a_board() {
             return request.reply(Some(b"{}".to_vec()));
         }
         // A hook still waiting is from a call that's over.
@@ -219,6 +229,24 @@ impl Turn<'_> {
         let output = json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": pending.input}});
         pending.resume.reply(Some(serde_json::to_vec(&output).unwrap_or_else(|_| b"{}".to_vec())));
         self.dismiss_attention(id);
+    }
+
+    /// The last board that answers questions left: held questions wait a grace period for one
+    /// to come back (a reconnect, a relaunch), then go back to the agents' terminals.
+    pub(crate) fn questions_lost_their_board(&mut self) {
+        if self.pending_questions.is_empty() || self.board.questions_have_a_board() {
+            return;
+        }
+        self.question_graces += 1;
+        let grace = self.question_graces;
+        self.store.handle.post_after(self.question_grace, move |orchestrator: &mut Orchestrator, server| {
+            let mut turn = orchestrator.turn(server);
+            if turn.question_graces != grace || turn.board.questions_have_a_board() {
+                return;
+            }
+            let held: Vec<Uuid> = turn.pending_questions.keys().copied().collect();
+            held.into_iter().for_each(|id| turn.answer_questions(id, None));
+        });
     }
 
     pub(crate) fn dismiss_attention(&mut self, id: Uuid) {

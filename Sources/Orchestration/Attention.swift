@@ -165,7 +165,8 @@ extension Orchestrator {
         let hook = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
         let input = hook["tool_input"] as? [String: Any] ?? [:]
         let questions = AgentQuestion.parse(input)
-        guard record(caller) != nil, !questions.isEmpty else { return Self.noAnswer }
+        // Nobody would see them: the agent asks in its terminal at once.
+        guard record(caller) != nil, !questions.isEmpty, questionsHaveABoard else { return Self.noAnswer }
         // A hook still waiting is from a call that's over.
         pendingQuestions.removeValue(forKey: caller)?.resume.resume(returning: Self.noAnswer)
         let context = (hook["transcript_path"] as? String).flatMap { TranscriptContext.lastText(in: URL(fileURLWithPath: $0)) }

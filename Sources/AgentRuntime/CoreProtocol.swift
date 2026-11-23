@@ -87,8 +87,10 @@ public struct SessionStatus: Codable, Equatable, Sendable {
 }
 
 enum CoreRequest: Codable {
-    /// `oldest`: since 3; a board that doesn't say speaks only `version`.
-    case hello(version: Int, oldest: Int?)
+    /// `oldest`: since 3; a board that doesn't say speaks only `version`. `answersQuestions`:
+    /// it shows agents' questions and answers them (a Mac or phone board); nil from one that
+    /// predates saying it.
+    case hello(version: Int, oldest: Int?, answersQuestions: Bool? = nil)
     /// Starts (or restarts) the program of session `id`, creating the session if needed; the
     /// sender is attached to it.
     case start(id: UUID, spec: LaunchSpec, cols: Int, rows: Int)

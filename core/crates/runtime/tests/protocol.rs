@@ -57,10 +57,10 @@ fn what_only_a_peer_writes_still_decodes() {
     // A whole double, as Swift writes `3.0`; a lowercase id; a null where Swift leaves the key out.
     assert_eq!(decode(format!(r#"{{"terminate":{{"id":"{id}","grace":3}}}}"#)).unwrap(), CoreRequest::Terminate { id: Uuid::parse(id).unwrap(), grace: 3.0 });
     assert_eq!(decode(format!(r#"{{"close":{{"id":"{id}","grace":null}}}}"#)).unwrap(), CoreRequest::Close { id: Uuid::parse(id).unwrap(), grace: None });
-    assert_eq!(decode(r#"{"hello":{"version":2}}"#.into()).unwrap(), CoreRequest::Hello { version: 2, oldest: None });
+    assert_eq!(decode(r#"{"hello":{"version":2}}"#.into()).unwrap(), CoreRequest::Hello { version: 2, oldest: None, answers_questions: None });
     // Keys a newer build added are dropped; a request this build doesn't know is an error the
     // server drops, never a panic.
-    assert_eq!(decode(r#"{"hello":{"version":9,"oldest":2,"flavor":"new"}}"#.into()).unwrap(), CoreRequest::Hello { version: 9, oldest: Some(2) });
+    assert_eq!(decode(r#"{"hello":{"version":9,"oldest":2,"flavor":"new"}}"#.into()).unwrap(), CoreRequest::Hello { version: 9, oldest: Some(2), answers_questions: None });
     assert!(decode(r#"{"teleport":{}}"#.into()).is_err());
     assert!(decode("not json".into()).is_err());
     // The build before this one welcomed with an empty dictionary and no `oldest`.

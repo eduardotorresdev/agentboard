@@ -44,6 +44,7 @@ struct ProtocolFixtures {
         let requests: [(String, CoreRequest)] = [
             ("hello", .hello(version: 8, oldest: 2)),
             ("hello_without_oldest", .hello(version: 2, oldest: nil)),
+            ("hello_answering_questions", .hello(version: 10, oldest: 2, answersQuestions: true)),
             ("start", .start(id: ids[0], spec: spec, cols: 120, rows: 40)),
             ("attach", .attach(id: ids[0])),
             ("resize", .resize(id: ids[0], cols: 80, rows: 24)),

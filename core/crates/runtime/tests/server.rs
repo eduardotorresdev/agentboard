@@ -98,7 +98,7 @@ impl Board {
     /// Connected and welcomed, in this build's version.
     fn open(path: &str) -> Self {
         let board = Self::connect(path);
-        board.request(&CoreRequest::Hello { version: 8, oldest: Some(2) });
+        board.request(&CoreRequest::Hello { version: 8, oldest: Some(2), answers_questions: None });
         let CoreEvent::Welcome { version: 8, .. } = board.event() else { panic!("not welcomed") };
         board
     }
@@ -228,7 +228,7 @@ fn hello_agrees_on_a_version_or_says_which_the_core_speaks() {
     let core = Fixture::new();
     let welcome = |version, oldest| {
         let board = Board::connect(&core.path);
-        board.request(&CoreRequest::Hello { version, oldest });
+        board.request(&CoreRequest::Hello { version, oldest, answers_questions: None });
         let CoreEvent::Welcome { version, oldest, sessions, service } = board.event() else { panic!() };
         assert_eq!((sessions, service), (vec![], None));
         (version, oldest)
@@ -245,7 +245,7 @@ fn hello_agrees_on_a_version_or_says_which_the_core_speaks() {
     // A core of another build answers a board of this one the same way.
     let newer = Fixture::<()>::with(60.0, |handle| handle.post(|_, server| server.versions = runtime::Versions { version: 11, oldest: 10 }));
     let board = Board::connect(&newer.path);
-    board.request(&CoreRequest::Hello { version: 8, oldest: Some(2) });
+    board.request(&CoreRequest::Hello { version: 8, oldest: Some(2), answers_questions: None });
     let CoreEvent::Welcome { version: 11, oldest: Some(10), .. } = board.event() else { panic!() };
 }
 
@@ -285,7 +285,7 @@ fn a_board_mirrors_a_program_and_a_second_one_picks_it_up() {
 
     // The program outlives the board; the next one learns of it in its welcome.
     let second = Board::connect(&core.path);
-    second.request(&CoreRequest::Hello { version: 8, oldest: Some(2) });
+    second.request(&CoreRequest::Hello { version: 8, oldest: Some(2), answers_questions: None });
     let CoreEvent::Welcome { sessions, .. } = second.event() else { panic!() };
     assert_eq!(sessions, [(id, SessionStatus { state: State::Running, process_id: Some(pid), exit_code: None })]);
     second.request(&CoreRequest::Attach { id });
@@ -430,7 +430,7 @@ fn terminate_stop_and_close_end_the_program() {
         assert_eq!(board.status(closed, |_| true), SessionStatus { state: State::Stopped, process_id: None, exit_code: None });
     }
     let fresh = Board::connect(&core.path);
-    fresh.request(&CoreRequest::Hello { version: 8, oldest: Some(2) });
+    fresh.request(&CoreRequest::Hello { version: 8, oldest: Some(2), answers_questions: None });
     let CoreEvent::Welcome { sessions, .. } = fresh.event() else { panic!() };
     let mut known: Vec<Uuid> = sessions.into_iter().map(|(id, _)| id).collect();
     known.sort();
@@ -678,7 +678,7 @@ fn the_service_gets_boards_frames_input_and_notifications() {
     let logged = |line: &str| log.lock().unwrap().iter().any(|logged| logged == line);
 
     let board = Board::connect(&core.path);
-    board.request(&CoreRequest::Hello { version: 8, oldest: Some(2) });
+    board.request(&CoreRequest::Hello { version: 8, oldest: Some(2), answers_questions: None });
     let CoreEvent::Welcome { service, .. } = board.event() else { panic!() };
     assert_eq!(service, Some(Data(b"state".to_vec())));
     assert!(logged("connected 1 vSome(8) of 1"));

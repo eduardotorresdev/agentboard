@@ -60,6 +60,10 @@ pub struct Store {
     pub(crate) attention: Vec<AttentionRequest>,
     /// Agents whose questions hook waits on the developer's answers (see attention.rs).
     pub(crate) pending_questions: HashMap<Uuid, PendingQuestions>,
+    /// How long held questions wait for a board that answers them once the last one left.
+    pub(crate) question_grace: Duration,
+    /// Counts the grace timers started: only the latest one releases the questions.
+    pub(crate) question_graces: u64,
     /// What agents asked the developer and still wait on (see decision.rs).
     pub(crate) decisions: Vec<Decision>,
     /// Agents whose context already points at the decision guide.
@@ -78,10 +82,10 @@ pub struct Store {
     /// The boards' other elements (browsers).
     elements: HashMap<Uuid, ElementInfo>,
     /// Boards that got their welcome, which then get every change.
-    boards: Vec<CoreBoard>,
+    pub(crate) boards: Vec<CoreBoard>,
     /// Boards that run the board-only tools (browsers, simulators): the ones that said which
     /// elements they have. A phone never does, and would leave a tool call unanswered.
-    tool_boards: Vec<CoreBoard>,
+    pub(crate) tool_boards: Vec<CoreBoard>,
     tool_calls: HashMap<Uuid, (CoreBoard, Reply)>,
     /// What the bus did since it was last asked (see `Turn::flush_bus`).
     bus_events: Arc<Mutex<Vec<BusEvent>>>,
@@ -245,6 +249,8 @@ impl Orchestrator {
             images: saved_images,
             attention: Vec::new(),
             pending_questions: HashMap::new(),
+            question_grace: Duration::from_secs(60),
+            question_graces: 0,
             decisions: Vec::new(),
             pointed_at_decisions: HashSet::new(),
             agent_endpoints: HashMap::new(),
@@ -321,6 +327,11 @@ impl Orchestrator {
 
     pub fn attention(&self) -> &[AttentionRequest] {
         &self.store.attention
+    }
+
+    /// How long held questions wait for a board that answers them (a minute; shorter in tests).
+    pub fn set_question_grace(&mut self, grace: Duration) {
+        self.store.question_grace = grace;
     }
 
     pub fn decisions(&self) -> &[Decision] {
@@ -954,9 +965,10 @@ impl CoreService for Orchestrator {
         self.turn(server).board.user_typed(from_runtime(id), bytes)
     }
 
-    fn board_disconnected(&mut self, _server: &mut CoreServer<Self>, board: &CoreBoard) {
+    fn board_disconnected(&mut self, server: &mut CoreServer<Self>, board: &CoreBoard) {
         self.store.boards.retain(|other| other != board);
         self.store.tool_boards.retain(|other| other != board);
+        self.turn(server).questions_lost_their_board();
         let calls: Vec<Uuid> = self.store.tool_calls.iter().filter(|(_, pending)| &pending.0 == board).map(|(call, _)| *call).collect();
         for call in calls {
             if let Some((_, reply)) = self.store.tool_calls.remove(&call) {

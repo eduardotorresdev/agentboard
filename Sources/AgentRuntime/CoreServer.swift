@@ -220,7 +220,8 @@ public final class CoreServer: @unchecked Sendable {
 
     private func handle(_ request: CoreRequest, from client: CoreBoard) {
         switch request {
-        case .hello(let version, let oldest):
+        case .hello(let version, let oldest, let answersQuestions):
+            client.answersQuestions = answersQuestions
             guard let agreed = versions.agreed(with: .init(version: version, oldest: oldest ?? version)) else {
                 // It hangs up on seeing the version; closing here could drop the welcome unsent.
                 return client.socket.send(CoreEvent.welcome(version: versions.version, oldest: versions.oldest, sessions: [:], service: nil))
@@ -463,6 +464,8 @@ public final class CoreBoard: Hashable, @unchecked Sendable {
     let socket: CoreSocket
     /// The protocol version agreed on with it, once it said hello.
     public internal(set) var version: Int?
+    /// Whether its hello said it answers agents' questions; nil from a board that predates saying it.
+    public internal(set) var answersQuestions: Bool?
     /// Set by `subscribeStatuses`: it then hears every session's status. Other clients (an
     /// agent's own connection) never get events they didn't ask for.
     var hearsAllStatuses = false

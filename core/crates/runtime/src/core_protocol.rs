@@ -129,6 +129,10 @@ pub enum CoreRequest {
         version: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         oldest: Option<i64>,
+        /// Whether it shows the questions agents ask and answers them (a board, Mac or phone);
+        /// none from a board that predates saying it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answers_questions: Option<bool>,
     },
     /// Starts (or restarts) the program of session `id`, creating the session if needed; the
     /// sender is attached to it.

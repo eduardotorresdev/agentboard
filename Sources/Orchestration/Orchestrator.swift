@@ -47,6 +47,10 @@ public final class Orchestrator: CoreService {
     /// Boards that run the board-only tools (browsers, simulators): the ones that said which
     /// elements they have. A phone never does, and would leave a tool call unanswered.
     private var toolBoards: Set<CoreBoard> = []
+    /// How long held questions wait for a board that answers them once the last one left.
+    var questionGrace: Duration = .seconds(60)
+    /// Counts the grace timers started: only the latest one releases the questions.
+    private var questionGraces = 0
     /// The board serving card streams, and how to reach them.
     private var streams: (board: CoreBoard, port: Int, token: String)?
     private var toolCalls: [UUID: (board: CoreBoard, done: CheckedContinuation<ToolResult, Never>)] = [:]
@@ -275,6 +279,26 @@ public final class Orchestrator: CoreService {
 
     // MARK: Boards
 
+    /// Whether a connected board shows agents' questions and answers them: one whose hello says
+    /// so, or one from before hellos said it that lists its elements (a Mac; an older phone
+    /// lists none and has no questions sheet).
+    var questionsHaveABoard: Bool {
+        boards.contains { $0.answersQuestions ?? toolBoards.contains($0) }
+    }
+
+    /// The last board that answers questions left: held questions wait a grace period for one
+    /// to come back (a reconnect, a relaunch), then go back to the agents' terminals.
+    private func questionsLostTheirBoard() {
+        guard !pendingQuestions.isEmpty, !questionsHaveABoard else { return }
+        questionGraces += 1
+        let grace = questionGraces
+        Task { @MainActor [weak self, questionGrace] in
+            try? await Task.sleep(for: questionGrace)
+            guard let self, self.questionGraces == grace, !self.questionsHaveABoard else { return }
+            for id in Array(self.pendingQuestions.keys) { self.answerQuestions(id, nil) }
+        }
+    }
+
     public func boardConnected(_ board: CoreBoard) -> Data? {
         boards.insert(board)
         return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
@@ -288,6 +312,7 @@ public final class Orchestrator: CoreService {
     public func boardDisconnected(_ board: CoreBoard) {
         boards.remove(board)
         toolBoards.remove(board)
+        questionsLostTheirBoard()
         if streams?.board == board { streams = nil }
         for (call, pending) in toolCalls where pending.board == board {
             toolCalls[call] = nil

@@ -84,7 +84,8 @@ public final class CoreClient: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(timeout)
         let client = CoreClient(fd: fd)
         client.socket.start()
-        client.socket.send(CoreRequest.hello(version: versions.version, oldest: versions.oldest))
+        // Every board this opens (the Mac's, the phone's) shows agents' questions and answers them.
+        client.socket.send(CoreRequest.hello(version: versions.version, oldest: versions.oldest, answersQuestions: true))
         guard client.welcomed.wait(timeout: .now() + max(0.1, deadline.timeIntervalSinceNow)) == .success,
               let welcome = client.lock.withLock({ client.welcome }) else {
             client.socket.close()
