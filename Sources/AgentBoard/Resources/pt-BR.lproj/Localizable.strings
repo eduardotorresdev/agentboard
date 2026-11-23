@@ -569,7 +569,10 @@
 "Lays out its cards and lines on this canvas." = "Aplica os cards e as linhas dele neste canvas.";
 "The canvases it was laid out on stay as they are. This can't be undone." = "Os canvas em que ele foi aplicado continuam como estão. Não dá para desfazer.";
 "Replaces this canvas with the template. Drag it sideways to remove it." = "Substitui este canvas pelo template. Arraste para o lado para remover.";
-"Template with %lld cards" = "Template com %lld cards";
+"Template %@ with %lld cards" = "Template %@ com %lld cards";
+"Untitled" = "Sem nome";
+"Name this template" = "Dê um nome a este template";
+"Shown on the template, to tell it apart from the others." = "Aparece no template, para diferenciá-lo dos outros.";
 "Replace this canvas with the template?" = "Substituir este canvas pelo template?";
 "Every card on it is removed, and its agents and runners stop. This can't be undone." = "Todos os cards dele são removidos, e seus agentes e runners são encerrados. Não dá para desfazer.";
 "Replace" = "Substituir";
@@ -670,3 +673,4 @@
 "Couldn't send the picture to %@. Nothing was sent." = "Não foi possível enviar a imagem para %@. Nada foi enviado.";
 "Sent 1 annotation to %@" = "1 anotação enviada para %@";
 "Sent %lld annotations to %@" = "%lld anotações enviadas para %@";
+"Other projects" = "Outros projetos";

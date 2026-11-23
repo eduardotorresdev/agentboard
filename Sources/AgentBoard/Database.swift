@@ -120,6 +120,10 @@ final class Database {
                 id TEXT PRIMARY KEY,
                 project TEXT NOT NULL,
                 data TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS agent_links (
+                id TEXT PRIMARY KEY,
+                data TEXT NOT NULL
             )
             """)
         if try !columns(of: "projects").contains("organization") {
@@ -509,7 +513,7 @@ final class Database {
     }
 
     func saveTemplate(_ template: CanvasTemplate, project: String) throws {
-        let stmt = try prepare("INSERT OR REPLACE INTO templates (id, project, data) VALUES (?, ?, ?)")
+        let stmt = try prepare("INSERT INTO templates (id, project, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, template.id.uuidString)
         bind(stmt, 2, project)
@@ -519,6 +523,33 @@ final class Database {
 
     func deleteTemplate(id: UUID) throws {
         let stmt = try prepare("DELETE FROM templates WHERE id = ?")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func agentLinks() throws -> [AgentLinks.Link] {
+        let stmt = try prepare("SELECT data FROM agent_links ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [AgentLinks.Link] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let link = try? JSONDecoder().decode(AgentLinks.Link.self, from: Data(String(cString: sqlite3_column_text(stmt, 0)).utf8)) {
+                result.append(link)
+            }
+        }
+        return result
+    }
+
+    func saveAgentLink(_ link: AgentLinks.Link) throws {
+        let stmt = try prepare("INSERT INTO agent_links (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, link.id.uuidString)
+        bind(stmt, 2, String(decoding: try JSONEncoder().encode(link), as: UTF8.self))
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    func deleteAgentLink(id: UUID) throws {
+        let stmt = try prepare("DELETE FROM agent_links WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }

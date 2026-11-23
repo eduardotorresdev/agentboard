@@ -4,6 +4,8 @@
 
 All code must be written in English: identifiers, comments, log and UI strings, script output, commit messages, and file names.
 
+Talk to the user in Brazilian Portuguese (pt-BR): replies, questions and summaries.
+
 ## Animation
 
 All animations must be spring-based (e.g. `.spring`, `.snappy`, `.smooth`, `.bouncy`). Never use timing curves like `.easeInOut` or `.linear`.

@@ -31,12 +31,14 @@ final class FileTreeCardLayer: CALayer {
     override init(layer: Any) { super.init(layer: layer) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func update(frame: CGRect, name: String, focused: Bool, closeHovered: Bool, scale: CGFloat) {
+    /// Also a relay's card (see `AgentLinks`): its agent's icon, state and where it is.
+    func update(frame: CGRect, name: String, focused: Bool, closeHovered: Bool, scale: CGFloat,
+                icon: CardIcon = .symbol("folder", color: Theme.Hex.inkMuted), status: CardStatus? = nil, detail: String? = nil) {
         self.frame = frame
         self.focused = focused
         CardFrame.style(self, focused: focused)
         let close = CardMetrics.close(of: bounds)
-        bar.update(size: bounds.size, icon: .symbol("folder", color: Theme.Hex.inkMuted), status: nil, title: name, detail: nil, focused: focused,
+        bar.update(size: bounds.size, icon: icon, status: status, title: name, detail: detail, focused: focused,
                    reserve: bounds.width - close.minX + 8, scale: scale)
         CardFrame.closeButton(closeHover, closeGlyph, in: close, hovered: closeHovered, scale: scale)
     }

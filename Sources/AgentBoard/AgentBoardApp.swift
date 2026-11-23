@@ -25,8 +25,12 @@ struct AgentBoardApp: App {
         fileTrees.attach(to: agents)
         _fileTrees = State(initialValue: fileTrees)
         let hosts = HostStores(local: agents, account: AccountStore(database: store.database))
+        let links = AgentLinks(database: store.database, projects: store)
+        links.store = { [unowned hosts] in hosts[$0] }
+        links.stores = { [unowned hosts] in [hosts.local] + hosts.remote.values }
         hosts.prepare = { [unowned hosts] in
             $0.projectTools = ProjectTools(projects: store, agents: $0, hosts: hosts)
+            links.attach(to: $0)
             // Another host's store gets the board's browsers and file trees as this Mac's did above.
             if $0.host != nil {
                 browsers.attach(to: $0)

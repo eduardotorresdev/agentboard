@@ -83,6 +83,12 @@ final class AgentStore {
     @ObservationIgnored private var viewers: [UUID: [ObjectIdentifier: () -> Void]] = [:]
     /// Called after a message travels along a line, so the board can show it.
     @ObservationIgnored var onMessage: ((Message) -> Void)?
+    /// Every message the core reports, for the relays to carry on (see `AgentLinks`).
+    @ObservationIgnored var onRelayMessage: ((Message) -> Void)?
+    /// The lines changed: with the ones before, or nil when a core's state just arrived.
+    @ObservationIgnored var onConnectionsChange: ((_ old: [Connection]?) -> Void)?
+    /// The links to agents of other worktrees and hosts, when the app keeps them.
+    @ObservationIgnored weak var agentLinks: AgentLinks?
 
     /// The line to the process that runs the cards' programs and keeps the cards, the lines and
     /// the agents' tools, so they outlive this one (see `CoreServer`). It reconnects by itself
@@ -320,6 +326,7 @@ final class AgentStore {
         onConnect?()
         onWelcome?()
         client.send(.elements(elements()))
+        onConnectionsChange?(nil)
         if let streams = servedStreams { client.send(.servesStreams(port: streams.port, token: streams.token)) }
         for (id, session) in sessions {
             guard let record = record(id) else {
@@ -384,9 +391,12 @@ final class AgentStore {
         case .cardRemoved(let id):
             forget(id)
         case .connections(let list):
+            let old = connections
             connections = list
+            onConnectionsChange?(old)
         case .message(let message):
             onMessage?(message)
+            onRelayMessage?(message)
         case .runners(let report):
             runnerReport = report
             onRunnersChange?()
@@ -639,8 +649,10 @@ final class AgentStore {
     }
 
     func disconnect(_ id: UUID) {
+        let old = connections
         connections.removeAll { $0.id == id }
         send(.disconnect(id))
+        onConnectionsChange?(old)
     }
 
     /// Lines touching an element the board removed (a browser) go with it.

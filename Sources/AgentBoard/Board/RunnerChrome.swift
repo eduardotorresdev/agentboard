@@ -210,7 +210,7 @@ extension CardMetrics {
 
     static let composerGap: CGFloat = 8
     /// Lines the composer grows to before it scrolls.
-    static let composerMaxLines = 6
+    static let composerMaxLines = 10
 
     /// One row per file being sent, under the text.
     static let uploadRowHeight: CGFloat = 20

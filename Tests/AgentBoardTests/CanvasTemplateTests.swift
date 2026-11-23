@@ -39,8 +39,13 @@ struct CanvasTemplateTests {
         try database.saveTemplate(second, project: "/p")
         try database.saveTemplate(first.with(id: UUID()), project: "/other")
         #expect(try database.templates(project: "/p") == [second, first])
+        // Renaming keeps its place in the list.
+        var renamed = first
+        renamed.name = "Web"
+        try database.saveTemplate(renamed, project: "/p")
+        #expect(try database.templates(project: "/p") == [second, renamed])
         try database.deleteTemplate(id: second.id)
-        #expect(try database.templates(project: "/p") == [first])
+        #expect(try database.templates(project: "/p") == [renamed])
         #expect(try database.templates(project: "/other").count == 1)
     }
 }

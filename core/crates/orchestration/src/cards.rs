@@ -129,6 +129,13 @@ pub struct ElementInfo {
     /// puts it on the worktree's board in every organization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<Uuid>,
+    /// It stands for an agent elsewhere (another worktree or host): it takes messages, which the
+    /// board carries there on hearing them (`BoardEvent::Message`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<bool>,
+    /// Why a relay can't take a message right now, as the board knows it; none when it can.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable: Option<String>,
 }
 
 /// The organization's Claude Code config folder, prepared (see `organization_home::prepare`).

@@ -106,9 +106,14 @@ public struct ElementInfo: Hashable, Codable, Sendable {
     /// The organization it belongs to; nil from a board that predates organizations here, which
     /// puts it on the worktree's board in every organization.
     public var organization: UUID?
+    /// It stands for an agent elsewhere (another worktree or host): it takes messages, which the
+    /// board carries there on hearing them (`BoardEvent.message`).
+    public var relay: Bool?
+    /// Why a relay can't take a message right now, as the board knows it; nil when it can.
+    public var unavailable: String?
 
     public init(id: UUID, name: String, kind: String, detail: String?, worktree: String, frame: CGRect,
-                organization: UUID? = nil) {
+                organization: UUID? = nil, relay: Bool? = nil, unavailable: String? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -116,5 +121,7 @@ public struct ElementInfo: Hashable, Codable, Sendable {
         self.worktree = worktree
         self.frame = frame
         self.organization = organization
+        self.relay = relay
+        self.unavailable = unavailable
     }
 }

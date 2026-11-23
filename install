@@ -29,8 +29,10 @@ APP="$STAGE/AgentBoard.app"
 scripts/assemble-app "$BIN" core/target/release/agentboard "$APP"
 # Xcode 27's SwiftPM stamps the deployment target as the SDK version, and AppKit then gives the
 # app the behavior of that old SDK (broken top bar, no popovers). Stamp the SDK it was built with.
-vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace -output "$APP/Contents/MacOS/AgentBoard" "$APP/Contents/MacOS/AgentBoard"
-codesign --force --sign - "$APP/Contents/MacOS/AgentBoard"
+# Signed outside the bundle: inside, codesign sees the resource bundles at its root and refuses.
+vtool -set-build-version macos 14.0 "$(xcrun --show-sdk-version)" -replace -output "$STAGE/AgentBoard" "$APP/Contents/MacOS/AgentBoard"
+codesign --force --sign - "$STAGE/AgentBoard"
+mv "$STAGE/AgentBoard" "$APP/Contents/MacOS/AgentBoard"
 VERSION=$(date +%Y.%m.%d)
 BUILD=$(date +%Y%m%d%H%M)
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)

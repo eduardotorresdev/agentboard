@@ -36,6 +36,8 @@ struct CanvasTemplate: Identifiable, Codable, Equatable {
     }
 
     var id = UUID()
+    /// What the user called it; templates memorized before names existed have none.
+    var name: String?
     var cards: [Card]
     var lines: [Line]
 
@@ -73,6 +75,9 @@ struct CanvasTemplate: Identifiable, Codable, Equatable {
         ]
         return parts.filter { $0.1 > 0 }.map { ($0.0, $0.1, $0.1 == 1 ? $0.2 : $0.3) }
     }
+
+    /// Its name as shown.
+    var title: String { name ?? L("Untitled") }
 
     /// What it holds, in words: "2 agents, 1 runner".
     var summary: String { counts.map(\.label).joined(separator: ", ") }

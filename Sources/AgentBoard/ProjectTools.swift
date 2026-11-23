@@ -7,7 +7,7 @@ import Orchestration
 /// organization of the agent's card. One per store: `agents` is the calling agent's host's.
 @MainActor
 final class ProjectTools {
-    private let projects: ProjectStore
+    let projects: ProjectStore
     private unowned let agents: AgentStore
     private weak var hosts: HostStores?
 

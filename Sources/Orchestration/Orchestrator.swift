@@ -374,7 +374,9 @@ public final class Orchestrator: CoreService {
                 bus.remove(element: id)
             }
             for info in list {
-                if elements[info.id] == nil { bus.register(RemoteElement(id: info.id, store: self)) }
+                if elements[info.id] == nil {
+                    bus.register(info.relay == true ? RelayElement(id: info.id, store: self) : RemoteElement(id: info.id, store: self))
+                }
                 elements[info.id] = info
             }
             broadcast(.elements(Array(elements.values)), except: board)
@@ -683,6 +685,9 @@ public final class Orchestrator: CoreService {
     }
 
     fileprivate func element(_ id: UUID) -> ElementInfo? { elements[id] }
+
+    /// A board that runs the board's own tools (not a phone) is connected.
+    fileprivate var hasToolBoard: Bool { boards.contains(where: toolBoards.contains) }
 
     /// Whether the agent is answering the developer's questions or a prompt in its terminal:
     /// a message typed in now would land in that answer.
@@ -1012,7 +1017,7 @@ struct TerminalLine {
 @MainActor
 final class RunnerElement: BoardElement {
     let id: UUID
-    private weak var store: Orchestrator?
+    weak var store: Orchestrator?
 
     init(id: UUID, store: Orchestrator) {
         self.id = id
@@ -1092,10 +1097,23 @@ private final class FileTreeElement: BoardElement {
 }
 
 /// An element the board told the core about (a browser).
+/// An agent elsewhere, on this board: what it is given the bus reports (`.message`), and a board
+/// carries it there; with no board open nothing would.
 @MainActor
-private final class RemoteElement: BoardElement {
+private final class RelayElement: RemoteElement, MessageEndpoint {
+    var unavailableReason: String? {
+        guard let store else { return nil }
+        if let reason = store.element(id)?.unavailable { return reason }
+        return store.hasToolBoard ? nil : "no board is open to carry the message there"
+    }
+
+    func receive(_ message: Message, from sender: any BoardElement) {}
+}
+
+@MainActor
+private class RemoteElement: BoardElement {
     let id: UUID
-    private weak var store: Orchestrator?
+    fileprivate weak var store: Orchestrator?
 
     init(id: UUID, store: Orchestrator) {
         self.id = id

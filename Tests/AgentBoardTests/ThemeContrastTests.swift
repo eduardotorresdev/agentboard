@@ -90,8 +90,11 @@ final class ThemeContrastTests: XCTestCase {
         CardFrame.style(card, focused: true)
         XCTAssertEqual(card.borderWidth, 2)
         XCTAssertEqual(card.shadowOpacity, 0)
+        XCTAssertGreaterThan(card.borderColor?.alpha ?? 0, 0)
         CardFrame.style(card, focused: false)
-        XCTAssertEqual(card.borderWidth, 0)
+        // The ring stays, clear, so highlighting only fades its color in.
+        XCTAssertEqual(card.borderWidth, 2)
+        XCTAssertEqual(card.borderColor?.alpha, 0)
     }
 
     func testControlTargetsKeepTheirScreenSizeWhenZoomedOut() {

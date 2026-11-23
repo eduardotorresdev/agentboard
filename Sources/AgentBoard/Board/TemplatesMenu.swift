@@ -14,6 +14,7 @@ struct TemplatesMenu: View {
     let reload: () -> Void
     @State private var isOpen = false
     @State private var removing: CanvasTemplate?
+    @State private var naming: CanvasTemplate?
 
     var body: some View {
         // Nothing to memorize, and nothing memorized or few enough to show on the empty canvas
@@ -48,14 +49,14 @@ struct TemplatesMenu: View {
                             TemplateRow(template: template) {
                                 isOpen = false
                                 board.apply(template)
-                            } onRemove: { removing = template }
+                            } onRemove: { removing = template } onRename: { naming = template }
                         }
                     }
                 }
                 .frame(height: min(CGFloat(templates.count) * (TemplateRow.height + 6) - 6, 372))
             }
             if !isEmpty, let current = board.template(), !current.cards.isEmpty {
-                Button { save(current) } label: {
+                Button { naming = current } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "plus").font(Theme.Font.label).foregroundStyle(Theme.accent)
                         VStack(alignment: .leading, spacing: 1) {
@@ -91,11 +92,7 @@ struct TemplatesMenu: View {
         .background(Theme.surfaceDeep)
         .animation(.snappy(duration: 0.3), value: templates)
         .modifier(TemplateRemoval(removing: $removing, database: database, reload: reload))
-    }
-
-    private func save(_ template: CanvasTemplate) {
-        do { try database?.saveTemplate(template, project: project) } catch { NSLog("AgentBoard: couldn't save the template: \(error)") }
-        reload()
+        .modifier(TemplateNaming(naming: $naming, database: database, project: project, reload: reload))
     }
 }
 
@@ -107,9 +104,11 @@ struct TemplateCards: View {
 
     let board: BoardController
     let database: Database?
+    let project: String
     let templates: [CanvasTemplate]
     let reload: () -> Void
     @State private var removing: CanvasTemplate?
+    @State private var naming: CanvasTemplate?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -119,13 +118,43 @@ struct TemplateCards: View {
             }
             HStack(spacing: 8) {
                 ForEach(templates) { template in
-                    TemplateRow(template: template) { board.apply(template) } onRemove: { removing = template }
+                    TemplateRow(template: template) { board.apply(template) } onRemove: { removing = template } onRename: { naming = template }
                         .frame(width: 204)
                 }
             }
         }
         .animation(.snappy(duration: 0.3), value: templates)
         .modifier(TemplateRemoval(removing: $removing, database: database, reload: reload))
+        .modifier(TemplateNaming(naming: $naming, database: database, project: project, reload: reload))
+    }
+}
+
+/// Asks for the name of the template in `naming` and saves it under that name: a new one, or
+/// one being renamed. A name is required.
+private struct TemplateNaming: ViewModifier {
+    @Binding var naming: CanvasTemplate?
+    let database: Database?
+    let project: String
+    let reload: () -> Void
+    @State private var name = ""
+
+    func body(content: Content) -> some View {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        content
+            .alert(L("Name this template"), isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } }), presenting: naming) { template in
+                TextField(L("Name"), text: $name)
+                Button(L("Save")) {
+                    var named = template
+                    named.name = trimmed
+                    do { try database?.saveTemplate(named, project: project) } catch { NSLog("AgentBoard: couldn't save the template: \(error)") }
+                    reload()
+                }
+                .disabled(trimmed.isEmpty)
+                Button(L("Cancel"), role: .cancel) {}
+            } message: { _ in
+                Text(L("Shown on the template, to tell it apart from the others."))
+            }
+            .onChange(of: naming) { name = naming?.name ?? "" }
     }
 }
 
@@ -157,6 +186,7 @@ private struct TemplateRow: View {
     let template: CanvasTemplate
     let onApply: () -> Void
     let onRemove: () -> Void
+    let onRename: () -> Void
     @State private var offset: CGFloat = 0
     @State private var isRevealed = false
 
@@ -177,6 +207,16 @@ private struct TemplateRow: View {
             // Covered by the thumbnail until dragged; the context menu and VoiceOver remove without dragging.
             .accessibilityHidden(true)
             TemplateThumbnail(template: template)
+                .overlay(alignment: .bottomLeading) {
+                    Text(template.title)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(template.name == nil ? Theme.inkMuted : Theme.ink)
+                        .lineLimit(1)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.control))
+                        .padding(6)
+                }
                 .offset(x: offset)
                 .onTapGesture { if isRevealed { settle(false) } else { onApply() } }
                 .gesture(DragGesture(minimumDistance: 6)
@@ -184,12 +224,16 @@ private struct TemplateRow: View {
                     .onEnded { _ in settle(offset < -Self.reveal / 2) })
         }
         .frame(height: Self.height)
-        .contextMenu { Button(L("Remove"), role: .destructive, action: onRemove) }
+        .contextMenu {
+            Button(L("Rename"), action: onRename)
+            Button(L("Remove"), role: .destructive, action: onRemove)
+        }
         .help(L("Replaces this canvas with the template. Drag it sideways to remove it."))
         .accessibilityElement()
-        .accessibilityLabel(L("Template with \(template.cards.count) cards"))
+        .accessibilityLabel(L("Template \(template.title) with \(template.cards.count) cards"))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, onApply)
+        .accessibilityAction(named: Text(L("Rename")), onRename)
         .accessibilityAction(named: Text(L("Remove")), onRemove)
     }
 

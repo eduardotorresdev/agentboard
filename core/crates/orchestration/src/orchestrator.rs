@@ -549,7 +549,13 @@ impl Elements for BoardView<'_> {
         // An element the board told the core about (a browser).
         let info = self.elements.get(&id)?;
         let board = info.organization.map_or(info.worktree.clone(), |organization| board_key(&info.worktree, organization));
-        Some(Element { board: Some(board), detail: info.detail.clone(), ..Element::new(id, info.name.clone(), ElementKind(info.kind.clone())) })
+        // A relay takes messages: a board hears them and carries them on, so one must be there.
+        let endpoint = (info.relay == Some(true)).then(|| Endpoint {
+            unavailable_reason: info.unavailable.clone().or_else(|| {
+                (!self.boards.iter().any(|board| self.tool_boards.contains(board))).then(|| "no board is open to carry the message there".to_string())
+            }),
+        });
+        Some(Element { board: Some(board), detail: info.detail.clone(), endpoint, ..Element::new(id, info.name.clone(), ElementKind(info.kind.clone())) })
     }
 
     fn receive(&mut self, message: &Message, sender: &Element) {

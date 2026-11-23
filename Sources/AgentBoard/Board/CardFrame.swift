@@ -21,16 +21,15 @@ enum CardFrame {
         ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 
-    /// Corners and the highlighted look (focus, and selection
-    /// through the same flag): a solid accent ring, with the accent cap the title bar draws. No
-    /// blurred glow. The card has no background of its own: its title bar draws header and body.
+    /// Corners and the highlighted look (focus, and selection through the same flag): a ring that
+    /// is always there, clear until the card is highlighted, then a soft gray. No blurred glow. The card has no background of its own: its title bar draws header and body.
     static func style(_ card: CALayer, focused highlighted: Bool) {
         card.backgroundColor = nil
         card.cornerRadius = CardMetrics.radius
         // No shadow: the card's contrast against the sky separates it.
         card.shadowOpacity = 0
-        card.borderColor = BoardPalette.rgb(BoardPalette.accent)
-        card.borderWidth = highlighted ? 2 : 0
+        card.borderWidth = 2
+        card.borderColor = highlighted ? BoardPalette.rgb(BoardPalette.ink, 0.18) : CGColor(gray: 0, alpha: 0)
     }
 
     /// A close control: a crisp square that fills while hovered, its cross centered.
@@ -137,7 +136,6 @@ enum CardIcon: Hashable {
 
 /// A card's title bar: translucent gray over the sky, the card's icon, its name, its state as a
 /// small mark (in `CardStatus`'s vocabulary) and a quieter detail. Below it the card's body.
-/// Focus shows as an accent cap on the top edge.
 final class CardTitleBar: CALayer {
     private let backdrop = CALayer()
     private let tint = CALayer()
@@ -147,7 +145,6 @@ final class CardTitleBar: CALayer {
     private let mark = CALayer()
     private let markGlyph = CALayer()
     private let detail = CATextLayer()
-    private let rule = CALayer()
     private var status: CardStatus?
 
     override init() {
@@ -166,8 +163,7 @@ final class CardTitleBar: CALayer {
         detail.font = CardFrame.detailFont
         detail.fontSize = CardFrame.detailFont.pointSize
         for text in [title, detail] { text.truncationMode = .end }
-        rule.backgroundColor = BoardPalette.rgb(BoardPalette.accent)
-        [body, backdrop, tint, glyph, title, mark, detail, rule].forEach(addSublayer)
+        [body, backdrop, tint, glyph, title, mark, detail].forEach(addSublayer)
         mark.addSublayer(markGlyph)
     }
 
@@ -242,9 +238,6 @@ final class CardTitleBar: CALayer {
         detail.contentsScale = scale
         detail.foregroundColor = BoardPalette.rgb(status == .crashed ? Theme.Hex.danger : status == .waiting || contrast ? ink : Theme.Hex.inkMuted)
         detail.frame = CGRect(x: detailX, y: (height - detailLine) / 2 + 1, width: max(0, CardFrame.titleX + available - detailX), height: detailLine)
-        // Focus caps the card's top edge; no line ever splits the bar from the content.
-        rule.frame = CGRect(x: CardMetrics.radius, y: 0, width: max(0, width - CardMetrics.radius * 2), height: 3)
-        rule.isHidden = !focused
         CATransaction.commit()
         animate(status)
         SkyBlur.shared.register(self)

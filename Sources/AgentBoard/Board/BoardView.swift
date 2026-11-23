@@ -188,6 +188,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     fileprivate var touchCapture: UUID?
     fileprivate let fileTrees: FileTreeStore
     fileprivate var fileTreeCards: [UUID: FileTreeCardLayer] = [:]
+    /// Cards standing for linked agents of other worktrees and hosts (see `AgentLinks`).
+    fileprivate var relayCards: [UUID: FileTreeCardLayer] = [:]
     /// The SwiftUI files and file of each file tree card, over its content, and the bar that
     /// sends its notes, below it.
     fileprivate var fileTreeViews: [UUID: (host: FileTreeHost, content: NSView, bar: NSView, barHost: FileTreeHost)] = [:]
@@ -767,6 +769,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         syncBrowsers(onScreen: onScreen, scale: renderScale)
         syncSimulators(onScreen: onScreen, scale: renderScale)
         syncFileTrees(scale: renderScale)
+        syncRelays(scale: renderScale)
         syncLinks(scale: renderScale)
         syncSelection()
         syncDecisions(records)
@@ -909,13 +912,18 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         store.agents(in: worktree).map { ($0.id, $0.frame) } + store.postIts(in: worktree).map { ($0.id, $0.frame) }
             + store.images(in: worktree).map { ($0.id, $0.frame) }
             + browsers.browsers(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) } + localSimulators.map { ($0.id, $0.frame) }
-            + fileTrees.trees(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) }
+            + fileTrees.trees(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) } + relays.map { ($0.id, $0.frame) }
     }
 
     /// The lines of this worktree, between any of its cards.
     private var worktreeConnections: [Connection] {
         store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree, on: store.host?.id).map(\.id))
-            .union(localSimulators.map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)))
+            .union(localSimulators.map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)).union(relays.map(\.id)))
+    }
+
+    /// The relays of this worktree: linked agents elsewhere.
+    fileprivate var relays: [AgentLinks.Relay] {
+        store.agentLinks?.relays(on: store.host?.id).filter { $0.worktree == worktree } ?? []
     }
 
     /// Ties each line of this worktree to its cards' handles, and the one being drawn to the
@@ -1328,7 +1336,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// The topmost agent card under a world point, unless a browser or post-it covers it.
     private func card(at point: CGPoint) -> AgentRecord? {
-        guard browser(at: point) == nil, simulator(at: point) == nil, postIt(at: point) == nil, image(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        guard relay(at: point) == nil, browser(at: point) == nil, simulator(at: point) == nil, postIt(at: point) == nil, image(at: point) == nil, fileTree(at: point) == nil else { return nil }
         return store.agents(in: worktree).last { $0.frame.contains(point) }
     }
 
@@ -1355,13 +1363,19 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         return store.images(in: worktree).last { $0.frame.contains(point) }
     }
 
+    /// The topmost relay card under a world point.
+    fileprivate func relay(at point: CGPoint) -> AgentLinks.Relay? {
+        relays.last { $0.frame.contains(point) }
+    }
+
     /// The topmost card of any kind under a world point.
     private func item(at point: CGPoint) -> UUID? {
-        fileTree(at: point)?.id ?? simulator(at: point)?.id ?? browser(at: point)?.id ?? image(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
+        fileTree(at: point)?.id ?? relay(at: point)?.id ?? simulator(at: point)?.id ?? browser(at: point)?.id ?? image(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
     }
 
     private func frame(of id: UUID) -> CGRect? {
         record(id)?.frame ?? store.postIt(id)?.frame ?? store.image(id)?.frame ?? browsers.record(id)?.frame ?? simulators.record(id)?.frame ?? fileTrees.record(id)?.frame
+            ?? store.agentLinks?.relay(id)?.frame
     }
 
     private func record(_ id: UUID) -> AgentRecord? {
@@ -1464,6 +1478,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             syncLayers()
             return
         }
+        if fileTree(at: location) == nil, let relay = relay(at: location) {
+            endAddressEditing()
+            endPostItEditing()
+            relayMouseDown(relay, at: location, point: point)
+            syncLayers()
+            return
+        }
         if let tree = fileTree(at: location) {
             endAddressEditing()
             endPostItEditing()
@@ -1547,6 +1568,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         } else if wasFocused, CardMetrics.terminal(of: record).contains(location), report(.press, at: location, to: record, event: event) {
             // The first click only focuses the card; later ones go to the program if it wants them.
             mouseCapture = record.id
+        }
+        // The first click on an agent writes in its composer; the next one (the board already
+        // first responder, above) types into its terminal.
+        if !wasFocused, focusedID == record.id, record.runner == nil, interaction?.kind != .resize {
+            ComposerDrafts.focus(record.id)
         }
         syncLayers()
     }
@@ -1720,6 +1746,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let tree, CardMetrics.close(of: tree.frame).target(zoom: zoom).contains(point) {
             hovered = tree.id
         }
+        let relay = tree == nil ? relay(at: point) : nil
+        if let relay, CardMetrics.close(of: relay.frame).target(zoom: zoom).contains(point) {
+            hovered = relay.id
+        }
         let image = image(at: point)
         if let image, ImageCardLayout(size: image.frame.size).close.target(zoom: zoom).contains(local(point, in: image.frame)) {
             hovered = image.id
@@ -1746,7 +1776,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             syncLayers()
         }
         let handle = handle(at: point)
-        let showing = handle?.card ?? tree?.id ?? simulator?.id ?? browser?.id ?? image?.id ?? postIt?.id ?? card?.id
+        let showing = handle?.card ?? tree?.id ?? relay?.id ?? simulator?.id ?? browser?.id ?? image?.id ?? postIt?.id ?? card?.id
         if control?.0 != hoveredControl?.card || control?.1 != hoveredControl?.control {
             hoveredControl = control.map { (card: $0.0, control: $0.1) }
             syncLayers()
@@ -1833,7 +1863,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 
-    /// Focused and selected cards wear the same lifted, accent-capped frame.
+    /// Focused and selected cards wear the same soft gray ring.
     private func highlighted(_ id: UUID) -> Bool { id == focusedID || selection.contains(id) }
 
     /// Draws the box being dragged; selected cards show it on their own frame.
@@ -1886,6 +1916,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 simulators.remove(id)
             } else if fileTrees.record(id) != nil {
                 fileTrees.remove(id)
+            } else if let links = store.agentLinks, let link = links.links.first(where: { $0.ends.contains { $0.relay == id } }) {
+                links.remove(link)
             }
         }
         if let focusedID, ids.contains(focusedID) { self.focusedID = nil }
@@ -2398,7 +2430,9 @@ extension BoardView {
     }
 
     fileprivate func setFrame(_ frame: CGRect, for id: UUID, persist: Bool) {
-        if store.image(id) != nil {
+        if let links = store.agentLinks, links.relay(id) != nil {
+            links.setFrame(frame, for: id, persist: persist)
+        } else if store.image(id) != nil {
             store.setImageFrame(frame, for: id, persist: persist)
         } else if fileTrees.record(id) != nil {
             fileTrees.setFrame(frame, for: id, persist: persist)
@@ -3641,5 +3675,49 @@ extension BoardView {
         guard !urls.isEmpty else { return false }
         addImages(urls.map(ImageSource.file), at: world(convert(sender.draggingLocation, from: nil)))
         return true
+    }
+}
+
+// MARK: - Relays
+
+extension BoardView {
+    /// Linked agents of other worktrees and hosts: a title bar each, with the agent's icon,
+    /// state and where it is. Read-only; the close button ends the link on both boards.
+    fileprivate func syncRelays(scale: CGFloat) {
+        let records = relays
+        let ids = Set(records.map(\.id))
+        for (id, card) in relayCards where !ids.contains(id) {
+            card.removeFromSuperlayer()
+            relayCards[id] = nil
+        }
+        for record in records {
+            let card = relayCards[record.id] ?? {
+                let card = FileTreeCardLayer()
+                relayCards[record.id] = card
+                cardsLayer.addSublayer(card)
+                card.animateAppearance()
+                return card
+            }()
+            card.update(frame: record.frame, name: record.name, focused: highlighted(record.id), closeHovered: hoveredClose == record.id,
+                        scale: scale, icon: CardFrame.agentIcon(provider: record.provider), status: record.status, detail: record.place)
+            let lit: Int? = if let linkDrag {
+                linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
+            } else {
+                record.id == hoveredCard ? hoveredHandle : nil
+            }
+            card.updateHandles(visible: linkDrag != nil || record.id == hoveredCard, hovered: lit, linkTarget: linkDrag?.target == record.id)
+        }
+    }
+
+    fileprivate func relayMouseDown(_ relay: AgentLinks.Relay, at location: CGPoint, point: CGPoint) {
+        focusedID = relay.id
+        if CardMetrics.close(of: relay.frame).target(zoom: zoom).contains(location),
+           let links = store.agentLinks, let link = links.links.first(where: { $0.ends.contains { $0.relay == relay.id } }) {
+            links.remove(link)
+            focusedID = nil
+            hoveredClose = nil
+        } else {
+            interaction = Interaction(id: relay.id, kind: .move, start: point, frame: relay.frame)
+        }
     }
 }

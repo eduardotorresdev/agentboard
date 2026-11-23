@@ -612,7 +612,7 @@ fn elements_reach_their_organizations_agents() {
     let (mine, theirs) = (Uuid::new(), Uuid::new());
     let a = AgentRecord { organization: Some(mine), ..agent("Ada", &core.folder) };
     board.add(&[&a]);
-    let element = |name: &str, kind: &str, organization| ElementInfo { id: Uuid::new(), name: name.into(), kind: kind.into(), detail: None, worktree: a.worktree.clone(), frame: Rect::new(0.0, 0.0, 100.0, 100.0), organization };
+    let element = |name: &str, kind: &str, organization| ElementInfo { id: Uuid::new(), name: name.into(), kind: kind.into(), detail: None, worktree: a.worktree.clone(), frame: Rect::new(0.0, 0.0, 100.0, 100.0), organization, relay: None, unavailable: None };
     let elements = vec![element("Ours", "browser", Some(mine)), element("Theirs", "browser", Some(theirs)), element("Legacy", "filetree", None)];
     board.send(BoardRequest::Elements(only(elements.clone())));
     board.connect(a.id, elements[0].id);
@@ -1526,6 +1526,8 @@ fn elements_reach_the_other_boards_only() {
         worktree: core.folder.to_string_lossy().into_owned(),
         frame: Rect::new(0.0, 0.0, 700.0, 500.0),
         organization: None,
+        relay: None,
+        unavailable: None,
     };
     mac.send(BoardRequest::Elements(only(vec![browser.clone()])));
     phone.wait("the elements", |events| events.contains(&BoardEvent::Elements(only(vec![browser.clone()]))));
@@ -1877,4 +1879,43 @@ fn a_board_has_the_core_make_projects_and_worktrees() {
         assert!(path.is_none() && error.is_some(), "{error:?}");
     }
     assert!(!core.folder.join("etc").exists() && !core.folder.join(".git").exists());
+}
+
+/// An agent elsewhere (another worktree or host) stands on the board as a relay: messages to it
+/// reach the board, which carries them there, and what comes back from it arrives named after
+/// it. With no board to carry them, it says so instead of swallowing them.
+#[test]
+fn relays_take_messages_for_the_board_to_carry() {
+    let core = Core::new();
+    let mut board = Board::open(&core);
+    let a = agent("Ada", &core.folder);
+    board.add(&[&a]);
+    let relay = ElementInfo {
+        id: Uuid::new(),
+        name: "Bob (shop › checkout)".into(),
+        kind: "agent".into(),
+        detail: None,
+        worktree: a.worktree.clone(),
+        frame: Rect::new(0.0, 0.0, 280.0, 60.0),
+        organization: None,
+        relay: Some(true),
+        unavailable: None,
+    };
+    board.send(BoardRequest::Elements(only(vec![relay.clone()])));
+    board.connect(a.id, relay.id);
+    wait_until("the line", || core.lines().len() == 1);
+    board.start(&[&a]);
+    core.shows(a.id, "ready");
+
+    let (sent, failed) = core.call("send_message", json!({"to": "Bob (shop › checkout)", "message": "ping"}), a.id);
+    assert!(!failed, "{sent}");
+    board.wait("the message for the board", |events| {
+        events.iter().any(|event| matches!(event, BoardEvent::Message(m) if m.value.to == relay.id && m.value.text == "ping" && m.value.from == a.id))
+    });
+    board.send(BoardRequest::Deliver { from: relay.id, text: "pong".into(), to: Some(a.id) });
+    core.shows(a.id, "got Message from “Bob (shop › checkout)”");
+
+    board.disconnect();
+    let (refused, failed) = core.call("send_message", json!({"to": "Bob (shop › checkout)", "message": "anyone?"}), a.id);
+    assert!(failed && refused.contains("no board is open"), "{refused}");
 }

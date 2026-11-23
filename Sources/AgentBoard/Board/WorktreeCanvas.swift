@@ -34,7 +34,7 @@ struct WorktreeCanvas: View {
                 VStack(spacing: 28) {
                     SkyBlobEmptyState().allowsHitTesting(false)
                     if !templates.isEmpty, templates.count <= TemplateCards.limit, !board.isZen {
-                        TemplateCards(board: board, database: database, templates: templates, reload: reloadTemplates)
+                        TemplateCards(board: board, database: database, project: project, templates: templates, reload: reloadTemplates)
                             .transition(.opacity)
                     }
                 }

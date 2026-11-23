@@ -21,9 +21,29 @@ public protocol AgentProvider: Sendable {
     func arguments(session: UUID, tools: ToolServerLink?) -> [String]
     /// Adjusts the environment inherited from the app.
     func environment(_ base: [String: String]) -> [String: String]
+    /// The slash commands the agent takes in `folder`, offered when the user types `/`.
+    func commands(in folder: String) -> [AgentCommand]
+}
+
+/// A slash command an agent takes: its name without the slash, one line on what it does, and
+/// where it comes from.
+public struct AgentCommand: Hashable, Sendable {
+    /// Built into the agent, a skill folder, or a custom command file.
+    public enum Kind: Sendable { case builtin, skill, command }
+
+    public let name: String
+    public let summary: String
+    public let kind: Kind
+
+    public init(_ name: String, _ summary: String, kind: Kind = .builtin) {
+        self.name = name
+        self.summary = summary
+        self.kind = kind
+    }
 }
 
 public extension AgentProvider {
+    func commands(in folder: String) -> [AgentCommand] { [] }
     var subtitle: String { "" }
     var installCommand: String? { nil }
     var brandColor: UInt32? { nil }
@@ -86,6 +106,33 @@ public struct ClaudeCode: AgentProvider {
     public let installCommand: String? = "curl -fsSL https://claude.ai/install.sh | bash"
 
     public init() {}
+
+    public func commands(in folder: String) -> [AgentCommand] {
+        let builtIn = [
+            AgentCommand("model", "Switch the model"), AgentCommand("effort", "Set the effort level"),
+            AgentCommand("compact", "Summarize the conversation to free context"), AgentCommand("clear", "Start a new conversation"),
+            AgentCommand("context", "Show what fills the context"), AgentCommand("cost", "Show this session's cost"),
+            AgentCommand("usage", "Show plan usage limits"), AgentCommand("fast", "Toggle fast mode"),
+            AgentCommand("mcp", "Manage MCP servers"), AgentCommand("memory", "Edit memory files"),
+            AgentCommand("agents", "Manage subagents"), AgentCommand("permissions", "Manage tool permissions"),
+            AgentCommand("hooks", "Manage hooks"), AgentCommand("config", "Open settings"),
+            AgentCommand("review", "Review a pull request"), AgentCommand("init", "Write a CLAUDE.md for this project"),
+            AgentCommand("resume", "Resume a past conversation"), AgentCommand("rewind", "Go back to an earlier point"),
+            AgentCommand("export", "Export the conversation"), AgentCommand("status", "Show version, model and account"),
+            AgentCommand("doctor", "Check the installation"), AgentCommand("help", "List commands"),
+        ]
+        // Skills and custom commands, the project's then the user's: each folder entry is one command.
+        let home = NSHomeDirectory()
+        let folders = [folder + "/.claude/skills", folder + "/.claude/commands", home + "/.claude/skills", home + "/.claude/commands"]
+        let custom = folders.flatMap { dir in
+            ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter { !$0.hasPrefix(".") }.sorted().map {
+                let skill = dir.hasSuffix("skills")
+                return AgentCommand(($0 as NSString).deletingPathExtension, skill ? "Skill" : "Command", kind: skill ? .skill : .command)
+            }
+        }
+        var seen = Set<String>()
+        return (builtIn + custom).filter { seen.insert($0.name).inserted }
+    }
 
     public func arguments(session: UUID, tools: ToolServerLink?) -> [String] {
         let id = session.uuidString.lowercased()
@@ -185,6 +232,14 @@ public struct Codex: AgentProvider {
     public let installCommand: String? = "npm install -g @openai/codex"
 
     public init() {}
+
+    public func commands(in folder: String) -> [AgentCommand] {
+        [AgentCommand("model", "Switch the model and reasoning effort"), AgentCommand("compact", "Summarize the conversation to free context"),
+         AgentCommand("new", "Start a new conversation"), AgentCommand("status", "Show the session's settings and usage"),
+         AgentCommand("diff", "Show the changes made, untracked files included"), AgentCommand("review", "Review the current changes"),
+         AgentCommand("init", "Write an AGENTS.md for this project"), AgentCommand("mention", "Mention a file"),
+         AgentCommand("mcp", "List MCP tools"), AgentCommand("approvals", "Choose what runs without asking")]
+    }
 
     public func environment(_ base: [String: String]) -> [String: String] { base }
 
