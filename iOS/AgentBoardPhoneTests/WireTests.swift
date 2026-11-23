@@ -175,6 +175,25 @@ final class WireTests: XCTestCase {
         }
     }
 
+    /// The canvas card and the full-screen page show one session: each gets its changes whichever
+    /// was configured last, and one going away leaves the other live (the page opened straight
+    /// from a launch drew nothing, its redraws taken by the card behind it).
+    @MainActor func testEveryTerminalShowingASessionRedrawsOnItsChanges() {
+        let session = AgentSession(cols: 80, rows: 24)
+        let page = MetalTerminalView(), card = MetalTerminalView()
+        page.configure(session: session, live: true, zoom: 1, showsCursor: true)
+        card.configure(session: session, live: true, zoom: 1, showsCursor: false)
+        session.onChange?()
+        XCTAssertEqual([page.changes, card.changes], [1, 1])
+        card.configure(session: nil, live: false, zoom: 1, showsCursor: false)
+        session.onChange?()
+        XCTAssertEqual([page.changes, card.changes], [2, 1])
+        XCTAssertTrue(session.isObserved)
+        page.configure(session: nil, live: false, zoom: 1, showsCursor: false)
+        XCTAssertNil(session.onChange)
+        XCTAssertFalse(session.isObserved)
+    }
+
     /// Making projects and worktrees: the requests as the Mac's core reads them, and its answer.
     func testCreatingSpeaksTheCoresFixtures() throws {
         func fixture(_ name: String) throws -> Data {

@@ -73,7 +73,8 @@ final class StreamClient: @unchecked Sendable {
 /// Stream messages as pictures: H.264 units as sample buffers an `AVSampleBufferDisplayLayer`
 /// shows at once, JPEG frames as images.
 struct StreamDecoder {
-    enum Picture {
+    /// Unchecked: a decoded sample and an image aren't changed after they are made.
+    enum Picture: @unchecked Sendable {
         case header(StreamWire.Header)
         case sample(CMSampleBuffer)
         case image(CGImage)

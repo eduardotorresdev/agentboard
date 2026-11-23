@@ -89,7 +89,7 @@ import UIKit
                 self.dropped("Reconnecting…")
             }
             if let state = client.serviceState { welcomed(state) }
-            client.onService { data in DispatchQueue.main.async { [weak self] in self?.serviced(data) } }
+            client.onService { [weak self] data in DispatchQueue.main.async { self?.serviced(data) } }
             phase = .connected
             // After a reconnect: the sessions shown before attach again, and get a fresh snapshot.
             for (id, session) in sessions { attach(id, session, on: client) }

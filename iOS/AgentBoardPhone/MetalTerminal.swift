@@ -35,9 +35,14 @@ final class MetalTerminalView: UIView {
     private let theme = TerminalTheme.light
     private let metal = CAMetalLayer()
     private let cursor = CALayer()
-    private var session: AgentSession?
+    private(set) var session: AgentSession?
     private var layerState: TerminalLayer?
-    private var live = false
+    private(set) var live = false
+    /// How many of the session's changes reached this view (a test reads it).
+    private(set) var changes = 0
+    /// Every view showing a session: the canvas card and the full-screen page share one, and a
+    /// session has a single `onChange`, so it goes to all of them, not to whichever came last.
+    private static var viewers: [ObjectIdentifier: NSHashTable<MetalTerminalView>] = [:]
     private var zoom: CGFloat = 1
     private var showsCursor = false
 
@@ -62,9 +67,9 @@ final class MetalTerminalView: UIView {
     func configure(session: AgentSession?, live: Bool, zoom: CGFloat, showsCursor: Bool) {
         // SwiftUI calls this on every board update; only a real change costs a frame.
         guard session !== self.session || live != self.live || abs(zoom - self.zoom) > 0.01 || showsCursor != self.showsCursor else { return }
-        if session !== self.session {
-            self.session?.onChange = nil
-            self.session?.isObserved = false
+        let previous = self.session
+        if session !== previous {
+            if let previous { Self.viewers[ObjectIdentifier(previous)]?.remove(self) }
             self.session = session
             layerState = nil
         }
@@ -72,10 +77,30 @@ final class MetalTerminalView: UIView {
         self.live = live
         self.zoom = zoom
         self.showsCursor = showsCursor
-        session?.isObserved = live
-        session?.onChange = live ? { [weak self] in self?.draw() } : nil
+        if let previous, previous !== session { Self.watch(previous) }
+        if let session {
+            // Stored first: a class through `default:` is only read, never kept.
+            let table = Self.viewers[ObjectIdentifier(session)] ?? .weakObjects()
+            table.add(self)
+            Self.viewers[ObjectIdentifier(session)] = table
+            Self.watch(session)
+        }
         if rescaled { layerState = nil }
         draw()
+    }
+
+    /// Observed while any view shows it live; each change redraws every one of them.
+    private static func watch(_ session: AgentSession) {
+        let key = ObjectIdentifier(session)
+        let showing = { viewers[key]?.allObjects.filter { $0.session.map(ObjectIdentifier.init) == key && $0.live } ?? [] }
+        if showing().isEmpty {
+            viewers[key] = nil
+            session.isObserved = false
+            session.onChange = nil
+        } else {
+            session.isObserved = true
+            session.onChange = { for view in showing() { view.changes += 1; view.draw() } }
+        }
     }
 
     override func layoutSubviews() {
