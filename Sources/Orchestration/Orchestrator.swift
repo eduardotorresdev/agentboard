@@ -43,7 +43,7 @@ public final class Orchestrator: CoreService {
     /// The boards' other elements (browsers).
     private var elements: [UUID: ElementInfo] = [:]
     /// Boards that got their welcome, which then get every change.
-    private var boards: Set<CoreBoard> = []
+    private(set) var boards: Set<CoreBoard> = []
     /// Boards that run the board-only tools (browsers, simulators): the ones that said which
     /// elements they have. A phone never does, and would leave a tool call unanswered.
     private var toolBoards: Set<CoreBoard> = []

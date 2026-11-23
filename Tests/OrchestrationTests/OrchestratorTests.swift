@@ -517,6 +517,63 @@ struct OrchestratorTests {
         await MainActor.run { core.stop() }
     }
 
+    /// With no board that answers questions the hook lets go at once. Once the last one leaves,
+    /// held questions wait the grace for one to come back, then go to the agent's terminal.
+    @Test func heldQuestionsWaitAGracePeriodForABoard() async throws {
+        let core = try await MainActor.run { try Core() }
+        await MainActor.run { core.orchestrator.questionGrace = .milliseconds(600) }
+        let folder = await MainActor.run { core.folder }
+        let a = agent("Ada", in: folder)
+        func ask() -> Task<[String: Any], Error> {
+            Task {
+                let (url, token) = await MainActor.run { (core.orchestrator.toolsEndpoint, core.orchestrator.toolToken(for: a.id)) }
+                var request = URLRequest(url: try #require(url).appendingPathComponent("question"))
+                request.httpMethod = "POST"
+                request.timeoutInterval = 30
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                request.httpBody = try JSONSerialization.data(withJSONObject: [
+                    "hook_event_name": "PreToolUse", "tool_name": "AskUserQuestion",
+                    "tool_input": ["questions": [["question": "Which layout?", "header": "Layout", "multiSelect": false,
+                                                  "options": [["label": "Wide"], ["label": "Tall"]]]]],
+                ])
+                let (data, _) = try await URLSession.shared.data(for: request)
+                return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            }
+        }
+        func held() async -> Bool { await MainActor.run { core.orchestrator.pendingQuestions[a.id] != nil } }
+
+        let first = try await board(core)
+        first.send(.addCard(a))
+        try await waitUntil { core.card(named: "Ada") != nil }
+        first.disconnect()
+        try await waitUntil { core.orchestrator.boards.isEmpty }
+        // Nobody to see them: straight to the terminal.
+        #expect(try await ask().value.isEmpty)
+
+        // Back within the grace: still held well past it, and answered from the board that came back.
+        let second = try await board(core)
+        let kept = ask()
+        try await waitUntil { core.orchestrator.pendingQuestions[a.id] != nil }
+        second.disconnect()
+        try await Task.sleep(for: .milliseconds(200))
+        let third = try await board(core)
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(await held(), "released though a board came back")
+        third.send(.answerQuestions(id: a.id, answers: ["Which layout?": "Tall"]))
+        let output = try await kept.value["hookSpecificOutput"] as? [String: Any]
+        #expect((output?["updatedInput"] as? [String: Any])?["answers"] as? [String: String] == ["Which layout?": "Tall"])
+
+        // Not back: held through part of the grace, then to the terminal.
+        let released = ask()
+        try await waitUntil { core.orchestrator.pendingQuestions[a.id] != nil }
+        third.disconnect()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await held(), "released before the grace ended")
+        #expect(try await released.value.isEmpty)
+        #expect(await !held())
+        await MainActor.run { core.stop() }
+    }
+
     /// A newer core carries on the queue, without requests for cards it doesn't have.
     @Test @MainActor func theQueueSurvivesATakeOver() throws {
         let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtest-\(UUID().uuidString.prefix(8))")
