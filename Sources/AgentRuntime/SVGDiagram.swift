@@ -211,7 +211,8 @@ final class XMLTree {
         let parsed = parser.parse()
         if let refused = delegate.refused { throw refused }
         guard parsed, let root = delegate.root else {
-            throw SVGDiagram.Refused(reason: "The diagram isn't well-formed XML\(parser.parserError.map { ": \($0.localizedDescription)" } ?? ".")")
+            // One reason for every parser fault: the Rust core's parser words its faults differently.
+            throw SVGDiagram.Refused(reason: "The diagram isn't well-formed XML.")
         }
         return root
     }
@@ -366,8 +367,10 @@ struct Builder {
             defer { expanding.remove(id) }
             return try element(target, transform: moved, style: style, depth: depth + 1)
         case "rect":
-            let rect = CGRect(x: try number("x"), y: try number("y"), width: try number("width"), height: try number("height"))
-            guard rect.width >= 0, rect.height >= 0 else { throw SVGDiagram.Refused(reason: "A `<rect>` has a negative size.") }
+            // CGRect reports a negative size as positive: check the numbers as given.
+            let x = try number("x"), y = try number("y"), width = try number("width"), height = try number("height")
+            guard width >= 0, height >= 0 else { throw SVGDiagram.Refused(reason: "A `<rect>` has a negative size.") }
+            let rect = CGRect(x: x, y: y, width: width, height: height)
             var rx = try attributes["rx"].map { try Numbers.length($0, "rx") }
             var ry = try attributes["ry"].map { try Numbers.length($0, "ry") }
             rx = rx ?? ry; ry = ry ?? rx

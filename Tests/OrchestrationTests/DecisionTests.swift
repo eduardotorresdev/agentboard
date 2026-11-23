@@ -244,3 +244,34 @@ struct DecisionTests {
         link.disconnect()
     }
 }
+
+/// The drafts both cores check (`core/fixtures/decisions/drafts.json`): each is taken as the
+/// fixture says, or refused for the same reason, here and in the Rust core.
+@Test func theSharedDraftsAreTakenOrRefusedAlike() throws {
+    let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("../../core/fixtures/decisions/drafts.json"))
+    let fixture = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let base = try #require(fixture["base"] as? [String: Any])
+    let cases = try #require(fixture["cases"] as? [[String: Any]])
+    #expect(cases.count > 20)
+    for item in cases {
+        let name = item["name"] as? String ?? ""
+        var arguments = base
+        for (key, value) in item["set"] as? [String: Any] ?? [:] { arguments[key] = value is NSNull ? nil : value }
+        do {
+            let draft = try DecisionDraft(arguments)
+            let taken: [String: Any] = [
+                "family": draft.family, "framing": draft.framing, "question": draft.ask.question, "variants": draft.ask.variants.map(\.title),
+                "verified": draft.verified, "blocking": draft.blocking, "final": draft.final,
+                "cards": draft.cards.map { card -> [String: Any] in
+                    ["claim": card.claim, "kind": card.kind, "before": card.before ?? NSNull(), "target": card.target,
+                     "reference": card.reference ?? NSNull(), "pins": card.pins.map { [$0.x, $0.y, $0.question] as [Any] }]
+                },
+            ]
+            #expect(item["refused"] is NSNull, "\(name) was taken")
+            #expect(NSDictionary(dictionary: taken).isEqual(to: item["taken"] as? [String: Any] ?? [:]), "\(name)")
+        } catch let refused as DecisionDraft.Refused {
+            #expect(refused.reason == item["refused"] as? String, "\(name)")
+        }
+    }
+}

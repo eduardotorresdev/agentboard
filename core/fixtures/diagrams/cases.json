@@ -1,0 +1,325 @@
+{
+ "about": "Diagram cases both cores check: an SVG (inline, a file here, or `parts`: text repeated count times, joined), and null when it is drawn or the exact reason it is refused.",
+ "cases": [
+  {
+   "name": "the guide example",
+   "refused": null,
+   "file": "guide.svg"
+  },
+  {
+   "name": "every shape",
+   "refused": null,
+   "file": "shapes.svg"
+  },
+  {
+   "name": "escaped text",
+   "refused": null,
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\">a &lt; b &amp; c</text></svg>"
+  },
+  {
+   "name": "nesting at the limit",
+   "refused": null,
+   "parts": [
+    [
+     "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\">",
+     1
+    ],
+    [
+     "<g>",
+     15
+    ],
+    [
+     "</g>",
+     15
+    ],
+    [
+     "</svg>",
+     1
+    ]
+   ]
+  },
+  {
+   "name": "an entity",
+   "refused": "A diagram takes no DOCTYPE or entities.",
+   "svg": "<!DOCTYPE svg [<!ENTITY a \"x\">]><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\">&a;</text></svg>"
+  },
+  {
+   "name": "a doctype",
+   "refused": "A diagram takes no DOCTYPE or entities.",
+   "svg": "<!DOCTYPE svg><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg>"
+  },
+  {
+   "name": "an undeclared entity",
+   "refused": "The diagram isn't well-formed XML.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text x=\"1\" y=\"5\">&a;</text></svg>"
+  },
+  {
+   "name": "unclosed",
+   "refused": "The diagram isn't well-formed XML.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><g>"
+  },
+  {
+   "name": "mismatched tags",
+   "refused": "The diagram isn't well-formed XML.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><g></rect></svg>"
+  },
+  {
+   "name": "a second root",
+   "refused": "The diagram isn't well-formed XML.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg><svg/>"
+  },
+  {
+   "name": "a processing instruction",
+   "refused": "A diagram takes no processing instructions.",
+   "svg": "<?foo bar?><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg>"
+  },
+  {
+   "name": "a use that brings itself in",
+   "refused": "`<use>` brings in `#a` inside itself.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><g id=\"a\"><use href=\"#a\"/></g></svg>"
+  },
+  {
+   "name": "uses that bring each other in",
+   "refused": "`<use>` brings in `#a` inside itself.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><defs><g id=\"a\"><use href=\"#b\"/></g><g id=\"b\"><use href=\"#a\"/></g></defs><use href=\"#a\"/></svg>"
+  },
+  {
+   "name": "nesting past the limit",
+   "refused": "The diagram nests deeper than 16 levels. Flatten its groups.",
+   "parts": [
+    [
+     "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\">",
+     1
+    ],
+    [
+     "<g>",
+     17
+    ],
+    [
+     "</g>",
+     17
+    ],
+    [
+     "</svg>",
+     1
+    ]
+   ]
+  },
+  {
+   "name": "a non-finite number",
+   "refused": "`width` must be a finite number; it is “1e999”.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect width=\"1e999\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "a non-finite path number",
+   "refused": "`d` on `<path>`: numbers must be finite.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"M0 0 L1e999 0\"/></svg>"
+  },
+  {
+   "name": "not a number",
+   "refused": "`x` must be a finite number; it is “ten”.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect x=\"ten\" width=\"5\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "over 64 KB",
+   "refused": "The diagram is 67268 bytes; the limit is 65536. Draw less, or split it into cards.",
+   "parts": [
+    [
+     "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\">",
+     1
+    ],
+    [
+     "<rect width=\"1\" height=\"1\"/>",
+     2400
+    ],
+    [
+     "</svg>",
+     1
+    ]
+   ]
+  },
+  {
+   "name": "too many elements",
+   "refused": "The diagram has more than 2000 elements. Draw less, or split it into cards.",
+   "parts": [
+    [
+     "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\">",
+     1
+    ],
+    [
+     "<g/>",
+     2001
+    ],
+    [
+     "</svg>",
+     1
+    ]
+   ]
+  },
+  {
+   "name": "too many use copies",
+   "refused": "The diagram draws more than 2000 elements, `use` copies included. Draw less.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><defs><rect id=\"l0\" width=\"1\" height=\"1\"/><g id=\"l1\"><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/><use href=\"#l0\"/></g><g id=\"l2\"><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/><use href=\"#l1\"/></g><g id=\"l3\"><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/><use href=\"#l2\"/></g><g id=\"l4\"><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/><use href=\"#l3\"/></g></defs><use href=\"#l4\"/></svg>"
+  },
+  {
+   "name": "an external href",
+   "refused": "`<use>` takes an `href` to an element of the diagram (`#id`).",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><use href=\"https://example.com/x.svg#a\"/></svg>"
+  },
+  {
+   "name": "a missing use target",
+   "refused": "`<use>` names `#nope`, which the diagram doesn't have.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><use href=\"#nope\"/></svg>"
+  },
+  {
+   "name": "a viewBox of zero width",
+   "refused": "Give the diagram a `viewBox` with a width and height above 0.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 0 10\"></svg>"
+  },
+  {
+   "name": "a negative viewBox",
+   "refused": "Give the diagram a `viewBox` with a width and height above 0.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 -5 10\"></svg>"
+  },
+  {
+   "name": "a viewBox of three numbers",
+   "refused": "`viewBox` takes four numbers: x y width height.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10\"></svg>"
+  },
+  {
+   "name": "no size at all",
+   "refused": "Give the diagram a `viewBox` (or `width` and `height`) with a width and height above 0.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"/>"
+  },
+  {
+   "name": "a size without viewBox",
+   "refused": null,
+   "svg": "<svg width=\"40px\" height=\"20\"><rect width=\"5\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "not an svg",
+   "refused": "A diagram is one `<svg>` element; this starts with `<g>`.",
+   "svg": "<g/>"
+  },
+  {
+   "name": "an image",
+   "refused": "`<image>` isn't drawn. A diagram draws shapes and text only.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><image href=\"x.png\"/></svg>"
+  },
+  {
+   "name": "a gradient element",
+   "refused": "`<linearGradient>` isn't drawn. Fills are solid colors.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><linearGradient/></svg>"
+  },
+  {
+   "name": "css",
+   "refused": "`style` on `<rect>`: CSS isn't drawn: give `fill`, `stroke` and the rest as attributes.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect style=\"fill:red\" width=\"5\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "a gradient fill",
+   "refused": "`fill` is a gradient or pattern; fills are solid colors (`#rrggbb`).",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect fill=\"url(#g)\" width=\"5\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "a named color",
+   "refused": "`fill` is “red”: give a color as `#rrggbb`, `#rgb`, black, white or none.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect fill=\"red\" width=\"5\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "a short hex",
+   "refused": "`stroke` is “#12”: give a color as `#rrggbb` or `#rgb`.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect stroke=\"#12\" width=\"5\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "an unknown transform",
+   "refused": "`transform` has “spin” with 1 numbers; it takes translate, scale, rotate, skewX, skewY or matrix.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><g transform=\"spin(3)\"/></svg>"
+  },
+  {
+   "name": "an unclosed transform",
+   "refused": "`transform` is missing a “)”.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><g transform=\"translate(3\"/></svg>"
+  },
+  {
+   "name": "a bad path command",
+   "refused": "`d` on `<path>`: “X” isn't a path command.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"M0 0 X5\"/></svg>"
+  },
+  {
+   "name": "a path without M",
+   "refused": "`d` on `<path>`: it must start with a command (M).",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"L5 5\"/></svg>"
+  },
+  {
+   "name": "an empty path",
+   "refused": "`d` on `<path>`: it is empty.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"\"/></svg>"
+  },
+  {
+   "name": "bad arc flags",
+   "refused": "`d` on `<path>`: an arc's flags are 0 or 1.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><path d=\"M0 0 A5 5 0 2 0 9 9\"/></svg>"
+  },
+  {
+   "name": "a marker-end on no marker",
+   "refused": "`marker-end` names `#a`, which isn't a `<marker>` of the diagram.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><g id=\"a\"/><line x2=\"5\" marker-end=\"url(#a)\"/></svg>"
+  },
+  {
+   "name": "a marker-end without url",
+   "refused": "`marker-end` takes `url(#id)` naming a `<marker>` of the diagram.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><line x2=\"5\" marker-end=\"#a\"/></svg>"
+  },
+  {
+   "name": "text with markup",
+   "refused": "`<text>` holds plain text only; one `<text>` per line.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text>a<tspan>b</tspan></text></svg>"
+  },
+  {
+   "name": "a percentage",
+   "refused": "`width` is a percentage; give it in the viewBox's units.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect width=\"50%\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "a negative rect",
+   "refused": "A `<rect>` has a negative size.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect width=\"-5\" height=\"5\"/></svg>"
+  },
+  {
+   "name": "one point",
+   "refused": "`points` on `<polyline>` takes pairs of numbers, at least two points.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><polyline points=\"1 2\"/></svg>"
+  },
+  {
+   "name": "a bad linecap",
+   "refused": "`stroke-linecap` is butt, round or square.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><line x2=\"5\" stroke-linecap=\"flat\"/></svg>"
+  },
+  {
+   "name": "a bad font weight",
+   "refused": "`font-weight` is normal, bold or a number.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text font-weight=\"heavy\">a</text></svg>"
+  },
+  {
+   "name": "a zero font size",
+   "refused": "`font-size` must be above 0.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><text font-size=\"0\">a</text></svg>"
+  },
+  {
+   "name": "a marker without id",
+   "refused": "A `<marker>` needs an `id` for `marker-end` to name it.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><marker/></svg>"
+  },
+  {
+   "name": "a marker of zero size",
+   "refused": "A marker needs a `markerWidth` and `markerHeight` above 0.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><defs><marker id=\"m\" markerWidth=\"0\"/></defs><line x2=\"5\" marker-end=\"url(#m)\"/></svg>"
+  },
+  {
+   "name": "bad marker units",
+   "refused": "`markerUnits` is strokeWidth or userSpaceOnUse.",
+   "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><defs><marker id=\"m\" markerUnits=\"px\"/></defs><line x2=\"5\" marker-end=\"url(#m)\"/></svg>"
+  }
+ ]
+}

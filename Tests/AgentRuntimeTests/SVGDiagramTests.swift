@@ -170,4 +170,25 @@ private func svg(_ body: String, viewBox: String = "0 0 100 100") -> String {
         let bomb = #"<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "aaaa">]><svg viewBox="0 0 1 1"><text>&a;</text></svg>"#
         #expect(refusal(bomb) != nil)
     }
+
+    /// The cases both cores check (`core/fixtures/diagrams/cases.json`): the same SVG is drawn
+    /// or refused, for the same reason, here and in the Rust core.
+    @Test func theSharedCasesAreDrawnOrRefusedAlike() throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../core/fixtures/diagrams/cases.json"))
+        let cases = try #require((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["cases"] as? [[String: Any]])
+        #expect(cases.count > 40)
+        for item in cases {
+            let name = item["name"] as? String ?? ""
+            let text: String
+            if let file = item["file"] as? String {
+                text = try fixture(String(file.dropLast(4)))
+            } else if let parts = item["parts"] as? [[Any]] {
+                text = parts.map { String(repeating: $0[0] as? String ?? "", count: $0[1] as? Int ?? 0) }.joined()
+            } else {
+                text = item["svg"] as? String ?? ""
+            }
+            #expect(refusal(text) == item["refused"] as? String, "\(name)")
+        }
+    }
 }

@@ -1,0 +1,480 @@
+{
+ "about": "decision_open drafts both cores check: `base` with each case's `set` applied (null removes a key), and what is taken or the exact reason it is refused.",
+ "base": {
+  "family": "surface",
+  "framing": "Validate the invite screen",
+  "intent": "The new send button",
+  "cards": [
+   {
+    "claim": "The screen ended up like this",
+    "evidence": {
+     "type": "image",
+     "after": "After",
+     "before": "Before"
+    }
+   }
+  ],
+  "ask": {
+   "question": "Can the screen stay like this?"
+  },
+  "verified": [
+   "Built and opened the screen"
+  ]
+ },
+ "cases": [
+  {
+   "name": "a validation",
+   "set": {},
+   "refused": null,
+   "taken": {
+    "family": "surface",
+    "framing": "Validate the invite screen",
+    "question": "Can the screen stay like this?",
+    "variants": [],
+    "verified": [
+     "Built and opened the screen"
+    ],
+    "blocking": false,
+    "final": false,
+    "cards": [
+     {
+      "claim": "The screen ended up like this",
+      "kind": "image",
+      "before": "Before",
+      "target": "After",
+      "reference": null,
+      "pins": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "a choice that blocks",
+   "set": {
+    "cards": [
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars.",
+      "pins": [
+       {
+        "x": 0.5,
+        "y": 1,
+        "question": "Here?"
+       }
+      ]
+     }
+    ],
+    "blocking": true,
+    "final": true,
+    "ask": {
+     "question": "Which one?",
+     "variants": [
+      {
+       "name": "Dense list",
+       "detail": "More rows"
+      },
+      {
+       "name": "Card grid"
+      }
+     ]
+    },
+    "verified": [
+     "  One  ",
+     "",
+     3,
+     "Two"
+    ]
+   },
+   "refused": null,
+   "taken": {
+    "family": "surface",
+    "framing": "Validate the invite screen",
+    "question": "Which one?",
+    "variants": [
+     "A - Dense list",
+     "B - Card grid"
+    ],
+    "verified": [
+     "One",
+     "Two"
+    ],
+    "blocking": true,
+    "final": true,
+    "cards": [
+     {
+      "claim": "The list",
+      "kind": "image",
+      "before": null,
+      "target": "After",
+      "reference": "Against a table: denser, but no avatars.",
+      "pins": [
+       [
+        0.5,
+        1,
+        "Here?"
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "a diagram",
+   "set": {
+    "cards": [
+     {
+      "claim": "The answer goes to the core",
+      "evidence": {
+       "type": "diagram",
+       "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>"
+      },
+      "reference": "Before, the Mac answered alone."
+     }
+    ],
+    "family": "foundation"
+   },
+   "refused": null,
+   "taken": {
+    "family": "foundation",
+    "framing": "Validate the invite screen",
+    "question": "Can the screen stay like this?",
+    "variants": [],
+    "verified": [
+     "Built and opened the screen"
+    ],
+    "blocking": false,
+    "final": false,
+    "cards": [
+     {
+      "claim": "The answer goes to the core",
+      "kind": "diagram",
+      "before": null,
+      "target": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>",
+      "reference": "Before, the Mac answered alone.",
+      "pins": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "an unknown family",
+   "set": {
+    "family": "layout"
+   },
+   "refused": "Give `family`: surface (what a screen shows), flow (how the experience is walked through) or foundation (what the rest is built on)."
+  },
+  {
+   "name": "no family",
+   "set": {
+    "family": null
+   },
+   "refused": "Give `family`: surface (what a screen shows), flow (how the experience is walked through) or foundation (what the rest is built on)."
+  },
+  {
+   "name": "a framing of two lines",
+   "set": {
+    "framing": "Two\nlines"
+   },
+   "refused": "Give `framing`: one line saying what the user is about to evaluate."
+  },
+  {
+   "name": "no intent",
+   "set": {
+    "intent": null
+   },
+   "refused": "Give `intent`: one line saying what the user should notice. It is your own check and is not shown."
+  },
+  {
+   "name": "no cards",
+   "set": {
+    "cards": []
+   },
+   "refused": "Give `cards`: at least one, each with a claim and its evidence. A decision shows before it asks."
+  },
+  {
+   "name": "seven cards",
+   "set": {
+    "cards": [
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     },
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     },
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     },
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     },
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     },
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     },
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     }
+    ]
+   },
+   "refused": "A decision takes at most 6 cards; you gave 7. One card, one idea: cut, or split it into two decisions."
+  },
+  {
+   "name": "a card that asks",
+   "set": {
+    "cards": [
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars.",
+      "ask": "Is it fine?"
+     }
+    ]
+   },
+   "refused": "Card 1 asks something. A decision has one ask, given once in `ask`; a doubt about a place on the evidence is a pin."
+  },
+  {
+   "name": "a card without claim",
+   "set": {
+    "cards": [
+     {
+      "claim": " ",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     }
+    ]
+   },
+   "refused": "Card 1 has no `claim`: say what the evidence shows, e.g. “The screen ended up like this”."
+  },
+  {
+   "name": "an unknown evidence",
+   "set": {
+    "cards": [
+     {
+      "claim": "A page",
+      "evidence": {
+       "type": "browser"
+      },
+      "reference": "New"
+     }
+    ]
+   },
+   "refused": "Card 1 has no `evidence`: an object with `type` (image, diagram) and the board element it shows."
+  },
+  {
+   "name": "an image without after",
+   "set": {
+    "cards": [
+     {
+      "claim": "x",
+      "evidence": {
+       "type": "image"
+      },
+      "reference": "r"
+     }
+    ]
+   },
+   "refused": "Card 1: give the image to evaluate in `after` (and the one it replaces in `before`)."
+  },
+  {
+   "name": "in a vacuum",
+   "set": {
+    "cards": [
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars."
+     },
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": " "
+     }
+    ]
+   },
+   "refused": "Card 2 is evaluated in a vacuum: give `before`, or a `reference` line with the justification or the alternative. Precedent is not a justification."
+  },
+  {
+   "name": "a pin outside",
+   "set": {
+    "cards": [
+     {
+      "claim": "The list",
+      "evidence": {
+       "type": "image",
+       "after": "After"
+      },
+      "reference": "Against a table: denser, but no avatars.",
+      "pins": [
+       {
+        "x": 1.5,
+        "y": 0.2,
+        "question": "Here?"
+       }
+      ]
+     }
+    ]
+   },
+   "refused": "Card 1: a pin takes `x` and `y` from 0 to 1 (from the evidence's top left) and its `question`."
+  },
+  {
+   "name": "a diagram without svg",
+   "set": {
+    "cards": [
+     {
+      "claim": "x",
+      "evidence": {
+       "type": "diagram"
+      },
+      "reference": "r"
+     }
+    ]
+   },
+   "refused": "Card 1: give the diagram's SVG in `svg`."
+  },
+  {
+   "name": "a diagram that cannot be drawn",
+   "set": {
+    "cards": [
+     {
+      "claim": "x",
+      "evidence": {
+       "type": "diagram",
+       "svg": "<svg viewBox='0 0 9 9'><image/></svg>"
+      },
+      "reference": "r"
+     }
+    ]
+   },
+   "refused": "Card 1: the diagram can't be drawn. `<image>` isn't drawn. A diagram draws shapes and text only."
+  },
+  {
+   "name": "a diagram in a vacuum",
+   "set": {
+    "cards": [
+     {
+      "claim": "x",
+      "evidence": {
+       "type": "diagram",
+       "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>"
+      }
+     }
+    ]
+   },
+   "refused": "Card 1 is evaluated in a vacuum: give `before`, or a `reference` line with the justification or the alternative. Precedent is not a justification."
+  },
+  {
+   "name": "two asks",
+   "set": {
+    "ask": [
+     {
+      "question": "One?"
+     },
+     {
+      "question": "Two?"
+     }
+    ]
+   },
+   "refused": "One decision, one ask: `ask` is a single object. A second question is a second decision."
+  },
+  {
+   "name": "an ask without question",
+   "set": {
+    "ask": {
+     "variants": []
+    }
+   },
+   "refused": "Give `ask`: an object with the `question`, and `variants` when the user picks between alternatives."
+  },
+  {
+   "name": "one variant",
+   "set": {
+    "ask": {
+     "question": "Which?",
+     "variants": [
+      {
+       "name": "Only one"
+      }
+     ]
+    }
+   },
+   "refused": "A choice takes 2 to 4 variants (three for something new); you gave 1. With one, ask for validation: leave `variants` out."
+  },
+  {
+   "name": "a long variant name",
+   "set": {
+    "ask": {
+     "question": "Which?",
+     "variants": [
+      {
+       "name": "Short"
+      },
+      {
+       "name": "A very long name"
+      }
+     ]
+    }
+   },
+   "refused": "Variant 2 needs a `name` of at most 3 words, e.g. “Dense list”; the rest goes in `detail`."
+  },
+  {
+   "name": "nothing verified",
+   "set": {
+    "verified": []
+   },
+   "refused": "Give `verified`: what you checked before asking, one line each. Nothing reaches the user unverified; what can't be verified is its own decision saying what stops you."
+  }
+ ]
+}
