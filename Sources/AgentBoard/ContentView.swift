@@ -101,7 +101,13 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            if let path = DebugShow.worktree { OpenWorktree.set(path, in: store.organizationID) }
+            if let path = DebugShow.worktree {
+                // A fresh dev home has no projects yet: the shown worktree's folder becomes one.
+                if !store.projects.contains(where: { $0.path == path }), FileManager.default.fileExists(atPath: path + "/.git") {
+                    store.addProject(at: URL(fileURLWithPath: path))
+                }
+                OpenWorktree.set(path, in: store.organizationID)
+            }
             // The account is the usual way in: asked for once per launch, and the board works without it.
             if hosts.account.account == nil, !hosts.account.isSigningIn, ProcessInfo.processInfo.environment["AGENTBOARD_BACKGROUND"] == nil || DebugShow.items.contains("sign-in") {
                 hosts.account.signIn()

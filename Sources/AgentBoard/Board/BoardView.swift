@@ -796,6 +796,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// its questions. It collapses into the card once the agent has nothing left to show.
     private func syncDecisions(_ records: [AgentRecord]) {
         var shown = Set<UUID>()
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "snapshotBalloons") != nil { FileHandle.standardError.write(Data("snapshot: sync \(records.count) agents, \(store.decisions.count) decisions\n".utf8)) }
+        #endif
         for record in records where record.runner == nil {
             guard let sequence = store.decisionSequence(of: record.id) else { continue }
             shown.insert(record.id)
@@ -805,6 +808,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 model.onHeight = { [weak self] in DispatchQueue.main.async { self?.placeBalloon(record.id) } }
                 balloons[record.id] = (view, model)
                 addSubview(view)
+                #if DEBUG
+                debugSnapshotBalloon(record.id)
+                #endif
                 return (view, model)
             }()
             let model = balloon.model
@@ -831,6 +837,32 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             placeBalloon(id)
         }
     }
+
+    #if DEBUG
+    private static var snapshotted = false
+
+    /// `-snapshotBalloons <folder>` (with `-snapshotZooms 0.7,1.6`): once a balloon shows, centers
+    /// it at each zoom and writes this board view, and nothing else on screen, to
+    /// <folder>/balloon-zoom-<zoom>.png.
+    private func debugSnapshotBalloon(_ id: UUID) {
+        guard !Self.snapshotted, let folder = UserDefaults.standard.string(forKey: "snapshotBalloons") else { return }
+        Self.snapshotted = true
+        let zooms = (UserDefaults.standard.string(forKey: "snapshotZooms") ?? "0.7,1.6").split(separator: ",").compactMap { Double($0) }
+        Task { @MainActor [weak self] in
+            for value in zooms {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard let self, let balloon = self.balloons[id] else { return }
+                let rect = CGRect(origin: balloon.model.origin, size: CGSize(width: DecisionMetrics.outerWidth, height: balloon.model.height))
+                let zoom = CGFloat(value)
+                self.setCamera(Camera(zoom: zoom, pan: CGPoint(x: self.bounds.midX - rect.midX * zoom, y: self.bounds.midY - rect.midY * zoom)))
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let rep = self.bitmapImageRepForCachingDisplay(in: self.bounds) else { continue }
+                self.cacheDisplay(in: self.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: folder).appendingPathComponent("balloon-zoom-\(value).png"))
+            }
+        }
+    }
+    #endif
 
     private func placeBalloon(_ id: UUID) {
         guard let balloon = balloons[id] else { return }
