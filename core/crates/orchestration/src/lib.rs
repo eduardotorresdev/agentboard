@@ -22,6 +22,7 @@ mod browser_relay;
 mod card_database;
 mod card_tools;
 mod decision;
+mod decision_tools;
 mod cards;
 mod image_card;
 mod image_tools;

@@ -8,7 +8,8 @@ use serde_json::{Map, Value};
 
 use connections::Uuid;
 
-use crate::board_protocol::Unlabelled;
+use crate::board_protocol::{only, BoardEvent, Unlabelled};
+use crate::orchestrator::BoardView;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -292,6 +293,104 @@ impl DecisionDraft {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(DraftCard { claim, kind, before, target, reference, pins })
+    }
+}
+
+impl BoardView<'_> {
+    /// Shows a new decision to the boards. One past the worktree's provisional limit blocks.
+    pub(crate) fn open_decision(&mut self, mut decision: Decision) -> Decision {
+        let stacked = self
+            .decisions
+            .iter()
+            .filter(|other| other.state == State::Open && !other.blocking && other.worktree == decision.worktree && other.organization == decision.organization)
+            .count();
+        if stacked >= Decision::PROVISIONAL_LIMIT {
+            decision.blocking = true;
+        }
+        self.decisions.push(decision.clone());
+        self.broadcast_decisions();
+        decision
+    }
+
+    fn broadcast_decisions(&self) {
+        self.broadcast(&BoardEvent::Decisions(only(self.decisions.clone())), None);
+    }
+
+    /// The developer's answer, from a board: the agent hears it as a prompt. The decision stays
+    /// open, holding the answer, until that prompt reaches the agent's terminal.
+    pub(crate) fn answer_decision(&mut self, id: Uuid, answer: Answer) {
+        let Some(index) = self.decisions.iter().position(|decision| decision.id == id && decision.state == State::Open && decision.answer.is_none()) else { return };
+        if let Answer::Option(letter) = &answer {
+            if !self.decisions[index].ask.variants().iter().any(|variant| variant.letter == letter.value) {
+                return;
+            }
+        }
+        self.decisions[index].answer = Some(answer);
+        self.broadcast_decisions();
+        let agent = self.decisions[index].agent;
+        self.deliver_answers(agent);
+    }
+
+    /// Queues the answers `agent` hasn't heard yet. While its program isn't running nothing is
+    /// queued: this is called again when it is back.
+    pub(crate) fn deliver_answers(&mut self, agent: Uuid) {
+        let answered: Vec<(Uuid, String)> = self
+            .decisions
+            .iter()
+            .filter(|decision| decision.agent == agent && decision.state == State::Open)
+            .filter_map(|decision| Some((decision.id, Self::answer_prompt(decision, decision.answer.as_ref()?))))
+            .collect();
+        for (id, text) in answered {
+            self.tell(agent, text, Some(id));
+        }
+    }
+
+    fn answer_prompt(decision: &Decision, answer: &Answer) -> String {
+        let lead = format!("The user answered your decision “{}”", decision.framing);
+        match answer {
+            Answer::Ok {} => format!("{lead}: OK. Carry on."),
+            Answer::Option(_) => format!("{lead}: {}. Make that one the real one and carry on.", decision.title(answer)),
+            Answer::UseRecommended {} => {
+                format!("{lead}: Use Recommended. The choice is yours: choose now, then call decision_echo with one line saying which you chose and why.")
+            }
+            Answer::Redirect(text) => format!(
+                "{lead} with a redirect:\n\n{}\n\nIt applies to the work at hand only. Call decision_echo with one line saying what you understood, then act on it \
+                 without waiting for confirmation. Then review your other open decisions: decision_withdraw the ones this made \
+                 obsolete and redo the affected ones.",
+                text.value
+            ),
+        }
+    }
+
+    /// The answer reached the agent's terminal: a redirect or a choice given back waits for the
+    /// agent's echo; anything else closes the decision.
+    pub(crate) fn answer_delivered(&mut self, id: Uuid) {
+        let Some(index) = self.decisions.iter().position(|decision| decision.id == id && decision.state == State::Open) else { return };
+        match self.decisions[index].answer {
+            Some(Answer::UseRecommended {} | Answer::Redirect(_)) => {
+                self.decisions[index].state = State::AwaitingEcho;
+                self.broadcast_decisions();
+            }
+            _ => self.close_decision(id, None),
+        }
+    }
+
+    /// Boards see the decision closed once (with the agent's echo, if any), then it is gone.
+    pub(crate) fn close_decision(&mut self, id: Uuid, echo: Option<String>) {
+        let Some(index) = self.decisions.iter().position(|decision| decision.id == id) else { return };
+        self.decisions[index].state = State::Closed;
+        self.decisions[index].echo = echo;
+        self.broadcast_decisions();
+        self.decisions.remove(index);
+    }
+
+    /// Takes decisions away without a word to the developer: withdrawn, or their agent is gone.
+    pub(crate) fn withdraw_decisions(&mut self, matches: impl Fn(&Decision) -> bool) {
+        if !self.decisions.iter().any(&matches) {
+            return;
+        }
+        self.decisions.retain(|decision| !matches(decision));
+        self.broadcast_decisions();
     }
 }
 

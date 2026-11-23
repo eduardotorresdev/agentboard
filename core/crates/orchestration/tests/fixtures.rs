@@ -102,7 +102,7 @@ fn requests_encode_as_swift_does() {
     let names = [
         "addCard", "updateCard", "removeCard", "connect", "disconnect", "elements", "open", "restart", "restart_as_it_is", "startRunner", "stopRunner", "toolResult", "toolResult_error",
         "addPostIt", "updatePostIt", "removePostIt", "writePostIt", "addImage", "updateImage", "removeImage", "dismissAttention", "answerQuestions", "answerQuestions_in_the_terminal", "deliver",
-        "prompt", "deliverHeld", "deliver_to_one",
+        "prompt", "deliverHeld", "deliver_to_one", "answerDecision_ok", "answerDecision_option", "answerDecision_useRecommended", "answerDecision_redirect",
     ];
     let requests: Vec<BoardRequest> = names.iter().map(|name| round_trip(&format!("request_{name}"))).collect();
     assert_eq!(requests[0], BoardRequest::AddCard(only(agent())));
@@ -122,6 +122,10 @@ fn requests_encode_as_swift_does() {
     assert_eq!(requests[22], BoardRequest::AnswerQuestions { id: id(1), answers: None });
     assert_eq!(requests[25], BoardRequest::DeliverHeld(only(id(1))));
     assert_eq!(requests[26], BoardRequest::Deliver { from: id(5), text: "1. Area 48, 486, 408, 132".into(), to: Some(id(1)) });
+    assert_eq!(requests[27], BoardRequest::AnswerDecision { id: id(5), answer: Answer::Ok {} });
+    assert_eq!(requests[28], BoardRequest::AnswerDecision { id: id(6), answer: Answer::Option(only("B".into())) });
+    assert_eq!(requests[29], BoardRequest::AnswerDecision { id: id(6), answer: Answer::UseRecommended {} });
+    assert_eq!(requests[30], BoardRequest::AnswerDecision { id: id(7), answer: Answer::Redirect(only("Make it shorter".into())) });
     // An absent optional may also come as null, and a request of a newer board is no request.
     let null = format!(r#"{{"restart":{{"id":"{}","command":null}}}}"#, id(2));
     assert_eq!(BoardRequest::decode(null.as_bytes()), Some(requests[8].clone()));
@@ -132,7 +136,7 @@ fn requests_encode_as_swift_does() {
 fn events_encode_as_swift_does() {
     let names = [
         "cardAdded", "cardUpdated", "cardRemoved", "connections", "message", "runners", "runners_none", "toolCall", "postItAdded", "postItUpdated", "postItRemoved", "imageAdded", "imageUpdated",
-        "imageRemoved", "attention", "held", "promptReturned", "elements",
+        "imageRemoved", "attention", "held", "promptReturned", "elements", "decisions",
     ];
     let events: Vec<BoardEvent> = names.iter().map(|name| round_trip(&format!("event_{name}"))).collect();
     assert_eq!(events[0], BoardEvent::CardAdded(only(runner())));
@@ -155,6 +159,15 @@ fn events_encode_as_swift_does() {
     assert_eq!(events[15], BoardEvent::Held { id: id(1), count: 2 });
     let BoardEvent::Elements(Unlabelled { value: elements }) = &events[17] else { panic!("not the elements") };
     assert_eq!(elements.iter().map(|info| (info.id, info.kind.as_str())).collect::<Vec<_>>(), [(id(5), "browser"), (id(6), "filetree")]);
+    let BoardEvent::Decisions(Unlabelled { value: decisions }) = &events[18] else { panic!("not the decisions") };
+    assert_eq!(decisions[0].cards[0].evidence, Evidence::Image { before: Some(id(6)), after: id(7) });
+    assert_eq!(decisions[0].cards[1].evidence, Evidence::Image { before: None, after: id(7) });
+    assert_eq!((decisions[0].organization, decisions[0].since, decisions[0].state), (Some(id(8)), DATE, DecisionState::Open));
+    assert_eq!(decisions[1].cards[0].evidence, Evidence::Diagram { svg: "<svg viewBox=\"0 0 9 9\"/>".into() });
+    assert_eq!(decisions[1].ask.variants().iter().map(Variant::title).collect::<Vec<_>>(), ["A - Core", "B - Direct"]);
+    assert_eq!((decisions[1].blocking, decisions[1].closing, decisions[1].state, decisions[1].answer.clone()), (true, true, DecisionState::AwaitingEcho, Some(Answer::UseRecommended {})));
+    assert_eq!((decisions[2].cards[0].evidence.clone(), decisions[2].cards[1].evidence.clone()), (Evidence::Browser { id: id(5) }, Evidence::Video { id: id(7) }));
+    assert_eq!((decisions[2].state, decisions[2].echo.as_deref()), (DecisionState::Closed, Some("Cut a step")));
 }
 
 #[test]
@@ -166,8 +179,10 @@ fn the_state_encodes_as_swift_does() {
     assert_eq!(state.images, Some(vec![image(), video()]));
     assert_eq!(state.attention.map(|queue| queue.len()), Some(3));
     assert_eq!(state.elements.map(|list| list.iter().map(|info| info.id).collect::<Vec<_>>()), Some(vec![id(5)]));
+    assert_eq!(state.decisions.map(|list| list.len()), Some(3));
     let old: BoardState = round_trip("state_of_an_older_core");
     assert_eq!((old.post_its, old.attention, old.images, old.elements), (None, None, None, None));
+    assert_eq!(old.decisions, None);
 }
 
 /// A data folder the Swift core used serves this one.

@@ -1,0 +1,157 @@
+{
+  "decisions" : {
+    "_0" : [
+      {
+        "agent" : "00000001-ABCD-4EF0-8A1B-000000000001",
+        "ask" : {
+          "validation" : {
+            "question" : "Can it stay?"
+          }
+        },
+        "blocking" : false,
+        "cards" : [
+          {
+            "claim" : "The screen ended up like this",
+            "evidence" : {
+              "image" : {
+                "after" : "00000007-ABCD-4EF0-8A1B-000000000007",
+                "before" : "00000006-ABCD-4EF0-8A1B-000000000006"
+              }
+            },
+            "pins" : [
+              {
+                "question" : "Here?",
+                "x" : 0.25,
+                "y" : 1
+              }
+            ]
+          },
+          {
+            "claim" : "Only after",
+            "evidence" : {
+              "image" : {
+                "after" : "00000007-ABCD-4EF0-8A1B-000000000007"
+              }
+            },
+            "pins" : [
+
+            ],
+            "reference" : "Against the old one"
+          }
+        ],
+        "family" : "surface",
+        "final" : false,
+        "framing" : "Validate the invite screen",
+        "id" : "00000005-ABCD-4EF0-8A1B-000000000005",
+        "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+        "since" : 784111222.5,
+        "state" : "open",
+        "verified" : [
+          "Opened it"
+        ],
+        "worktree" : "\/work\/tree"
+      },
+      {
+        "agent" : "00000001-ABCD-4EF0-8A1B-000000000001",
+        "answer" : {
+          "useRecommended" : {
+
+          }
+        },
+        "ask" : {
+          "choice" : {
+            "question" : "Which?",
+            "variants" : [
+              {
+                "detail" : "Through the core",
+                "letter" : "A",
+                "name" : "Core"
+              },
+              {
+                "letter" : "B",
+                "name" : "Direct"
+              }
+            ]
+          }
+        },
+        "blocking" : true,
+        "cards" : [
+          {
+            "claim" : "The path",
+            "evidence" : {
+              "diagram" : {
+                "svg" : "<svg viewBox=\"0 0 9 9\"\/>"
+              }
+            },
+            "pins" : [
+
+            ],
+            "reference" : "Before"
+          }
+        ],
+        "family" : "foundation",
+        "final" : true,
+        "framing" : "Choose the path",
+        "id" : "00000006-ABCD-4EF0-8A1B-000000000006",
+        "since" : 784111222.5,
+        "state" : "awaitingEcho",
+        "verified" : [
+          "Drew it",
+          "Checked it"
+        ],
+        "worktree" : "\/work\/tree"
+      },
+      {
+        "agent" : "00000003-ABCD-4EF0-8A1B-000000000003",
+        "answer" : {
+          "redirect" : {
+            "_0" : "Make it shorter"
+          }
+        },
+        "ask" : {
+          "validation" : {
+            "question" : "Good?"
+          }
+        },
+        "blocking" : false,
+        "cards" : [
+          {
+            "claim" : "The page",
+            "evidence" : {
+              "browser" : {
+                "id" : "00000005-ABCD-4EF0-8A1B-000000000005"
+              }
+            },
+            "pins" : [
+
+            ],
+            "reference" : "r"
+          },
+          {
+            "claim" : "The clip",
+            "evidence" : {
+              "video" : {
+                "id" : "00000007-ABCD-4EF0-8A1B-000000000007"
+              }
+            },
+            "pins" : [
+
+            ],
+            "reference" : "r"
+          }
+        ],
+        "echo" : "Cut a step",
+        "family" : "flow",
+        "final" : false,
+        "framing" : "Walk the signup",
+        "id" : "00000007-ABCD-4EF0-8A1B-000000000007",
+        "since" : 784111222.5,
+        "state" : "closed",
+        "verified" : [
+          "Ran it"
+        ],
+        "worktree" : "\/work\/tree"
+      }
+    ]
+  }
+}

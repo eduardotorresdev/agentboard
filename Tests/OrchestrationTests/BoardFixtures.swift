@@ -55,6 +55,25 @@ struct BoardFixtures {
             AttentionRequest(id: ids[1], reason: .waiting, since: date, questions: questions),
         ]
     }
+    private static var decisions: [Decision] {
+        [
+            Decision(id: ids[4], agent: ids[0], worktree: "/work/tree", organization: ids[7], family: "surface", framing: "Validate the invite screen",
+                     cards: [Decision.Card(claim: "The screen ended up like this", evidence: .image(before: ids[5], after: ids[6]),
+                                           pins: [Decision.Pin(x: 0.25, y: 1, question: "Here?")]),
+                             Decision.Card(claim: "Only after", evidence: .image(before: nil, after: ids[6]), reference: "Against the old one")],
+                     ask: .validation(question: "Can it stay?"), verified: ["Opened it"], since: date),
+            Decision(id: ids[5], agent: ids[0], worktree: "/work/tree", family: "foundation", framing: "Choose the path",
+                     cards: [Decision.Card(claim: "The path", evidence: .diagram(svg: "<svg viewBox=\"0 0 9 9\"/>"), reference: "Before")],
+                     ask: .choice(question: "Which?", variants: [Decision.Variant(letter: "A", name: "Core", detail: "Through the core"),
+                                                                 Decision.Variant(letter: "B", name: "Direct")]),
+                     verified: ["Drew it", "Checked it"], blocking: true, final: true, state: .awaitingEcho, since: date, answer: .useRecommended),
+            Decision(id: ids[6], agent: ids[2], worktree: "/work/tree", family: "flow", framing: "Walk the signup",
+                     cards: [Decision.Card(claim: "The page", evidence: .browser(id: ids[4]), reference: "r"),
+                             Decision.Card(claim: "The clip", evidence: .video(id: ids[6]), reference: "r")],
+                     ask: .validation(question: "Good?"), verified: ["Ran it"], state: .closed, since: date,
+                     answer: .redirect("Make it shorter"), echo: "Cut a step"),
+        ]
+    }
     private static var runners: RunnerReport {
         var report = RunnerReport()
         report.stats = [ids[1]: RunnerStats(cpu: 12.5, memory: 104_857_600, processes: 3,
@@ -105,6 +124,10 @@ struct BoardFixtures {
             ("prompt", .prompt(id: ids[0], text: "run the tests")),
             ("deliverHeld", .deliverHeld(ids[0])),
             ("deliver_to_one", .deliver(from: ids[4], text: "1. Area 48, 486, 408, 132", to: ids[0])),
+            ("answerDecision_ok", .answerDecision(id: ids[4], answer: .ok)),
+            ("answerDecision_option", .answerDecision(id: ids[5], answer: .option("B"))),
+            ("answerDecision_useRecommended", .answerDecision(id: ids[5], answer: .useRecommended)),
+            ("answerDecision_redirect", .answerDecision(id: ids[6], answer: .redirect("Make it shorter"))),
         ]
         for (name, request) in requests { try write(request, "request_" + name) }
         let message = Message(id: ids[8], from: ids[0], to: ids[2], text: "Run the tests", date: Self.date)
@@ -127,11 +150,12 @@ struct BoardFixtures {
             ("held", .held(id: ids[0], count: 2)),
             ("promptReturned", .promptReturned(id: ids[0], text: "run the tests", reason: "it exited")),
             ("elements", .elements([element, bare])),
+            ("decisions", .decisions(Self.decisions)),
         ]
         for (name, event) in events { try write(event, "event_" + name) }
         let state = BoardState(cards: [Self.agent, Self.runner, Self.plain], connections: Self.lines, runners: Self.runners,
                                postIts: [Self.postIt, Self.emptyPostIt], attention: Self.attention, images: [Self.image, Self.video],
-                               elements: [element])
+                               decisions: Self.decisions, elements: [element])
         try write(state, "state")
         // What a core that predates post-its, attention and images sends.
         var old = BoardState(cards: [Self.plain], connections: [], runners: RunnerReport())

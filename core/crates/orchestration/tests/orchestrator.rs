@@ -160,8 +160,16 @@ impl Core {
         (text.join("\n"), result["isError"].as_bool().unwrap())
     }
 
-    /// What an agent's context hook gets back before `event`: the added context, or none.
+    /// What an agent's context hook gets back before `event`: the added context, or none. The
+    /// pointer to the decision guide is left out (`decision_context` has it).
     fn context(&self, event: &str, caller: Uuid) -> Option<String> {
+        let context = self.decision_context(event, caller)?;
+        let rest: Vec<&str> = context.split("\n\n").filter(|part| !part.starts_with("To ask the user anything, open a decision")).collect();
+        (!rest.is_empty()).then(|| rest.join("\n\n"))
+    }
+
+    /// The context hook's answer as the agent gets it.
+    fn decision_context(&self, event: &str, caller: Uuid) -> Option<String> {
         let answer: Value = serde_json::from_slice(&self.post("/context", caller, &json!({"hook_event_name": event, "session_id": "x"}))).unwrap();
         answer["hookSpecificOutput"]["additionalContext"].as_str().map(str::to_string)
     }
@@ -944,8 +952,8 @@ fn the_tools_are_listed_with_their_instructions() {
     let rpc = |method: &str| serde_json::from_slice::<Value>(&core.post("", a.id, &json!({"jsonrpc": "2.0", "id": 1, "method": method}))).unwrap()["result"].clone();
     let instructions = rpc("initialize")["instructions"].as_str().unwrap().to_string();
     let parts: Vec<&str> = instructions.split("\n\n").collect();
-    assert_eq!(parts.len(), 7, "{instructions}");
-    for (part, start) in parts.iter().zip(["You are “Ada”, one of several coding agents", "Runners are terminal cards", "Post-its are markdown notes", "Images are pictures", "Videos are clips on the user's board (MP4, MOV or M4V)", "Browser cards connected to you", "Simulator cards connected to you"]) {
+    assert_eq!(parts.len(), 8, "{instructions}");
+    for (part, start) in parts.iter().zip(["You are “Ada”, one of several coding agents", "Runners are terminal cards", "Post-its are markdown notes", "Images are pictures", "Videos are clips on the user's board (MP4, MOV or M4V)", "Browser cards connected to you", "Simulator cards connected to you", "To ask the user anything, open a decision with decision_open"]) {
         assert!(part.starts_with(start) && !part.contains("  "), "{part}");
     }
     assert!(parts[4].contains("video_read gives its size, length and 4 frames sampled evenly through it."));
@@ -956,7 +964,8 @@ fn the_tools_are_listed_with_their_instructions() {
                     image_create image_read image_replace image_remove video_create video_read video_replace video_remove browser_open browser_list browser_navigate browser_snapshot \
                     browser_screenshot browser_click browser_type browser_press browser_scroll browser_evaluate browser_console browser_wait simulator_open simulator_list \
                     simulator_snapshot simulator_screenshot simulator_tap simulator_swipe simulator_type simulator_press simulator_wait simulator_close project_list project_create \
-                    worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove element_connect browser_close";
+                    worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove element_connect browser_close \
+                    decision_guide decision_open decision_echo decision_withdraw";
     assert_eq!(names, expected.split_whitespace().collect::<Vec<_>>());
     let open = tools.as_array().unwrap().iter().find(|tool| tool["name"] == "simulator_open").unwrap();
     assert_eq!(open["inputSchema"]["properties"]["platform"]["enum"], json!(["ios", "android"]));
@@ -1514,4 +1523,210 @@ fn board_only_tools_go_to_a_board_that_runs_them() {
     assert!(answer.contains("answered by the Mac"), "{answer}");
     phone.read(Duration::from_millis(100));
     assert!(!phone.events.iter().any(|event| matches!(event, BoardEvent::ToolCall { .. })), "the phone was asked");
+}
+
+// MARK: Decisions (ports of the Swift `DecisionTests`)
+
+/// A well-formed `decision_open` call; `change` breaks it.
+fn decision_arguments(change: impl FnOnce(&mut serde_json::Map<String, Value>)) -> Value {
+    let mut arguments = json!({
+        "family": "surface", "framing": "Validate the invite screen", "intent": "The new send button",
+        "cards": [{"claim": "The screen ended up like this", "evidence": {"type": "image", "after": "After", "before": "Before"}}],
+        "ask": {"question": "Can the screen stay like this?"},
+        "verified": ["Built and opened the screen"],
+    });
+    change(arguments.as_object_mut().unwrap());
+    arguments
+}
+
+/// A started agent with a before and an after image connected to it, and a board listening.
+fn decision_setup() -> (Core, AgentRecord, Board) {
+    let core = Core::new();
+    let board = Board::open(&core);
+    let a = agent("Ada", &core.folder);
+    board.add(&[&a]);
+    board.start(&[&a]);
+    core.shows(a.id, "ready");
+    std::fs::write(core.folder.join("shot.png"), png(40, 20)).unwrap();
+    for name in ["Before", "After"] {
+        let (created, failed) = core.call("image_create", json!({"path": "shot.png", "name": name}), a.id);
+        assert!(!failed, "{created}");
+    }
+    (core, a, board)
+}
+
+impl Core {
+    fn decisions(&self) -> Vec<Decision> {
+        self.ask(|orchestrator, _| orchestrator.decisions().to_vec())
+    }
+}
+
+impl Board {
+    /// The decisions as last sent.
+    fn heard(&self) -> Option<Vec<Decision>> {
+        self.events.iter().rev().find_map(|event| if let BoardEvent::Decisions(list) = event { Some(list.value.clone()) } else { None })
+    }
+}
+
+/// The id a tool's answer names.
+fn named_id(text: &str) -> Uuid {
+    text.split(' ').find_map(|word| Uuid::parse(word.trim_matches(|c: char| c.is_ascii_punctuation()))).expect("an id")
+}
+
+/// Open, answer OK: the agent hears it, boards see it closed, nothing is left; the attention
+/// queue is never raised.
+#[test]
+fn a_validation_is_opened_answered_and_closed() {
+    let (core, a, mut board) = decision_setup();
+    let refused = core.call("decision_open", decision_arguments(|arguments| drop(arguments.remove("verified"))), a.id);
+    assert!(refused.1 && refused.0.starts_with("Give `verified`") && refused.0.ends_with("(decision_guide has the rules.)"), "{}", refused.0);
+    let missing = core.call("decision_open", decision_arguments(|arguments| drop(arguments.insert("cards".into(), json!([{"claim": "x", "evidence": {"type": "image", "after": "Nope"}, "reference": "r"}])))), a.id);
+    assert!(missing.1 && missing.0.contains("Connected: Before, After"), "{}", missing.0);
+    assert!(core.decisions().is_empty());
+
+    let (opened, failed) = core.call("decision_open", decision_arguments(|_| {}), a.id);
+    assert!(!failed && opened.contains("provisional"), "{opened}");
+    let decision = core.decisions().remove(0);
+    assert_eq!(named_id(&opened), decision.id);
+    assert!(decision.state == DecisionState::Open && !decision.blocking && decision.agent == a.id && decision.worktree == a.worktree);
+    let images = core.images();
+    let image = |name: &str| images.iter().find(|image| image.name == name).unwrap().id;
+    assert_eq!(decision.cards[0].evidence, Evidence::Image { before: Some(image("Before")), after: image("After") });
+    assert!(core.ask(|orchestrator, _| orchestrator.attention().is_empty()));
+    board.wait("the decision", |_| false || true);
+    let id = decision.id;
+    board.wait("the decision heard", |events| events.iter().any(|event| matches!(event, BoardEvent::Decisions(list) if list.value.iter().map(|d| d.id).eq([id]))));
+
+    // A board that connects later finds it.
+    let late = Board::open(&core);
+    assert_eq!(late.state.decisions.as_ref().map(|list| list.iter().map(|d| d.id).collect::<Vec<_>>()), Some(vec![id]));
+    late.disconnect();
+
+    board.send(BoardRequest::AnswerDecision { id, answer: Answer::Ok {} });
+    wait_until("the decision closed", || core.decisions().is_empty());
+    wait_until("the answer typed in", || core.unwrapped(a.id).contains("OK. Carry on."));
+
+    // A diagram needs nothing on the board: its SVG is the evidence.
+    let svg = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures/diagrams/guide.svg")).unwrap().trim().to_string();
+    let (drawn, failed) = core.call("decision_open", decision_arguments(|arguments| drop(arguments.insert("cards".into(), json!([{"claim": "The answer goes to the core", "evidence": {"type": "diagram", "svg": svg}, "reference": "Before, the Mac answered alone."}])))), a.id);
+    assert!(!failed, "{drawn}");
+    let diagram = core.decisions().remove(0);
+    assert_eq!(diagram.cards[0].evidence, Evidence::Diagram { svg });
+    board.send(BoardRequest::AnswerDecision { id: diagram.id, answer: Answer::Ok {} });
+    wait_until("the diagram closed", || core.decisions().is_empty());
+    board.wait("seen closed once", |events| {
+        events.iter().any(|event| matches!(event, BoardEvent::Decisions(list) if list.value.first().is_some_and(|d| d.id == diagram.id && d.state == DecisionState::Closed && d.answer == Some(Answer::Ok {}))))
+    });
+    // A diagram the boards can't draw never opens.
+    let (bad, failed) = core.call("decision_open", decision_arguments(|arguments| drop(arguments.insert("cards".into(), json!([{"claim": "x", "evidence": {"type": "diagram", "svg": "<!DOCTYPE svg [<!ENTITY a \"x\">]><svg viewBox=\"0 0 9 9\"/>"}, "reference": "r"}])))), a.id);
+    assert!(failed && bad.contains("the diagram can't be drawn. A diagram takes no DOCTYPE or entities."), "{bad}");
+    assert!(core.ask(|orchestrator, _| orchestrator.attention().is_empty()));
+}
+
+/// A redirect waits for the agent's echo, and the next decision only comes after it.
+#[test]
+fn a_redirect_is_echoed_before_the_next_decision() {
+    let (core, a, mut board) = decision_setup();
+    let choice = || decision_arguments(|arguments| drop(arguments.insert("ask".into(), json!({"question": "Which one?", "variants": [{"name": "Dense list"}, {"name": "Card grid"}]}))));
+    core.call("decision_open", choice(), a.id);
+    let decision = core.decisions().remove(0);
+
+    // An answer naming no variant of this ask changes nothing.
+    board.send(BoardRequest::AnswerDecision { id: decision.id, answer: Answer::Option(only("Z".into())) });
+    board.send(BoardRequest::AnswerDecision { id: decision.id, answer: Answer::Redirect(only("About B - Card grid: keep the avatars".into())) });
+    wait_until("waiting for the echo", || core.decisions().first().is_some_and(|d| d.state == DecisionState::AwaitingEcho));
+    assert_eq!(core.decisions()[0].answer, Some(Answer::Redirect(only("About B - Card grid: keep the avatars".into()))));
+    wait_until("the redirect typed in", || core.unwrapped(a.id).contains("keep the avatars"));
+    // Answered once: a second answer is ignored.
+    board.send(BoardRequest::AnswerDecision { id: decision.id, answer: Answer::Ok {} });
+
+    // Withdrawing without naming one never takes the answered decision.
+    let kept = core.call("decision_withdraw", json!({}), a.id);
+    assert!(kept.1 && core.decisions().iter().map(|d| d.id).eq([decision.id]), "{}", kept.0);
+    let early = core.call("decision_open", decision_arguments(|_| {}), a.id);
+    assert!(early.1 && early.0.contains("decision_echo first"), "{}", early.0);
+    assert!(core.call("decision_echo", json!({}), a.id).1);
+    let (echoed, failed) = core.call("decision_echo", json!({"echo": "Keeping the avatars in the grid."}), a.id);
+    assert!(!failed, "{echoed}");
+    assert!(core.decisions().is_empty());
+    board.wait("closed with the echo", |events| {
+        events.iter().any(|event| matches!(event, BoardEvent::Decisions(list) if list.value.first().is_some_and(|d| d.echo.as_deref() == Some("Keeping the avatars in the grid.") && d.state == DecisionState::Closed)))
+    });
+
+    // Use Recommended gives the choice back and waits for the echo too; a letter closes at once.
+    core.call("decision_open", choice(), a.id);
+    board.send(BoardRequest::AnswerDecision { id: core.decisions()[0].id, answer: Answer::UseRecommended {} });
+    wait_until("waiting for the echo", || core.decisions().first().is_some_and(|d| d.state == DecisionState::AwaitingEcho));
+    core.call("decision_echo", json!({"echo": "Went with A - Dense list."}), a.id);
+    core.call("decision_open", choice(), a.id);
+    board.send(BoardRequest::AnswerDecision { id: core.decisions()[0].id, answer: Answer::Option(only("B".into())) });
+    wait_until("the letter closes it", || core.decisions().is_empty());
+    wait_until("the letter typed in", || core.unwrapped(a.id).contains("B - Card grid. Make that one"));
+}
+
+/// An answer given while the agent's program isn't running is kept, and reaches it when it is back.
+#[test]
+fn an_answer_waits_for_an_agent_that_is_not_running() {
+    let (core, a, board) = decision_setup();
+    core.call("decision_open", decision_arguments(|_| {}), a.id);
+    let decision = core.decisions().remove(0);
+    // End of input: the agent's program exits.
+    board.types(a.id, "\x04");
+    wait_until("the agent exited", || core.process(a.id).is_none());
+
+    board.send(BoardRequest::AnswerDecision { id: decision.id, answer: Answer::Ok {} });
+    wait_until("the answer kept", || core.decisions().first().is_some_and(|d| d.answer == Some(Answer::Ok {})));
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(core.decisions().iter().map(|d| d.state).collect::<Vec<_>>(), [DecisionState::Open]);
+
+    board.send(BoardRequest::Restart { id: a.id, command: None });
+    wait_until("delivered once back", || core.decisions().is_empty());
+    wait_until("the answer typed in", || core.unwrapped(a.id).contains("OK. Carry on."));
+}
+
+/// Three provisional decisions may be open in a worktree, the fourth blocks; the agent
+/// withdraws its own, and closing its card takes the rest.
+#[test]
+fn provisional_decisions_stack_up_to_a_limit_and_are_withdrawn() {
+    let (core, a, mut board) = decision_setup();
+    let framed = |framing: &str| {
+        let framing = framing.to_string();
+        decision_arguments(move |arguments| drop(arguments.insert("framing".into(), json!(framing))))
+    };
+    let first = core.call("decision_open", decision_arguments(|_| {}), a.id).0;
+    let second = core.call("decision_open", framed("Validate the empty state"), a.id).0;
+    let third = core.call("decision_open", framed("Validate the error state"), a.id).0;
+    let fourth = core.call("decision_open", framed("Validate the loading state"), a.id).0;
+    assert!(![&first, &second, &third].iter().any(|text| text.contains("blocks")));
+    assert!(fourth.contains("It blocks: this worktree already has 3 provisional"), "{fourth}");
+    assert_eq!(core.decisions().iter().map(|d| d.blocking).collect::<Vec<_>>(), [false, false, false, true]);
+    core.call("decision_withdraw", json!({"decision": named_id(&fourth).to_string()}), a.id);
+
+    let unnamed = core.call("decision_withdraw", json!({}), a.id);
+    assert!(unnamed.1 && unnamed.0.contains("say which"), "{}", unnamed.0);
+    let withdrawn = core.call("decision_withdraw", json!({"decision": named_id(&second).to_string()}), a.id);
+    assert!(!withdrawn.1, "{}", withdrawn.0);
+    assert_eq!(core.decisions().iter().map(|d| d.framing.clone()).collect::<Vec<_>>(), ["Validate the invite screen", "Validate the error state"]);
+    board.wait("two left", |events| events.iter().rev().find_map(|event| if let BoardEvent::Decisions(list) = event { Some(list.value.len()) } else { None }) == Some(2));
+
+    board.send(BoardRequest::RemoveCard(only(a.id)));
+    wait_until("none left", || core.decisions().is_empty());
+    board.wait("the boards hear none left", |events| events.iter().rev().find_map(|event| if let BoardEvent::Decisions(list) = event { Some(list.value.is_empty()) } else { None }) == Some(true));
+    assert_eq!(board.heard(), Some(vec![]));
+}
+
+/// The guide is the board skill's Decisions section, and runners get no decision tools.
+#[test]
+fn decisions_are_for_agents_and_their_guide_is_the_skill() {
+    let (core, a, board) = decision_setup();
+    let (guide, failed) = core.call("decision_guide", json!({}), a.id);
+    assert!(!failed && guide.starts_with("## Decisions\n") && guide.contains("opens no balloon") && !guide[3..].contains("\n## "), "{guide}");
+    // The pointer reaches an agent's context once, and again when its session starts over.
+    assert!(core.decision_context("UserPromptSubmit", a.id).is_some_and(|context| context.contains("open a decision with decision_open")));
+    assert!(core.decision_context("UserPromptSubmit", a.id).is_none_or(|context| !context.contains("decision_open")));
+    assert!(core.decision_context("SessionStart", a.id).is_some_and(|context| context.contains("open a decision with decision_open")));
+    core.call("runner_start", json!({"command": "sleep 30", "name": "web", "wait": false}), a.id);
+    let runner = core.card("web").unwrap();
+    assert_eq!(core.call("decision_guide", json!({}), runner.id).1, true);
+    drop(board);
 }

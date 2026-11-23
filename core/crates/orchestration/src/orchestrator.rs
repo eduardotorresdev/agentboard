@@ -17,6 +17,8 @@ use runtime::{AgentCatalog, AgentHook, AgentProvider, AgentSession, CoreBoard, C
 use terminal::TerminalModes;
 
 use crate::attention::{AttentionRequest, PendingQuestions};
+use crate::decision::Decision;
+use crate::decision_tools::DecisionTools;
 use crate::board_protocol::{from_runtime, only, to_runtime, BoardEvent, BoardRequest, BoardState, RunnerReport, Unlabelled};
 use crate::card_database::CardDatabase;
 use crate::cards::{prepare_organization, AgentRecord, ElementInfo};
@@ -58,6 +60,10 @@ pub struct Store {
     pub(crate) attention: Vec<AttentionRequest>,
     /// Agents whose questions hook waits on the developer's answers (see attention.rs).
     pub(crate) pending_questions: HashMap<Uuid, PendingQuestions>,
+    /// What agents asked the developer and still wait on (see decision.rs).
+    pub(crate) decisions: Vec<Decision>,
+    /// Agents whose context already points at the decision guide.
+    pub(crate) pointed_at_decisions: HashSet<Uuid>,
     /// Agent endpoints, so messages held while an agent waits on the developer go out once it's answered.
     agent_endpoints: HashMap<Uuid, AgentEndpoint>,
     tool_server: ToolServer,
@@ -239,6 +245,8 @@ impl Orchestrator {
             images: saved_images,
             attention: Vec::new(),
             pending_questions: HashMap::new(),
+            decisions: Vec::new(),
+            pointed_at_decisions: HashSet::new(),
             agent_endpoints: HashMap::new(),
             tool_server,
             search_path: None,
@@ -313,6 +321,10 @@ impl Orchestrator {
 
     pub fn attention(&self) -> &[AttentionRequest] {
         &self.store.attention
+    }
+
+    pub fn decisions(&self) -> &[Decision] {
+        &self.store.decisions
     }
 
     pub fn connections(&self) -> &[Connection] {
@@ -508,7 +520,7 @@ impl Elements for BoardView<'_> {
         let name = BoardName::quoted(&sender.name);
         let id = message.to;
         let Some(endpoint) = self.store.agent_endpoints.get_mut(&id) else { return };
-        endpoint.outbox.push_back(Queued { text: message.text.clone(), from_user: false, sender: Some(sender.id), from: Some(name) });
+        endpoint.outbox.push_back(Queued { text: message.text.clone(), from_user: false, sender: Some(sender.id), from: Some(name), decision: None });
         // Agents answering at once (a broadcast's replies) reach it as one prompt, not a row of them.
         if !std::mem::replace(&mut endpoint.gathering, true) {
             self.store.handle.post_after(AgentEndpoint::GATHER, move |orchestrator: &mut Orchestrator, server| {
@@ -575,6 +587,8 @@ struct Queued {
     sender: Option<Uuid>,
     /// The sending agent's name, quoted; `text` is then what it said, without a header.
     from: Option<String>,
+    /// The decision whose answer this carries: the store hears when it reaches the terminal.
+    decision: Option<Uuid>,
 }
 
 impl Queued {
@@ -647,7 +661,7 @@ impl BoardView<'_> {
         if let Some(reason) = reason {
             return self.give_back(id, text, &reason);
         }
-        self.enqueue(id, Queued { text: text.to_string(), from_user: true, sender: None, from: None });
+        self.enqueue(id, Queued { text: text.to_string(), from_user: true, sender: None, from: None, decision: None });
     }
 
     fn enqueue(&mut self, id: Uuid, queued: Queued) {
@@ -659,8 +673,18 @@ impl BoardView<'_> {
 
     /// A note from the board itself (a message of theirs that couldn't be delivered).
     fn notice(&mut self, id: Uuid, text: String) {
-        if self.program_reason(id).is_none() {
-            self.enqueue(id, Queued { text, from_user: false, sender: None, from: None });
+        self.tell(id, text, None);
+    }
+
+    /// A note from the board typed into the agent's terminal, queued like a message; nothing
+    /// while its program can't take it. A decision's answer is queued once.
+    pub(crate) fn tell(&mut self, id: Uuid, text: String, answering: Option<Uuid>) {
+        if self.program_reason(id).is_some() {
+            return;
+        }
+        let queued = answering.is_some() && self.agent_endpoints.get(&id).is_some_and(|endpoint| endpoint.outbox.iter().any(|queued| queued.decision == answering));
+        if !queued {
+            self.enqueue(id, Queued { text, from_user: false, sender: None, from: None, decision: answering });
         }
     }
 
@@ -753,6 +777,7 @@ impl BoardView<'_> {
             return self.schedule_idle_check(id);
         }
         let Some(mut next) = endpoint.outbox.pop_front() else { return };
+        let answered = next.decision;
         if let Some(name) = next.from.take() {
             let mut messages = vec![(name, std::mem::take(&mut next.text))];
             while let Some(more) = endpoint.outbox.pop_front_if(|more| more.from.is_some()) {
@@ -769,6 +794,9 @@ impl BoardView<'_> {
             if next.from_user && TerminalLine::is_command(&text) { text.into_bytes() } else { terminal.encode_paste(&text) }
         });
         session.send(paste);
+        if let Some(decision) = answered {
+            self.answer_delivered(decision);
+        }
         self.store.handle.post_after(AgentEndpoint::SUBMIT_DELAY, move |_: &mut Orchestrator, server| {
             session.send(vec![0x0D]);
             server.handle().post_after(AgentEndpoint::SUBMIT_DELAY, move |orchestrator: &mut Orchestrator, server| {
@@ -916,6 +944,7 @@ impl CoreService for Orchestrator {
             post_its: Some(store.post_its.clone()),
             attention: Some(store.attention.clone()),
             images: Some(store.images.clone()),
+            decisions: (!store.decisions.is_empty()).then(|| store.decisions.clone()),
             elements: Some(store.elements.values().cloned().collect()),
         };
         Some(state.encoded())
@@ -947,6 +976,10 @@ impl CoreService for Orchestrator {
     fn session_status(&mut self, server: &mut CoreServer<Self>, id: runtime::Uuid, status: &SessionStatus) {
         let (id, mut turn) = (from_runtime(id), self.turn(server));
         turn.board.session_changed(id, status);
+        // Answers given while its program wasn't running go in once it is.
+        if status.state == State::Running {
+            turn.board.deliver_answers(id);
+        }
         // An agent whose program ended can't answer: it leaves Needs you.
         if status.process_id.is_none() && status.state != State::Starting {
             turn.dismiss_attention(id);
@@ -969,6 +1002,7 @@ impl Turn<'_> {
         catalog.add(ProjectRelay);
         catalog.add(WorktreeTools);
         catalog.add(CardTools);
+        catalog.add(DecisionTools);
         if let Some(request) = catalog.serve(self, request) {
             match request.kind {
                 RequestKind::Question => self.ask(request),
@@ -1134,6 +1168,7 @@ impl Turn<'_> {
             BoardRequest::RemoveImage(Unlabelled { value: id }) => self.remove_image(id, sender),
             BoardRequest::DismissAttention(Unlabelled { value: id }) => self.dismiss_attention(id),
             BoardRequest::AnswerQuestions { id, answers } => self.answer_questions(id, answers),
+            BoardRequest::AnswerDecision { id, answer } => self.board.answer_decision(id, answer),
         }
     }
 
@@ -1188,6 +1223,7 @@ impl Turn<'_> {
         self.save(|database| database.delete_agent(id));
         self.broadcast(&BoardEvent::CardRemoved(only(id)), sender);
         self.dismiss_attention(id);
+        self.board.withdraw_decisions(|decision| decision.agent == id);
     }
 
     // MARK: Post-its

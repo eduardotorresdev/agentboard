@@ -15,6 +15,7 @@ use runtime::Data;
 
 use crate::attention::AttentionRequest;
 use crate::cards::{AgentRecord, ElementInfo};
+use crate::decision::{Answer, Decision};
 use crate::image_card::ImageRecord;
 use crate::post_it::PostItRecord;
 use crate::process_inspector::RunnerStats;
@@ -81,6 +82,8 @@ pub enum BoardRequest {
     Prompt { id: Uuid, text: String },
     /// Delivers the messages held while the user had text on the agent's terminal line.
     DeliverHeld(Unlabelled<Uuid>),
+    /// The developer answered the agent's decision (after the board's undo window).
+    AnswerDecision { id: Uuid, answer: Answer },
 }
 
 /// Core → board.
@@ -115,6 +118,9 @@ pub enum BoardEvent {
     /// The boards' other elements (browsers, simulators), after a board said which it has: how
     /// a board that can't run them (a phone) learns of them. Not sent back to that board.
     Elements(Unlabelled<Vec<ElementInfo>>),
+    /// Every decision, oldest first, after any change. One that closed comes once more, as
+    /// closed (with the agent's echo), then no more.
+    Decisions(Unlabelled<Vec<Decision>>),
 }
 
 /// The one unlabelled value of a Swift enum case: `{"_0": value}`.
@@ -145,6 +151,9 @@ pub struct BoardState {
     /// The images; none from a core that predates them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<ImageRecord>>,
+    /// The decisions waiting on the developer; none when there are none or from a core that predates them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decisions: Option<Vec<Decision>>,
     /// The boards' other elements; none from a core that predates sending them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elements: Option<Vec<ElementInfo>>,
