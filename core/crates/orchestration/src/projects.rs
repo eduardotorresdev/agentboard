@@ -156,7 +156,8 @@ pub fn create_worktree(projects: &Path, repository: &Path, branch: &str) -> Crea
     if !repository.join(".git").exists() {
         return Err(format!("{} isn't a project's repository.", repository.display()));
     }
-    if branch.is_empty() || branch.starts_with('-') || git(None, &["check-ref-format", "--branch", branch]).is_err() {
+    // `--branch` expands "@{-1}" to the last branch of whatever repository git runs in.
+    if branch.is_empty() || branch.starts_with('-') || branch.contains("@{") || git(None, &["check-ref-format", "--branch", branch]).is_err() {
         return Err(format!("“{branch}” isn't a valid branch name."));
     }
     let location = inside(projects, &worktree_location(&repository, branch))?;

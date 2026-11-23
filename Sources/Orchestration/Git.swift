@@ -161,7 +161,8 @@ package enum Git {
 
     /// Whether git accepts `name` as a branch name.
     package static func isValidBranchName(_ name: String) -> Bool {
-        !name.isEmpty && (try? run(["check-ref-format", "--branch", name])) != nil
+        // `--branch` expands "@{-1}" to the last branch of whatever repository git runs in.
+        !name.isEmpty && !name.contains("@{") && (try? run(["check-ref-format", "--branch", name])) != nil
     }
 
     /// What creating a worktree for `branch` checks out: the local branch with exactly that
