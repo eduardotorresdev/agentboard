@@ -76,8 +76,9 @@ trap stop EXIT
 # Builds, then swaps the running app for the new one: a failed build leaves the old one up.
 start() {
     swift build || { echo "Build failed, waiting for changes..."; return 1; }
-    # The host program, next to the app's executable ("This Mac as host").
-    { cargo build -p agentboard --manifest-path core/Cargo.toml && cp core/target/debug/agentboard .build/debug/; } || { echo "Build failed, waiting for changes..."; return 1; }
+    # The host program, next to the app's executable ("This Mac as host"), under its own name:
+    # "agentboard" is the app executable's name on a case-insensitive disk.
+    { cargo build -p agentboard --manifest-path core/Cargo.toml && cp core/target/debug/agentboard .build/debug/agentboard-host; } || { echo "Build failed, waiting for changes..."; return 1; }
     stop
     replace_core_if_changed
     .build/debug/AgentBoard &

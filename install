@@ -26,12 +26,7 @@ mkdir -p "$(dirname "$DEST")"
 STAGE=$(mktemp -d "$(dirname "$DEST")/.AgentBoard-install.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/AgentBoard.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp Assets/AppIcon.icns "$APP/Contents/Resources/"
-cp "$BIN/AgentBoard" "$BIN/AgentBoardCore" "$BIN/libBrowserInjection.dylib" "$BIN/simulator-host" "$APP/Contents/MacOS/"
-cp core/target/release/agentboard "$APP/Contents/MacOS/"
-# Where SwiftPM's resource accessors look: the bundle's root.
-cp -R "$BIN"/AgentBoard_*.bundle "$APP/"
+scripts/assemble-app "$BIN" core/target/release/agentboard "$APP"
 VERSION=$(date +%Y.%m.%d)
 BUILD=$(date +%Y%m%d%H%M)
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)

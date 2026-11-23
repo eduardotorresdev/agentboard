@@ -1,0 +1,15 @@
+#!/bin/bash
+# Puts the app's programs into a new AgentBoard.app (all but Info.plist): the SwiftPM products in
+# BIN, and the host program from HOST (core/target/…/agentboard). Used by ./install; a test runs it
+# on stand-in files.
+# Usage: scripts/assemble-app <BIN> <HOST> <APP>
+set -euo pipefail
+cd "$(dirname "$0")/.."
+BIN=$1 HOST=$2 APP=$3
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp Assets/AppIcon.icns "$APP/Contents/Resources/"
+cp "$BIN/AgentBoard" "$BIN/AgentBoardCore" "$BIN/libBrowserInjection.dylib" "$BIN/simulator-host" "$APP/Contents/MacOS/"
+# Its own name: "agentboard" is the app executable's name on a case-insensitive disk.
+cp "$HOST" "$APP/Contents/MacOS/agentboard-host"
+# Where SwiftPM's resource accessors look: the bundle's root.
+cp -R "$BIN"/AgentBoard_*.bundle "$APP/"

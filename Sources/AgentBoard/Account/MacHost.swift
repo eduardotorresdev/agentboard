@@ -38,7 +38,7 @@ final class MacHost {
         let data = try? Data(contentsOf: folder.appendingPathComponent("host.json"))
         return data.flatMap { try? JSONDecoder().decode(Config.self, from: $0) }?.id
     }
-    private static var executable: URL? { Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("agentboard") }
+    private static var executable: URL? { Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("agentboard-host") }
 
     func setWanted(_ wanted: Bool, signedIn: Bool) {
         isWanted = wanted
@@ -126,7 +126,7 @@ final class MacHost {
         process.environment = environment
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        process.terminationHandler = { _ in Task { @MainActor [weak self] in self?.readWaiting() } }
+        process.terminationHandler = { [weak self] _ in Task { @MainActor in self?.readWaiting() } }
         try? process.run()
     }
 
