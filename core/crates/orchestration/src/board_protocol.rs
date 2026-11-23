@@ -84,6 +84,17 @@ pub enum BoardRequest {
     DeliverHeld(Unlabelled<Uuid>),
     /// The developer answered the agent's decision (after the board's undo window).
     AnswerDecision { id: Uuid, answer: Answer },
+    /// From a board that can't run git itself (the phone): makes project `name` in the host's
+    /// projects folder, a clone of `clone` (https or ssh) or a new repository. `created` answers.
+    CreateProject {
+        request: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        clone: Option<String>,
+    },
+    /// The same for a worktree on `branch` of the project at `project` (its folder).
+    CreateWorktree { request: Uuid, project: String, branch: String },
 }
 
 /// Core → board.
@@ -121,6 +132,15 @@ pub enum BoardEvent {
     /// Every decision, oldest first, after any change. One that closed comes once more, as
     /// closed (with the agent's echo), then no more.
     Decisions(Unlabelled<Vec<Decision>>),
+    /// The answer to `createProject` or `createWorktree`, to the board that asked: the folder
+    /// made, or why not.
+    Created {
+        request: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 /// The one unlabelled value of a Swift enum case: `{"_0": value}`.

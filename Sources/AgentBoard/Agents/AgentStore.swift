@@ -366,6 +366,9 @@ final class AgentStore {
         case .streamTicket:
             // For boards that show another host's cards; this one serves its own.
             return
+        case .created:
+            // The answer to a phone's createProject or createWorktree; this board makes its own.
+            return
         case .cardAdded(let record):
             guard self.record(record.id) == nil else { return }
             agents.append(record)

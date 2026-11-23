@@ -279,6 +279,17 @@ public final class Orchestrator: CoreService {
 
     // MARK: Boards
 
+    /// Where projects made for a board go (tests use a folder of their own).
+    var projectsFolder = ProjectMaker.defaultFolder
+
+    private func answer(_ request: UUID, _ made: Result<String, ProjectRefusal>, to board: CoreBoard) {
+        let event: BoardEvent = switch made {
+        case .success(let path): .created(request: request, path: path, error: nil)
+        case .failure(let refusal): .created(request: request, path: nil, error: refusal.message)
+        }
+        board.send(event.encoded)
+    }
+
     /// Whether a connected board shows agents' questions and answers them: one whose hello says
     /// so, or one from before hellos said it that lists its elements (a Mac; an older phone
     /// lists none and has no questions sheet).
@@ -416,6 +427,16 @@ public final class Orchestrator: CoreService {
             dismissAttention(id)
         case .answerQuestions(let id, let answers):
             answerQuestions(id, answers)
+        case .createProject(let request, let name, let clone):
+            let projects = projectsFolder
+            Task {
+                answer(request, await ProjectMaker.project(in: projects, name: name, clone: clone), to: board)
+            }
+        case .createWorktree(let request, let project, let branch):
+            let projects = projectsFolder
+            Task {
+                answer(request, await ProjectMaker.worktree(in: projects, repository: project, branch: branch), to: board)
+            }
         case .answerDecision(let id, let answer):
             answerDecision(id, answer)
         case .servesStreams(let port, let token):

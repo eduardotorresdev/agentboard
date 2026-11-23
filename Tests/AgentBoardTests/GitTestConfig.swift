@@ -1,5 +1,6 @@
 import Foundation
 @testable import AgentBoard
+import Orchestration
 
 /// Touch before running git in a test: from then on git reads a throwaway global config (just a
 /// name and email) and no system config, so the developer's signing, hooks and aliases never

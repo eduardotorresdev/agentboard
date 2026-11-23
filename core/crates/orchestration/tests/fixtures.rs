@@ -103,8 +103,13 @@ fn requests_encode_as_swift_does() {
         "addCard", "updateCard", "removeCard", "connect", "disconnect", "elements", "open", "restart", "restart_as_it_is", "startRunner", "stopRunner", "toolResult", "toolResult_error",
         "addPostIt", "updatePostIt", "removePostIt", "writePostIt", "addImage", "updateImage", "removeImage", "dismissAttention", "answerQuestions", "answerQuestions_in_the_terminal", "deliver",
         "prompt", "deliverHeld", "deliver_to_one", "answerDecision_ok", "answerDecision_option", "answerDecision_useRecommended", "answerDecision_redirect",
+        "createProject", "createProject_clone", "createWorktree",
     ];
     let requests: Vec<BoardRequest> = names.iter().map(|name| round_trip(&format!("request_{name}"))).collect();
+    let created = names.iter().position(|name| *name == "createProject").unwrap();
+    assert_eq!(requests[created], BoardRequest::CreateProject { request: id(8), name: Some("shop".into()), clone: None });
+    assert_eq!(requests[created + 1], BoardRequest::CreateProject { request: id(8), name: None, clone: Some("git@github.com:owner/shop.git".into()) });
+    assert_eq!(requests[created + 2], BoardRequest::CreateWorktree { request: id(9), project: "/Users/me/agentboard/projects/shop".into(), branch: "fix/login".into() });
     assert_eq!(requests[0], BoardRequest::AddCard(only(agent())));
     assert_eq!(requests[1], BoardRequest::UpdateCard(only(runner())));
     assert_eq!(requests[3], BoardRequest::Connect(only(lines().remove(0))));
@@ -136,7 +141,7 @@ fn requests_encode_as_swift_does() {
 fn events_encode_as_swift_does() {
     let names = [
         "cardAdded", "cardUpdated", "cardRemoved", "connections", "message", "runners", "runners_none", "toolCall", "postItAdded", "postItUpdated", "postItRemoved", "imageAdded", "imageUpdated",
-        "imageRemoved", "attention", "held", "promptReturned", "elements", "decisions",
+        "imageRemoved", "attention", "held", "promptReturned", "elements", "decisions", "created", "created_refused",
     ];
     let events: Vec<BoardEvent> = names.iter().map(|name| round_trip(&format!("event_{name}"))).collect();
     assert_eq!(events[0], BoardEvent::CardAdded(only(runner())));

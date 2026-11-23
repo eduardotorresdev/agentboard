@@ -1,6 +1,7 @@
 import AgentRuntime
 import Foundation
 import SQLite3
+import Orchestration
 
 struct Project: Identifiable, Hashable {
     let id: Int64

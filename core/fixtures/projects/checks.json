@@ -1,0 +1,186 @@
+{
+ "names": [
+  {
+   "value": "",
+   "refused": "Give the project a name."
+  },
+  {
+   "value": " ",
+   "refused": "Give the project a name."
+  },
+  {
+   "value": ".",
+   "refused": "A project name is one folder name: no “/”, and not “.” or “..”."
+  },
+  {
+   "value": "..",
+   "refused": "A project name is one folder name: no “/”, and not “.” or “..”."
+  },
+  {
+   "value": "a/b",
+   "refused": "A project name is one folder name: no “/”, and not “.” or “..”."
+  },
+  {
+   "value": "../x",
+   "refused": "A project name is one folder name: no “/”, and not “.” or “..”."
+  },
+  {
+   "value": "x/..",
+   "refused": "A project name is one folder name: no “/”, and not “.” or “..”."
+  },
+  {
+   "value": "a\\b",
+   "refused": "A project name is one folder name: no “/”, and not “.” or “..”."
+  },
+  {
+   "value": "a\u0000b",
+   "refused": "A project name is one folder name: no “/”, and not “.” or “..”."
+  },
+  {
+   "value": "-rf",
+   "refused": "A project name can't start with “-” or “.”, nor hold control characters."
+  },
+  {
+   "value": ".hidden",
+   "refused": "A project name can't start with “-” or “.”, nor hold control characters."
+  },
+  {
+   "value": "a\nb",
+   "refused": "A project name can't start with “-” or “.”, nor hold control characters."
+  },
+  {
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "refused": "A project name can't start with “-” or “.”, nor hold control characters."
+  },
+  {
+   "value": "app"
+  },
+  {
+   "value": "my app"
+  },
+  {
+   "value": "app.v2"
+  },
+  {
+   "value": "über"
+  },
+  {
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  }
+ ],
+ "cloneURLs": [
+  {
+   "value": "file:///etc",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "/Users/me/repo",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "./repo",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "../repo",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "repo",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "ext::sh -c touch% /tmp/x",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "-uhack",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "--upload-pack=x",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "https://",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "https:///path",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "https://-oProxyCommand=x/repo",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "ssh://-oProxyCommand=x/repo",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "git@host:",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "host:path",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "a/b@host:path",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "git@host://x",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "http://example.com/repo.git",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "https://host/a b",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "fd::x",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "git://host/repo",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "",
+   "refused": "Clone from an https or ssh URL (https://…, ssh://… or git@host:owner/repo)."
+  },
+  {
+   "value": "https://github.com/owner/repo.git"
+  },
+  {
+   "value": "https://user@host.example/repo"
+  },
+  {
+   "value": "ssh://git@host.example/owner/repo.git"
+  },
+  {
+   "value": "ssh://host:2222/repo"
+  },
+  {
+   "value": "git@github.com:owner/repo.git"
+  }
+ ],
+ "repositoryNames": [
+  {
+   "url": "git@github.com:owner/repo.git",
+   "name": "repo"
+  },
+  {
+   "url": "https://host/owner/app/",
+   "name": "app"
+  },
+  {
+   "url": "ssh://host/x",
+   "name": "x"
+  }
+ ]
+}

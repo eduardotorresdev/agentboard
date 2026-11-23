@@ -55,6 +55,11 @@ public enum BoardRequest: Codable, Sendable {
     case deliverHeld(UUID)
     /// The developer answered the agent's decision (after the board's undo window).
     case answerDecision(id: UUID, answer: Decision.Answer)
+    /// From a board that can't run git itself (the phone): makes project `name` in the host's
+    /// projects folder, a clone of `clone` (https or ssh) or a new repository. `created` answers.
+    case createProject(request: UUID, name: String?, clone: String?)
+    /// The same for a worktree on `branch` of the project at `project` (its folder).
+    case createWorktree(request: UUID, project: String, branch: String)
     /// This board serves card streams on the host's loopback (docs/streams.md); the core keeps
     /// it in memory, while the board stays, to answer `streamTicket`.
     case servesStreams(port: Int, token: String)
@@ -98,6 +103,9 @@ public enum BoardEvent: Codable, Sendable {
     /// The boards' other elements (browsers, simulators), after a board said which it has: how
     /// a board that can't run them (a phone) learns of them. Not sent back to that board.
     case elements([ElementInfo])
+    /// The answer to `createProject` or `createWorktree`, to the board that asked: the folder
+    /// made, or why not.
+    case created(request: UUID, path: String?, error: String?)
 }
 
 /// What a board gets with its welcome.

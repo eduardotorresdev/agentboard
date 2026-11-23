@@ -1,5 +1,6 @@
 import AgentRuntime
 import Foundation
+import Orchestration
 
 /// The user's own board: a free canvas that belongs to no project, one per organization. Its
 /// cards live in a folder of its own in the data folder, which is where its agents start.

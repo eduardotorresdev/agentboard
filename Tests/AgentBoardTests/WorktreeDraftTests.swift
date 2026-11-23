@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import AgentBoard
+import Orchestration
 
 /// A repository on `main` in a fresh temporary folder; never the user's own repositories.
 private func repository() throws -> URL {

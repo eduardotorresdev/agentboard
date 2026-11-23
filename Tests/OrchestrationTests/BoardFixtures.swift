@@ -128,6 +128,9 @@ struct BoardFixtures {
             ("answerDecision_option", .answerDecision(id: ids[5], answer: .option("B"))),
             ("answerDecision_useRecommended", .answerDecision(id: ids[5], answer: .useRecommended)),
             ("answerDecision_redirect", .answerDecision(id: ids[6], answer: .redirect("Make it shorter"))),
+            ("createProject", .createProject(request: ids[7], name: "shop", clone: nil)),
+            ("createProject_clone", .createProject(request: ids[7], name: nil, clone: "git@github.com:owner/shop.git")),
+            ("createWorktree", .createWorktree(request: ids[8], project: "/Users/me/agentboard/projects/shop", branch: "fix/login")),
         ]
         for (name, request) in requests { try write(request, "request_" + name) }
         let message = Message(id: ids[8], from: ids[0], to: ids[2], text: "Run the tests", date: Self.date)
@@ -151,6 +154,8 @@ struct BoardFixtures {
             ("promptReturned", .promptReturned(id: ids[0], text: "run the tests", reason: "it exited")),
             ("elements", .elements([element, bare])),
             ("decisions", .decisions(Self.decisions)),
+            ("created", .created(request: ids[7], path: "/Users/me/agentboard/projects/shop", error: nil)),
+            ("created_refused", .created(request: ids[8], path: nil, error: "“a..b” isn't a valid branch name.")),
         ]
         for (name, event) in events { try write(event, "event_" + name) }
         let state = BoardState(cards: [Self.agent, Self.runner, Self.plain], connections: Self.lines, runners: Self.runners,

@@ -188,6 +188,7 @@ final class ProjectTools {
     }
 
     private func create(_ arguments: [String: Any], in organization: UUID) async -> ToolResult {
+        // Any URL, unlike a phone's request (`ProjectChecks.cloneURL`): this agent already has a shell here; https/ssh-only guards what comes over the network.
         let clone = (arguments["clone"] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty
         let destination: URL
         if let path = (arguments["path"] as? String)?.trimmingCharacters(in: .whitespaces).nonEmpty {
@@ -198,6 +199,8 @@ final class ProjectTools {
                 ?? clone.map(AddProjectDialog.repositoryName(from:))?.nonEmpty
             guard let name else { return .error("Give a `name`, a `path`, or a `clone` URL.") }
             guard !name.contains("/") else { return .error("`name` can't contain “/”; use `path` for a full folder.") }
+            // As the Add Project dialog: "." and ".." would land the project outside the folder.
+            if let problem = AddProjectDialog.nameProblem(name) { return .error(problem) }
             let location = AppDefaults.shared.string(forKey: "projectLocation") ?? AddProjectDialog.defaultLocation
             destination = URL(fileURLWithPath: location).appendingPathComponent(name)
         }

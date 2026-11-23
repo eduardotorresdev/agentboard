@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Orchestration
 
 /// Add Project, modeled on Orca: pick how to start (clone, create, open), then fill in that form.
 struct AddProjectDialog: View {

@@ -1,0 +1,6 @@
+{
+  "createProject" : {
+    "clone" : "git@github.com:owner\/shop.git",
+    "request" : "00000008-ABCD-4EF0-8A1B-000000000008"
+  }
+}

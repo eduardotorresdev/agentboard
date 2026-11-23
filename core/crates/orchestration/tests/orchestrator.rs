@@ -1805,3 +1805,52 @@ fn held_questions_wait_a_grace_period_for_a_board() {
     let queue = core.ask(|orchestrator, _| orchestrator.attention().to_vec());
     assert!(queue.len() == 1 && queue[0].questions.is_none(), "{queue:?}");
 }
+
+// MARK: Projects from a board that can't run git
+
+/// A phone asks the host's core for a project and a worktree; the core makes them in its
+/// projects folder and answers that board, and refuses what would leave the folder.
+#[test]
+fn a_board_has_the_core_make_projects_and_worktrees() {
+    let core = Core::new();
+    let projects = core.folder.join("projects");
+    // git reads only a config made here, never the user's (no signing, no prompts).
+    let config = core.folder.join("gitconfig");
+    std::fs::write(&config, "[user]\n\tname = Test\n\temail = test@example.invalid\n[commit]\n\tgpgsign = false\n").unwrap();
+    std::env::set_var("GIT_CONFIG_GLOBAL", &config);
+    std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
+    let folder = projects.clone();
+    core.ask(move |orchestrator, _| orchestrator.set_projects_folder(folder));
+    let mut board = Board::open(&core);
+    let answer = |board: &mut Board, request: Uuid| {
+        board.wait("the answer", |events| events.iter().any(|event| matches!(event, BoardEvent::Created { request: answered, .. } if *answered == request)));
+        board.events.iter().find_map(|event| match event {
+            BoardEvent::Created { request: answered, path, error } if *answered == request => Some((path.clone(), error.clone())),
+            _ => None,
+        }).unwrap()
+    };
+
+    let request = Uuid::new();
+    board.send(BoardRequest::CreateProject { request, name: Some("app".into()), clone: None });
+    let (path, error) = answer(&mut board, request);
+    let app = projects.canonicalize().unwrap().join("app");
+    assert_eq!((path.as_deref(), error), (Some(app.to_str().unwrap()), None));
+    assert!(app.join(".git").exists());
+
+    let request = Uuid::new();
+    board.send(BoardRequest::CreateWorktree { request, project: app.to_string_lossy().into_owned(), branch: "fix/login".into() });
+    let (path, error) = answer(&mut board, request);
+    assert_eq!((path, error), (Some(app.with_file_name("app-worktrees").join("fix-login").to_string_lossy().into_owned()), None));
+
+    for refused in [
+        BoardRequest::CreateProject { request: Uuid::new(), name: Some("..".into()), clone: None },
+        BoardRequest::CreateProject { request: Uuid::new(), name: None, clone: Some("file:///etc".into()) },
+        BoardRequest::CreateWorktree { request: Uuid::new(), project: core.folder.to_string_lossy().into_owned(), branch: "x".into() },
+    ] {
+        let (BoardRequest::CreateProject { request, .. } | BoardRequest::CreateWorktree { request, .. }) = refused.clone() else { unreachable!() };
+        board.send(refused);
+        let (path, error) = answer(&mut board, request);
+        assert!(path.is_none() && error.is_some(), "{error:?}");
+    }
+    assert!(!core.folder.join("etc").exists() && !core.folder.join(".git").exists());
+}

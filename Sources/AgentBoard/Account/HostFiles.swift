@@ -1,5 +1,6 @@
 import AgentRuntime
 import Foundation
+import Orchestration
 
 /// Answers true once.
 private final class Once: @unchecked Sendable {

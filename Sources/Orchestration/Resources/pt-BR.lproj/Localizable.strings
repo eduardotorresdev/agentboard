@@ -5,3 +5,12 @@
 "This folder no longer exists on disk." = "Esta pasta não existe mais no disco.";
 "restarted" = "reiniciado";
 "%@ is not installed. Install it in a terminal with “%@”, then click this card." = "%@ não está instalado. Instale num terminal com “%@” e depois clique neste card.";
+
+/* Git (moved from the app with the functions that say them) */
+"The repository has no commits yet. Make a first commit, then add worktrees." = "O repositório ainda não tem commits. Faça um primeiro commit e depois adicione worktrees.";
+"the branch %@" = "a branch %@";
+"Left in place: %@." = "Mantido no lugar: %@.";
+"git took too long and was stopped." = "O git demorou demais e foi interrompido.";
+"Couldn't reach %@. It may be offline." = "Não foi possível falar com %@. Ele pode estar offline.";
+"origin has no branch to start %@ from. Push one, then try again." = "O origin não tem branch de onde começar %@. Envie uma e tente de novo.";
+"%@ can't sign in to this repository's server. Set up git credentials on that host (an SSH key or a credential helper), then try again." = "%@ não consegue se autenticar no servidor deste repositório. Configure as credenciais do git nesse host (uma chave SSH ou um credential helper) e tente de novo.";

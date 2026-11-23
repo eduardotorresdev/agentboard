@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import AgentBoard
+import Orchestration
 
 /// The account server's catalog, in memory: a version and a document, `stale` when behind, and
 /// the avatars with a version each.

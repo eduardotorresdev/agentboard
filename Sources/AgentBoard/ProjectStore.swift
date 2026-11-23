@@ -2,6 +2,7 @@ import AgentRuntime
 import AppKit
 import Foundation
 import Observation
+import Orchestration
 
 @MainActor
 @Observable

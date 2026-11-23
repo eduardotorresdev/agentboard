@@ -64,6 +64,8 @@ pub struct Store {
     pub(crate) question_grace: Duration,
     /// Counts the grace timers started: only the latest one releases the questions.
     pub(crate) question_graces: u64,
+    /// Where projects made for a board go: `~/agentboard/projects`, as the Mac app makes them.
+    pub(crate) projects_folder: PathBuf,
     /// What agents asked the developer and still wait on (see decision.rs).
     pub(crate) decisions: Vec<Decision>,
     /// Agents whose context already points at the decision guide.
@@ -251,6 +253,7 @@ impl Orchestrator {
             pending_questions: HashMap::new(),
             question_grace: Duration::from_secs(60),
             question_graces: 0,
+            projects_folder: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("agentboard/projects"),
             decisions: Vec::new(),
             pointed_at_decisions: HashSet::new(),
             agent_endpoints: HashMap::new(),
@@ -327,6 +330,11 @@ impl Orchestrator {
 
     pub fn attention(&self) -> &[AttentionRequest] {
         &self.store.attention
+    }
+
+    /// Where projects made for a board go (tests use a folder of their own).
+    pub fn set_projects_folder(&mut self, folder: PathBuf) {
+        self.store.projects_folder = folder;
     }
 
     /// How long held questions wait for a board that answers them (a minute; shorter in tests).
@@ -1181,7 +1189,27 @@ impl Turn<'_> {
             BoardRequest::DismissAttention(Unlabelled { value: id }) => self.dismiss_attention(id),
             BoardRequest::AnswerQuestions { id, answers } => self.answer_questions(id, answers),
             BoardRequest::AnswerDecision { id, answer } => self.board.answer_decision(id, answer),
+            BoardRequest::CreateProject { request, name, clone } => {
+                self.create(request, board, move |projects| crate::projects::create_project(projects, name.as_deref(), clone.as_deref()));
+            }
+            BoardRequest::CreateWorktree { request, project, branch } => {
+                self.create(request, board, move |projects| crate::projects::create_worktree(projects, Path::new(&project), &branch));
+            }
         }
+    }
+
+    /// Runs git for a board's create on a thread of its own (a clone takes its time), then
+    /// answers that board.
+    fn create(&mut self, request: Uuid, board: &CoreBoard, make: impl FnOnce(&Path) -> crate::projects::Created + Send + 'static) {
+        let (projects, board) = (self.projects_folder.clone(), board.clone());
+        std::thread::spawn(move || {
+            let made = make(&projects);
+            let (path, error) = match made {
+                Ok(path) => (Some(path.to_string_lossy().into_owned()), None),
+                Err(error) => (None, Some(error)),
+            };
+            board.send(&BoardEvent::Created { request, path, error }.encoded());
+        });
     }
 
     /// Runs a tool only a board can (a browser's) on a connected one.

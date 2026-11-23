@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import Orchestration
 
 /// Adds a worktree to a project. The user names what they'll work on; that name is the
 /// worktree's title, and the branch and folder are derived from it (or, when it names an

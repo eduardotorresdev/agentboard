@@ -49,29 +49,31 @@ fn remote(name: &str) -> String {
     format!("https://repos.invalid/{name}.git")
 }
 
-#[test]
-fn names_that_climb_out_or_hide_are_refused() {
-    for name in ["", " ", ".", "..", "a/b", "../x", "x/..", "-rf", ".hidden", "a\0b", "a\nb", "a\\b"] {
-        assert!(check_name(name).is_err(), "{name:?}");
-    }
-    for name in ["app", "my app", "app.v2", "über"] {
-        assert!(check_name(name).is_ok(), "{name:?}");
+/// The shared cases (`core/fixtures/projects/checks.json`), refused with the same reason by
+/// the Swift core's checks.
+fn checks() -> serde_json::Value {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/projects/checks.json");
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn each(list: &serde_json::Value, check: impl Fn(&str) -> Result<(), String>) {
+    for case in list.as_array().unwrap() {
+        let value = case["value"].as_str().unwrap();
+        assert_eq!(check(value).err().as_deref(), case["refused"].as_str(), "{value:?}");
     }
 }
 
 #[test]
+fn names_that_climb_out_or_hide_are_refused() {
+    each(&checks()["names"], check_name);
+}
+
+#[test]
 fn only_https_and_ssh_clone_urls_are_taken() {
-    for url in ["file:///etc", "/Users/me/repo", "./repo", "../repo", "repo", "ext::sh -c touch% /tmp/x", "-uhack", "--upload-pack=x",
-                "https://", "https:///path", "https://-oProxyCommand=x/repo", "ssh://-oProxyCommand=x/repo", "git@host:", "host:path", "a/b@host:path",
-                "git@host://x", "http://example.com/repo.git", "https://host/a b", "fd::x", "git://host/repo"] {
-        assert!(check_clone_url(url).is_err(), "{url:?}");
+    each(&checks()["cloneURLs"], check_clone_url);
+    for case in checks()["repositoryNames"].as_array().unwrap() {
+        assert_eq!(projects::repository_name(case["url"].as_str().unwrap()), case["name"].as_str().unwrap());
     }
-    for url in ["https://github.com/owner/repo.git", "https://user@host.example/repo", "ssh://git@host.example/owner/repo.git", "ssh://host:2222/repo",
-                "git@github.com:owner/repo.git"] {
-        assert!(check_clone_url(url).is_ok(), "{url:?}");
-    }
-    assert_eq!(projects::repository_name("git@github.com:owner/repo.git"), "repo");
-    assert_eq!(projects::repository_name("https://host/owner/app/"), "app");
 }
 
 #[test]

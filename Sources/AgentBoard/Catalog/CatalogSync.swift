@@ -2,6 +2,7 @@ import AgentRuntime
 import AppKit
 import CryptoKit
 import Foundation
+import Orchestration
 
 /// Keeps this Mac's projects database and the account's catalog (docs/catalog.md) the same,
 /// both ways: what this Mac has new goes up, what another board (a phone) added comes down.
