@@ -83,7 +83,7 @@ final class AgentStore {
     /// The line to the process that runs the cards' programs and keeps the cards, the lines and
     /// the agents' tools, so they outlive this one (see `CoreServer`). It reconnects by itself
     /// when that process goes away.
-    @ObservationIgnored private let link: CoreLink
+    @ObservationIgnored let link: CoreLink
     /// A core in this process, when the real one couldn't be reached: programs then end with
     /// the board.
     @ObservationIgnored private var local: InProcessCore?

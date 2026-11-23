@@ -10,7 +10,7 @@ public final class CoreLink {
     private let connect: @Sendable () -> Result<CoreClient, CoreClient.Failure>
     /// The versions of the incompatible core last reported, so each is reported once.
     private var reportedIncompatible: CoreProtocol.Versions?
-    private var pending: [BoardRequest] = []
+    private(set) var pending: [BoardRequest] = []
     private var connecting = false
     private var closed = false
     private var lostSince: Date?

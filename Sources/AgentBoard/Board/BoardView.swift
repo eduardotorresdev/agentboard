@@ -220,7 +220,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// Runner cards' buttons, addresses and metrics, drawn over their `CardLayer`.
     private var runnerChrome: [UUID: RunnerChromeLayer] = [:]
     /// Each agent card's composer, below the card.
-    private var composers: [UUID: NSView] = [:]
+    private var composers: [UUID: ZoomedView] = [:]
     /// Project and worktree of this board, for the balloons' title.
     var place = ProjectStore.Place(worktree: "")
     /// Decision balloons, by agent: its questions show one after the other in the same balloon.
@@ -780,16 +780,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// camera like the rest of the card.
     private func placeComposer(for record: AgentRecord) {
         let view = composers[record.id] ?? {
-            let view = NSView()
-            view.addSubview(NSHostingView(rootView: AgentComposer(store: store, id: record.id)))
+            // Scaled inside SwiftUI: through the view's bounds, SwiftUI would answer the buttons'
+            // clicks where they sit at zoom 1.
+            let view = ZoomedView(content: AgentComposer(store: store, id: record.id))
             composers[record.id] = view
             addSubview(view)
             return view
         }()
         let rect = CardMetrics.composer(of: record)
-        view.frame = screen(rect)
-        view.setBoundsSize(rect.size)
-        view.subviews.first?.frame = view.bounds
+        view.place(screen(rect), size: rect.size, zoom: zoom)
     }
 
     /// One balloon per agent with decisions, left of the card and pointing at it, walking through
