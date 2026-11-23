@@ -115,8 +115,13 @@ mkdir -p "$WORK/home" "$WORK/user"
 safely() { env -u AGENTBOARD_HOME sandbox-exec -p "$POLICY" /usr/bin/env "${ENVIRONMENT[@]}" "$@"; }
 # Serial: WorktreeTitleTests hold the main thread for seconds each (real repositories), which
 # starves the suites whose cores answer on the main queue when they run alongside.
-safely "$HELPER" --test-bundle-path "$BUNDLE" "$BUNDLE" --testing-library swift-testing --no-parallel "$@"
-STATUS=$?
+safely "$HELPER" --test-bundle-path "$BUNDLE" "$BUNDLE" --testing-library swift-testing --no-parallel "$@" 2>&1 | tee "$WORK/testing.log"
+STATUS=${PIPESTATUS[0]}
+# A test process that dies mid-run can still exit 0: without the closing summary the run failed.
+if ! grep -q "Test run with" "$WORK/testing.log"; then
+    echo "test-safe: the Swift Testing run ended without its summary (the test process died?)" >&2
+    STATUS=1
+fi
 # The few XCTest suites run whole: their filter syntax differs. XCTEST=0 skips them. Named one by
 # one: a bare xctest run also reruns every Swift Testing test, unfiltered and in parallel.
 SUITES=$(grep -rhoE "class [A-Za-z0-9_]+: XCTestCase" Tests | awk '{print $2}' | tr -d : | sort -u | paste -sd, -)
