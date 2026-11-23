@@ -26,6 +26,7 @@ import UIKit
     private(set) var decisions: [Decision] = []
     private(set) var elements: [Element] = []
     @ObservationIgnored private var tickets: [UUID: [UUID: CheckedContinuation<(port: Int, token: String)?, Never>]] = [:]
+    @ObservationIgnored private var making: [UUID: CheckedContinuation<(path: String?, error: String?), Never>] = [:]
     /// Pictures and videos brought from the host, by file name; nil while on their way or refused.
     private(set) var files: [String: Data] = [:]
 
@@ -134,6 +135,8 @@ import UIKit
         client = nil
         for waiting in tickets.values { waiting.values.forEach { $0.resume(returning: nil) } }
         tickets = [:]
+        making.values.forEach { $0.resume(returning: (nil, why)) }
+        making = [:]
         phase = .failed(why)
         fetching.removeAll()
         // Tries again in a moment, while anyone still holds this link.
@@ -202,6 +205,17 @@ import UIKit
                               frame: CGRect(origin: freeSpot(in: worktree), size: CGSize(width: 600, height: 340)),
                               command: command, organization: organization(in: worktree)), as: "cardAdded")
         send(BoardSay.open(id, cols: 75, rows: 20, start: true))
+    }
+
+    /// A project or worktree made by the host's core: its folder, or why not. `request` builds
+    /// the request from its id (`BoardSay.createProject`, `BoardSay.createWorktree`).
+    func create(_ request: (UUID) -> Data) async -> (path: String?, error: String?) {
+        guard client != nil else { return (nil, "The host isn't connected.") }
+        return await withCheckedContinuation { continuation in
+            let id = UUID()
+            making[id] = continuation
+            send(request(id))
+        }
     }
 
     /// Shown at once; the core's `postItUpdated` confirms it.
@@ -357,6 +371,8 @@ import UIKit
         case .streamTicket(let card, let port, let token):
             let answer = port.flatMap { port in token.map { (port: port, token: $0) } }
             tickets.removeValue(forKey: card)?.values.forEach { $0.resume(returning: answer) }
+        case .created(let request, let path, let error):
+            making.removeValue(forKey: request)?.resume(returning: (path, error))
         }
     }
 }

@@ -152,6 +152,8 @@ enum BoardUpdate: Decodable {
     case elements([Element])
     /// How to reach a card's stream; nil while no Mac board serves them.
     case streamTicket(card: UUID, port: Int?, token: String?)
+    /// The answer to a createProject or createWorktree: the new folder, or why not.
+    case created(request: UUID, path: String?, error: String?)
 }
 
 /// Board → core requests, written as Swift's synthesized Codable writes `BoardRequest`.
@@ -202,6 +204,19 @@ enum BoardSay {
 
     static func restart(_ id: UUID) -> Data {
         json(["restart": ["id": id.uuidString]])
+    }
+
+    /// A new repository named `name`, or a clone of `clone` (named after it when `name` is nil).
+    static func createProject(_ request: UUID, name: String?, clone: String?) -> Data {
+        var body: [String: Any] = ["request": request.uuidString]
+        if let name { body["name"] = name }
+        if let clone { body["clone"] = clone }
+        return json(["createProject": body])
+    }
+
+    /// A new branch of the repository at `project`, in its own folder.
+    static func createWorktree(_ request: UUID, project: String, branch: String) -> Data {
+        json(["createWorktree": ["request": request.uuidString, "project": project, "branch": branch]])
     }
 
     static func answerDecision(_ id: UUID, _ answer: String) -> Data {

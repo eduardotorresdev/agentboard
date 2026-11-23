@@ -479,6 +479,18 @@ struct WorktreesView: View {
     let link: HostLink
     @Binding var path: NavigationPath
     @State private var worktrees: [Worktree] = []
+    /// What the alert is asking for: a new project, a clone, or a branch of the project at that path.
+    enum Making: Equatable { case project, clone, worktree(of: String) }
+    @State private var making: Making?
+    @State private var draft = ""
+    @State private var busy = false
+    @State private var refused: String?
+
+    /// Each project's main worktree: git lists it first.
+    private var projects: [Worktree] {
+        var seen = Set<String>()
+        return worktrees.filter { !$0.project.isEmpty && seen.insert($0.project).inserted }
+    }
 
     var body: some View {
         ScrollView {
@@ -525,6 +537,46 @@ struct WorktreesView: View {
         .navigationTitle(link.host.name)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Card.self) { TerminalPage(link: link, card: $0) }
+        .toolbar {
+            if link.phase == .connected {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { draft = ""; making = .project } label: {
+                            Text("New project")
+                            Text("An empty repository on this host, with a first commit.")
+                        }
+                        Button { draft = ""; making = .clone } label: {
+                            Text("Clone a repository")
+                            Text("Copies one from an https or ssh address.")
+                        }
+                        if !projects.isEmpty {
+                            Section("New worktree") {
+                                ForEach(projects) { project in
+                                    Button { draft = ""; making = .worktree(of: project.path) } label: {
+                                        Text(project.project)
+                                        Text("A new branch of this project, in its own folder.")
+                                    }
+                                }
+                            }
+                        }
+                    } label: { if busy { ProgressView() } else { Image(systemName: "plus") } }
+                    .disabled(busy)
+                    .accessibilityLabel("Create")
+                }
+            }
+        }
+        .alert(making == .project ? "New project" : making == .clone ? "Clone a repository" : "New worktree",
+               isPresented: Binding(get: { making != nil }, set: { if !$0 { making = nil } })) {
+            TextField(making == .project ? "Name" : making == .clone ? "https://… or git@…" : "Branch", text: $draft)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            Button("Create") { if let making { Task { await create(making, draft) } } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(making == .project ? "Made in the host's projects folder." : making == .clone ? "Named after the repository." : "A branch name, like feature/login.")
+        }
+        .alert("Couldn't create it", isPresented: Binding(get: { refused != nil }, set: { if !$0 { refused = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: { Text(refused ?? "") }
         .task { if link.phase != .connected { link.connect(account: account) } }
         .task(id: link.phase) {
             guard link.phase == .connected else { return }
@@ -547,5 +599,26 @@ struct WorktreesView: View {
             }
             #endif
         }
+    }
+
+    /// Asks the host's core, then opens what it made.
+    private func create(_ making: Making, _ text: String) async {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        busy = true
+        let made = await link.create { id in
+            switch making {
+            case .project: BoardSay.createProject(id, name: text, clone: nil)
+            case .clone: BoardSay.createProject(id, name: nil, clone: text)
+            case .worktree(let project): BoardSay.createWorktree(id, project: project, branch: text)
+            }
+        }
+        busy = false
+        guard let made = made.path else { return refused = made.error ?? "The host didn't say why." }
+        var project = (made as NSString).lastPathComponent
+        if case .worktree(let of) = making { project = worktrees.first { $0.path == of }?.project ?? project }
+        let worktree = Worktree(path: made, branch: making == .project || making == .clone ? nil : text, project: project,
+                                host: link.host.id.lowercased())
+        withAnimation(.smooth) { if !worktrees.contains(worktree) { worktrees.append(worktree) } }
+        path.append(worktree)
     }
 }

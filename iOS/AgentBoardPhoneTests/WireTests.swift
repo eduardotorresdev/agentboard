@@ -175,6 +175,25 @@ final class WireTests: XCTestCase {
         }
     }
 
+    /// Making projects and worktrees: the requests as the Mac's core reads them, and its answer.
+    func testCreatingSpeaksTheCoresFixtures() throws {
+        func fixture(_ name: String) throws -> Data {
+            try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                .appendingPathComponent("../../core/fixtures/orchestration/\(name).json"))
+        }
+        let project = UUID(uuidString: "00000008-ABCD-4EF0-8A1B-000000000008")!
+        let worktree = UUID(uuidString: "00000009-ABCD-4EF0-8A1B-000000000009")!
+        for (name, sent) in [("request_createProject", BoardSay.createProject(project, name: "shop", clone: nil)),
+                             ("request_createProject_clone", BoardSay.createProject(project, name: nil, clone: "git@github.com:owner/shop.git")),
+                             ("request_createWorktree", BoardSay.createWorktree(worktree, project: "/Users/me/agentboard/projects/shop", branch: "fix/login"))] {
+            XCTAssertEqual(try JSONSerialization.jsonObject(with: sent) as? NSDictionary,
+                           try JSONSerialization.jsonObject(with: fixture(name)) as? NSDictionary, name)
+        }
+        guard case .created(project, "/Users/me/agentboard/projects/shop", nil) = try JSONDecoder().decode(BoardUpdate.self, from: fixture("event_created")) else { return XCTFail("created") }
+        guard case .created(worktree, nil, let error?) = try JSONDecoder().decode(BoardUpdate.self, from: fixture("event_created_refused")) else { return XCTFail("refused") }
+        XCTAssertTrue(error.contains("a..b"))
+    }
+
     /// A decision's cards come with it: a diagram's SVG, an image's ids, a reference; the
     /// diagram draws on the phone with the shared renderer, arrowhead included.
     func testDecisionCardsDecodeAndTheirDiagramDraws() throws {
