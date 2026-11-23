@@ -31,6 +31,7 @@ mod orchestrator;
 mod orchestrator_media;
 mod orchestrator_runners;
 mod post_it;
+pub mod projects;
 mod post_it_tools;
 mod process_inspector;
 mod project_relay;
