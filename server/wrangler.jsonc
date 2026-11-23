@@ -4,13 +4,14 @@
   "main": "src/index.ts",
   // The host installer and binaries (`core/release` fills the folder).
   "assets": { "directory": "public" },
+  "routes": [{ "pattern": "agentboard.eduardotorres.dev", "custom_domain": true }],
   "compatibility_date": "2026-08-01",
   "vars": { "GITHUB_CLIENT_ID": "Ov23li5h6hjIu97YVJxT" },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "agentboard-account",
-      "database_id": "e7d2bb6b-fe89-4890-b77d-6bf05f00c530",
+      "database_id": "6778c1a2-a4d4-4336-8b8e-26feaa30d3ae",
       "migrations_dir": "migrations"
     }
   ],
