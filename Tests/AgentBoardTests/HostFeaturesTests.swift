@@ -148,11 +148,15 @@ private func machine(home: URL) -> HostFiles {
     }
     // The same path on both machines: two worktrees, told apart by their host.
     let onHost = browsers.add(.desktop, to: "/w", on: rig.host, at: .zero), onMac = browsers.add(.desktop, to: "/w", at: .zero)
+    // A file tree goes to the host's core, which keeps it, once it has answered.
+    try await waitUntil { there.fileTrees != nil }
     let tree = fileTrees.add(to: "/w", on: rig.host, at: .zero)
     #expect(browsers.browsers(in: "/w", on: rig.host).map(\.id) == [onHost.id])
     #expect(browsers.browsers(in: "/w").map(\.id) == [onMac.id])
     #expect(fileTrees.trees(in: "/w").isEmpty && fileTrees.trees(in: "/w", on: rig.host).map(\.id) == [tree.id])
-    #expect(Set(there.elements().map(\.id)) == [onHost.id, tree.id])
+    #expect(there.elements().map(\.id) == [onHost.id])
+    try await waitUntil { rig.orchestrator.fileTrees.map(\.id) == [tree.id] }
+    #expect(rig.orchestrator.fileTrees.map(\.id) == [tree.id])
     #expect(here.elements().map(\.id) == [onMac.id])
     // The browser tools of the host's store are its own, so an agent there drives its cards.
     #expect(there.browserTools != nil && there.browserTools !== here.browserTools)
@@ -161,7 +165,7 @@ private func machine(home: URL) -> HostFiles {
     let again = try Database(url: url)
     #expect(try again.browsers().first { $0.id == onHost.id }?.host == rig.host)
     #expect(try again.browsers().first { $0.id == onMac.id }?.host == nil)
-    #expect(try again.fileTrees().first?.host == rig.host)
+    #expect(try again.fileTrees().isEmpty)
 
     // A note on the host's file reaches the agent connected to the card there.
     let agent = AgentRecord(id: UUID(), worktree: "/w", providerID: "claude", name: "Agent", frame: .zero, organization: there.organizationID)

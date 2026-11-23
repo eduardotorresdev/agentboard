@@ -24,6 +24,7 @@ mod card_tools;
 mod decision;
 mod decision_tools;
 mod cards;
+mod file_tree;
 mod image_card;
 mod image_tools;
 mod l10n;
@@ -47,6 +48,7 @@ pub use board_protocol::{now, only, BoardEvent, BoardRequest, BoardState, Runner
 pub use card_database::CardDatabase;
 pub use decision::{Answer, Ask, Card as DecisionCard, Decision, Evidence, Pin, State as DecisionState, Variant};
 pub use cards::{default_organization, AgentRecord, ElementInfo, RunnerSpec};
+pub use file_tree::FileTreeRecord;
 pub use image_card::{Failure, ImageFiles, ImageRecord, Inspected, Kind, Stored};
 pub use orchestrator::{login_shell_path, Options, Orchestrator, TerminalLine, Turn};
 pub use post_it::PostItRecord;

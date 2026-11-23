@@ -300,6 +300,39 @@
       "worktree" : "\/work\/tree"
     }
   ],
+  "fileTrees" : [
+    {
+      "frame" : [
+        [
+          -1100,
+          0.5
+        ],
+        [
+          1040,
+          680
+        ]
+      ],
+      "id" : "00000009-ABCD-4EF0-8A1B-000000000009",
+      "name" : "Files",
+      "organization" : "00000008-ABCD-4EF0-8A1B-000000000008",
+      "worktree" : "\/work\/tree"
+    },
+    {
+      "frame" : [
+        [
+          0,
+          800
+        ],
+        [
+          1040,
+          680
+        ]
+      ],
+      "id" : "00000007-ABCD-4EF0-8A1B-000000000007",
+      "name" : "Files 2",
+      "worktree" : "\/work\/tree"
+    }
+  ],
   "images" : [
     {
       "file" : "0000000A-ABCD-4EF0-8A1B-00000000000A.png",

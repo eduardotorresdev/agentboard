@@ -20,6 +20,8 @@ public final class Orchestrator: CoreService {
     private(set) var postIts: [PostItRecord] = []
     /// The images (see ImageTools).
     private(set) var images: [ImageRecord] = []
+    /// The file tree cards; the board lists their files on the host.
+    private(set) var fileTrees: [FileTreeRecord] = []
     /// The agents waiting on the developer, oldest first (see Attention.swift).
     var attention: [AttentionRequest] = [] { didSet { releaseHeldMessages() } }
     /// What agents asked the developer and still wait on (see Decision.swift).
@@ -98,7 +100,8 @@ public final class Orchestrator: CoreService {
         }
         let savedPostIts = read({ try stored?.postIts() }, [])
         let savedImages = read({ try stored?.images() }, [])
-        let ids = Set(saved.map(\.id)).union(savedPostIts.map(\.id)).union(savedImages.map(\.id))
+        let savedFileTrees = read({ try stored?.fileTrees() }, [])
+        let ids = Set(saved.map(\.id)).union(savedPostIts.map(\.id)).union(savedImages.map(\.id)).union(savedFileTrees.map(\.id))
             .union(read({ try stored?.browserIDs() }, []))
         let lines = read({ try stored?.connections() }, []).filter { ids.contains($0.a) && ids.contains($0.b) }
         connectionsReadOnly = readFailed
@@ -114,6 +117,7 @@ public final class Orchestrator: CoreService {
         cards = saved.map { var card = $0; card.name = BoardName.named(card.name, else: card.runner == nil ? "Agent" : "Runner"); return card }
         postIts = savedPostIts.map { var note = $0; note.name = BoardName.named(note.name, else: "Post-it"); return note }
         images = savedImages.map { var image = $0; image.name = BoardName.named(image.name, else: "Image"); return image }
+        fileTrees = savedFileTrees.map { var tree = $0; tree.name = BoardName.named(tree.name, else: "Files"); return tree }
         catalog.add(RunnerTools(store: self))
         // Early, so an agent that cuts its instructions short still learns how to ask.
         catalog.add(DecisionTools(store: self))
@@ -139,6 +143,7 @@ public final class Orchestrator: CoreService {
         for record in cards { register(record) }
         for record in postIts { bus.register(PostItElement(id: record.id, store: self)) }
         for record in images { bus.register(ImageElement(id: record.id, store: self)) }
+        for record in fileTrees { bus.register(FileTreeElement(id: record.id, store: self)) }
         let inherited = inheriting.flatMap { try? JSONDecoder().decode(Inherited.self, from: $0) }
         if let inherited {
             attention = (inherited.attention ?? []).filter { id in cards.contains { $0.id == id.id } }
@@ -313,7 +318,8 @@ public final class Orchestrator: CoreService {
     public func boardConnected(_ board: CoreBoard) -> Data? {
         boards.insert(board)
         return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
-                          attention: attention, images: images, decisions: decisions, elements: Array(elements.values)).encoded
+                          attention: attention, images: images, decisions: decisions, elements: Array(elements.values),
+                          fileTrees: fileTrees).encoded
     }
 
     public func input(_ bytes: [UInt8], to id: UUID) -> [UInt8] {
@@ -423,6 +429,20 @@ public final class Orchestrator: CoreService {
             }
         case .removeImage(let id):
             removeImage(id, from: board)
+        case .addFileTree(let record):
+            guard fileTree(record.id) == nil else { return }
+            fileTrees.append(record)
+            bus.register(FileTreeElement(id: record.id, store: self))
+            try? database?.saveFileTree(record)
+            broadcast(.fileTreeAdded(record), except: board)
+        case .updateFileTree(let record):
+            guard let index = fileTrees.firstIndex(where: { $0.id == record.id }) else { return }
+            fileTrees[index].name = BoardName.clean(record.name) ?? fileTrees[index].name
+            fileTrees[index].frame = record.frame
+            try? database?.saveFileTree(fileTrees[index])
+            broadcast(.fileTreeUpdated(fileTrees[index]), except: board)
+        case .removeFileTree(let id):
+            removeFileTree(id, from: board)
         case .dismissAttention(let id):
             dismissAttention(id)
         case .answerQuestions(let id, let answers):
@@ -537,6 +557,18 @@ public final class Orchestrator: CoreService {
         postIts.removeAll { $0.id == id }
         try? database?.deletePostIt(id: id)
         broadcast(.postItRemoved(id), except: sender)
+    }
+
+    // MARK: File trees
+
+    func fileTree(_ id: UUID) -> FileTreeRecord? { fileTrees.first { $0.id == id } }
+
+    func removeFileTree(_ id: UUID, from sender: CoreBoard? = nil) {
+        guard fileTree(id) != nil else { return }
+        bus.remove(element: id)
+        fileTrees.removeAll { $0.id == id }
+        try? database?.deleteFileTree(id: id)
+        broadcast(.fileTreeRemoved(id), except: sender)
     }
 
     // MARK: Images
@@ -1040,6 +1072,23 @@ private final class ImageElement: BoardElement {
         let size = "\(Int(record.pixelSize.width))×\(Int(record.pixelSize.height))"
         return record.duration.map { "\(size), \(Int($0.rounded())) s; read with video_read" } ?? size
     }
+}
+
+/// A file tree card as the message bus sees it: what the user notes on its files goes along its lines.
+@MainActor
+private final class FileTreeElement: BoardElement {
+    let id: UUID
+    private weak var store: Orchestrator?
+
+    init(id: UUID, store: Orchestrator) {
+        self.id = id
+        self.store = store
+    }
+
+    var name: String { store?.fileTree(id)?.name ?? "" }
+    var kind: ElementKind { .fileTree }
+    var detail: String? { nil }
+    var board: String? { store?.fileTree(id).map { boardKey($0.worktree, $0.organizationID) } }
 }
 
 /// An element the board told the core about (a browser).

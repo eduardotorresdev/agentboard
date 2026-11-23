@@ -28,3 +28,20 @@ struct ElementOrganizationTests {
         #expect(!peers.text.contains("“Theirs”"), "\(peers.text)")
     }
 }
+
+/// A file tree the core keeps is in the way of what an agent adds: the next card goes clear of it.
+@Test func fileTreesAreInTheWayOfNewCards() async throws {
+    let core = try await MainActor.run { try Core() }
+    defer { Task { @MainActor in core.stop() } }
+    let folder = await MainActor.run { core.folder }
+    let a = agent("Ada", in: folder)
+    let client = try await board(core)
+    client.send(.addCard(a))
+    try await waitUntil { core.orchestrator.record(a.id) != nil }
+    let spot = await MainActor.run { core.orchestrator.origin(near: a, size: FileTreeRecord.size) }
+    let tree = FileTreeRecord(id: UUID(), worktree: a.worktree, name: "Files", frame: CGRect(origin: spot, size: FileTreeRecord.size))
+    client.send(.addFileTree(tree))
+    try await waitUntil { core.orchestrator.fileTree(tree.id) != nil }
+    let next = await MainActor.run { core.orchestrator.origin(near: a, size: PostItRecord.size) }
+    #expect(!CGRect(origin: next, size: PostItRecord.size).intersects(tree.frame), "\(next) inside \(tree.frame)")
+}

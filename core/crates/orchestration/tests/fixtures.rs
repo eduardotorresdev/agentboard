@@ -93,6 +93,14 @@ fn video() -> ImageRecord {
     }
 }
 
+fn file_tree() -> FileTreeRecord {
+    FileTreeRecord { id: id(9), worktree: "/work/tree".into(), name: "Files".into(), frame: Rect::new(-1100.0, 0.5, 1040.0, 680.0), organization: Some(id(8)) }
+}
+
+fn bare_file_tree() -> FileTreeRecord {
+    FileTreeRecord { id: id(7), worktree: "/work/tree".into(), name: "Files 2".into(), frame: Rect::new(0.0, 800.0, 1040.0, 680.0), organization: None }
+}
+
 fn lines() -> Vec<Connection> {
     vec![Connection { id: id(8), a: id(1), b: id(2), a_side: Some(Side::Right), b_side: Some(Side::Left) }, Connection { id: id(9), a: id(1), b: id(4), a_side: None, b_side: None }]
 }
@@ -103,7 +111,7 @@ fn requests_encode_as_swift_does() {
         "addCard", "updateCard", "removeCard", "connect", "disconnect", "elements", "open", "restart", "restart_as_it_is", "startRunner", "stopRunner", "toolResult", "toolResult_error",
         "addPostIt", "updatePostIt", "removePostIt", "writePostIt", "addImage", "updateImage", "removeImage", "dismissAttention", "answerQuestions", "answerQuestions_in_the_terminal", "deliver",
         "prompt", "deliverHeld", "deliver_to_one", "answerDecision_ok", "answerDecision_option", "answerDecision_useRecommended", "answerDecision_redirect",
-        "createProject", "createProject_clone", "createWorktree",
+        "createProject", "createProject_clone", "createWorktree", "addFileTree", "updateFileTree", "removeFileTree",
     ];
     let requests: Vec<BoardRequest> = names.iter().map(|name| round_trip(&format!("request_{name}"))).collect();
     let created = names.iter().position(|name| *name == "createProject").unwrap();
@@ -126,6 +134,9 @@ fn requests_encode_as_swift_does() {
     assert_eq!(requests[21], BoardRequest::AnswerQuestions { id: id(1), answers: Some([("Which layout?".to_string(), "Grid".to_string())].into()) });
     assert_eq!(requests[22], BoardRequest::AnswerQuestions { id: id(1), answers: None });
     assert_eq!(requests[25], BoardRequest::DeliverHeld(only(id(1))));
+    assert_eq!(requests[34], BoardRequest::AddFileTree(only(file_tree())));
+    assert_eq!(requests[35], BoardRequest::UpdateFileTree(only(bare_file_tree())));
+    assert_eq!(requests[36], BoardRequest::RemoveFileTree(only(id(9))));
     assert_eq!(requests[26], BoardRequest::Deliver { from: id(5), text: "1. Area 48, 486, 408, 132".into(), to: Some(id(1)) });
     assert_eq!(requests[27], BoardRequest::AnswerDecision { id: id(5), answer: Answer::Ok {} });
     assert_eq!(requests[28], BoardRequest::AnswerDecision { id: id(6), answer: Answer::Option(only("B".into())) });
@@ -141,7 +152,7 @@ fn requests_encode_as_swift_does() {
 fn events_encode_as_swift_does() {
     let names = [
         "cardAdded", "cardUpdated", "cardRemoved", "connections", "message", "runners", "runners_none", "toolCall", "postItAdded", "postItUpdated", "postItRemoved", "imageAdded", "imageUpdated",
-        "imageRemoved", "attention", "held", "promptReturned", "elements", "decisions", "created", "created_refused",
+        "imageRemoved", "attention", "held", "promptReturned", "elements", "decisions", "created", "created_refused", "fileTreeAdded", "fileTreeUpdated", "fileTreeRemoved",
     ];
     let events: Vec<BoardEvent> = names.iter().map(|name| round_trip(&format!("event_{name}"))).collect();
     assert_eq!(events[0], BoardEvent::CardAdded(only(runner())));
@@ -173,6 +184,9 @@ fn events_encode_as_swift_does() {
     assert_eq!((decisions[1].blocking, decisions[1].closing, decisions[1].state, decisions[1].answer.clone()), (true, true, DecisionState::AwaitingEcho, Some(Answer::UseRecommended {})));
     assert_eq!((decisions[2].cards[0].evidence.clone(), decisions[2].cards[1].evidence.clone()), (Evidence::Browser { id: id(5) }, Evidence::Video { id: id(7) }));
     assert_eq!((decisions[2].state, decisions[2].echo.as_deref()), (DecisionState::Closed, Some("Cut a step")));
+    assert_eq!(events[21], BoardEvent::FileTreeAdded(only(file_tree())));
+    assert_eq!(events[22], BoardEvent::FileTreeUpdated(only(bare_file_tree())));
+    assert_eq!(events[23], BoardEvent::FileTreeRemoved(only(id(9))));
 }
 
 #[test]
@@ -182,12 +196,14 @@ fn the_state_encodes_as_swift_does() {
     assert_eq!(state.connections, lines());
     assert_eq!(state.post_its, Some(vec![post_it(), empty_post_it()]));
     assert_eq!(state.images, Some(vec![image(), video()]));
+    assert_eq!(state.file_trees, Some(vec![file_tree(), bare_file_tree()]));
     assert_eq!(state.attention.map(|queue| queue.len()), Some(3));
     assert_eq!(state.elements.map(|list| list.iter().map(|info| info.id).collect::<Vec<_>>()), Some(vec![id(5)]));
     assert_eq!(state.decisions.map(|list| list.len()), Some(3));
     let old: BoardState = round_trip("state_of_an_older_core");
     assert_eq!((old.post_its, old.attention, old.images, old.elements), (None, None, None, None));
     assert_eq!(old.decisions, None);
+    assert_eq!(old.file_trees, None);
 }
 
 /// A data folder the Swift core used serves this one.
@@ -199,6 +215,7 @@ fn a_database_written_by_swift_reads() {
     assert_eq!(database.agents().unwrap(), [agent(), runner(), plain()]);
     assert_eq!(database.post_its().unwrap(), [post_it(), empty_post_it()]);
     assert_eq!(database.images().unwrap(), [image(), video()]);
+    assert_eq!(database.file_trees().unwrap(), [file_tree(), bare_file_tree()]);
     assert_eq!(database.connections().unwrap(), lines());
     assert!(database.browser_ids().unwrap().is_empty());
 }
@@ -214,12 +231,14 @@ fn a_database_round_trips() {
         [agent(), runner(), plain()].iter().for_each(|card| database.save_agent(card).unwrap());
         [post_it(), empty_post_it()].iter().for_each(|note| database.save_post_it(note).unwrap());
         [image(), video()].iter().for_each(|image| database.save_image(image).unwrap());
+        [file_tree(), bare_file_tree()].iter().for_each(|tree| database.save_file_tree(tree).unwrap());
         database.save_connections(&lines()).unwrap();
     }
     let mut database = CardDatabase::open(&path).unwrap();
     assert_eq!(database.agents().unwrap(), [agent(), runner(), plain()]);
     assert_eq!(database.post_its().unwrap(), [post_it(), empty_post_it()]);
     assert_eq!(database.images().unwrap(), [image(), video()]);
+    assert_eq!(database.file_trees().unwrap(), [file_tree(), bare_file_tree()]);
     assert_eq!(database.connections().unwrap(), lines());
 
     let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("scratch.sqlite");
@@ -228,6 +247,8 @@ fn a_database_round_trips() {
     database_copy.delete_agent(id(3)).unwrap();
     database_copy.delete_post_it(id(5)).unwrap();
     database_copy.delete_image(id(6)).unwrap();
+    database_copy.delete_file_tree(id(7)).unwrap();
+    assert_eq!(database_copy.file_trees().unwrap(), [file_tree()]);
     database_copy.save_connections(&lines()[1..]).unwrap();
     assert_eq!(database_copy.agents().unwrap(), [agent(), runner()]);
     assert_eq!(database_copy.post_its().unwrap(), [post_it()]);

@@ -254,3 +254,48 @@ private func tempFolder() throws -> URL {
     card.forget()
     #expect(ImageCardLayer.cache[second.file] == nil)
 }
+
+/// File tree cards this Mac's database kept before the cores did move to their host's core,
+/// none lost: each leaves the Mac's database only once the core listed it, and moving again
+/// changes nothing.
+@MainActor
+@Test func fileTreesMoveFromTheMacsDatabaseToTheCore() async throws {
+    let folder = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("abtrees-\(UUID().uuidString.prefix(8))")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let path = NSTemporaryDirectory() + "abcore-\(UUID().uuidString.prefix(8)).sock"
+    defer {
+        unlink(path)
+        unlink(path + ".lock")
+        try? FileManager.default.removeItem(at: folder)
+    }
+    let (_, orchestrator) = try core(at: path, folder: folder)
+    let board = folder.appendingPathComponent("board.sqlite")
+    let elsewhere = UUID()
+    let legacy = [
+        StoredFileTree(record: FileTreeRecord(id: UUID(), worktree: "/w", name: "Files", frame: CGRect(x: 1, y: 2, width: 1040, height: 680),
+                                              organization: OrganizationHome.defaultID), host: nil),
+        StoredFileTree(record: FileTreeRecord(id: UUID(), worktree: "/w", name: "Files 2", frame: CGRect(x: 3, y: 4, width: 500, height: 400),
+                                              organization: OrganizationHome.defaultID), host: nil),
+        StoredFileTree(record: FileTreeRecord(id: UUID(), worktree: "/w", name: "There", frame: .zero, organization: OrganizationHome.defaultID),
+                       host: elsewhere),
+    ]
+    for tree in legacy { try Database(url: board).saveFileTree(tree) }
+    let mine = legacy.prefix(2).map(\.record)
+
+    // One launch after another: the first hands them over, the next sees them kept and forgets
+    // its copies, the last finds nothing left to do.
+    var stores: [(AgentStore, FileTreeStore)] = []
+    for launch in 0..<3 {
+        let store = AgentStore(connect: { CoreClient.open(socketPath: path, timeout: 10) })
+        let trees = FileTreeStore(database: try Database(url: board))
+        trees.attach(to: store)
+        stores.append((store, trees))
+        try await waitUntil { store.isLoaded && orchestrator.fileTrees.count == 2 }
+        #expect(orchestrator.fileTrees == mine, "launch \(launch)")
+        #expect(trees.trees(in: "/w").map(\.id) == mine.map(\.id), "launch \(launch)")
+        let left = try Database(url: board).fileTrees().map(\.record.id)
+        #expect(left == (launch == 0 ? legacy.map(\.record.id) : [legacy[2].record.id]), "launch \(launch)")
+    }
+    // The core keeps them across its own restarts, in its database.
+    #expect(try CardDatabase(url: folder.appendingPathComponent("agentboard.sqlite")).fileTrees() == mine)
+}

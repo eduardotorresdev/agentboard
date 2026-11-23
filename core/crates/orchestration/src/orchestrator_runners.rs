@@ -122,7 +122,8 @@ impl Turn<'_> {
         let cards = self.cards_in(worktree).map(|card| LayoutItem { id: card.id, frame: card.frame, is_hub: card.runner.is_none() });
         let post_its = self.post_its.iter().filter(|note| note.worktree == worktree).map(|note| other(note.id, note.frame));
         let images = self.images.iter().filter(|image| image.worktree == worktree).map(|image| other(image.id, image.frame));
-        cards.chain(post_its).chain(images).chain(self.element_frames(worktree).map(|info| other(info.id, info.frame))).collect()
+        let file_trees = self.file_trees.iter().filter(|tree| tree.worktree == worktree).map(|tree| other(tree.id, tree.frame));
+        cards.chain(post_its).chain(images).chain(file_trees).chain(self.element_frames(worktree).map(|info| other(info.id, info.frame))).collect()
     }
 
     /// The addresses a runner serves, in port order: `localhost`, then the network address

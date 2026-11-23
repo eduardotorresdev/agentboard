@@ -158,10 +158,11 @@ extension BoardState {
                 state.cards.append(record)
             case .updateCard(let record):
                 if let index = state.cards.firstIndex(where: { $0.id == record.id }) { state.cards[index] = record }
-            case .removeCard(let id), .removePostIt(let id), .removeImage(let id):
+            case .removeCard(let id), .removePostIt(let id), .removeImage(let id), .removeFileTree(let id):
                 state.cards.removeAll { $0.id == id }
                 state.postIts?.removeAll { $0.id == id }
                 state.images?.removeAll { $0.id == id }
+                state.fileTrees?.removeAll { $0.id == id }
                 state.connections.removeAll { $0.touches(id) }
             case .addPostIt(let record) where state.postIts?.contains { $0.id == record.id } != true:
                 state.postIts = (state.postIts ?? []) + [record]
@@ -177,6 +178,11 @@ extension BoardState {
                     state.images?[index].name = record.name
                     state.images?[index].frame = record.frame
                 }
+            // Only on a core that keeps file trees: an older one drops these requests.
+            case .addFileTree(let record) where state.fileTrees?.contains { $0.id == record.id } == false:
+                state.fileTrees?.append(record)
+            case .updateFileTree(let record):
+                if let index = state.fileTrees?.firstIndex(where: { $0.id == record.id }) { state.fileTrees?[index] = record }
             case .writePostIt(let id, let text):
                 if let index = state.postIts?.firstIndex(where: { $0.id == id }) { state.postIts?[index].write(text, by: nil) }
             case .connect(let connection) where !state.connections.contains { $0.joins(connection.a, connection.b) }:

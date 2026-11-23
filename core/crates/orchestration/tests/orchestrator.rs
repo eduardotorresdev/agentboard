@@ -122,6 +122,10 @@ impl Core {
         self.ask(|orchestrator, _| orchestrator.post_its().to_vec())
     }
 
+    fn file_trees(&self) -> Vec<FileTreeRecord> {
+        self.ask(|orchestrator, _| orchestrator.file_trees().to_vec())
+    }
+
     fn images(&self) -> Vec<ImageRecord> {
         self.ask(|orchestrator, _| orchestrator.images().to_vec())
     }
@@ -1208,6 +1212,26 @@ fn agents_add_post_its() {
     assert!(below.frame.min_y() >= record.frame.max_y() && below.frame.min_x() == record.frame.min_x());
     board.send(BoardRequest::RemovePostIt(only(record.id)));
     wait_until("one post-it and its line", || core.post_its().len() == 1 && core.lines().len() == 1);
+}
+
+/// A file tree the core keeps is in the way of what an agent adds: the next card goes clear of it.
+#[test]
+fn file_trees_are_in_the_way_of_new_cards() {
+    let core = Core::new();
+    let a = agent("Ada", &core.folder);
+    let mut board = Board::open(&core);
+    board.add(&[&a]);
+    wait_until("the card", || core.card("Ada").is_some());
+    // Where a post-it would go, a file tree is put first.
+    core.call("postit_create", json!({"name": "Probe"}), a.id);
+    let probe = core.post_its().remove(0);
+    board.send(BoardRequest::RemovePostIt(only(probe.id)));
+    let tree = FileTreeRecord { id: Uuid::new(), worktree: a.worktree.clone(), name: "Files".into(), frame: probe.frame, organization: None };
+    board.send(BoardRequest::AddFileTree(only(tree.clone())));
+    wait_until("the file tree", || core.file_trees() == [tree.clone()] && core.post_its().is_empty());
+    core.call("postit_create", json!({"name": "Plan"}), a.id);
+    let plan = core.post_its().remove(0);
+    assert!(!plan.frame.intersects(&tree.frame), "{:?} overlaps {:?}", plan.frame, tree.frame);
 }
 
 /// Agents add agents and plain terminals next to them, and close what is connected to them.

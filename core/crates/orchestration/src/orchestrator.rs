@@ -24,6 +24,7 @@ use crate::card_database::CardDatabase;
 use crate::cards::{prepare_organization, AgentRecord, ElementInfo};
 use crate::image_card::{ImageFiles, ImageRecord};
 use crate::l10n::l;
+use crate::file_tree::FileTreeRecord;
 use crate::post_it::PostItRecord;
 use crate::process_inspector::{RunnerStats, Sample};
 use crate::video_files::VideoTools;
@@ -56,6 +57,8 @@ pub struct Store {
     pub(crate) post_its: Vec<PostItRecord>,
     /// The images (see ImageTools).
     pub(crate) images: Vec<ImageRecord>,
+    /// The file tree cards; the board lists their files on the host.
+    pub(crate) file_trees: Vec<FileTreeRecord>,
     /// The agents waiting on the developer, oldest first (see attention.rs).
     pub(crate) attention: Vec<AttentionRequest>,
     /// Agents whose questions hook waits on the developer's answers (see attention.rs).
@@ -206,7 +209,8 @@ impl Orchestrator {
         }
         let saved_post_its = read(stored.map(CardDatabase::post_its), &mut read_failed).unwrap_or_default();
         let saved_images = read(stored.map(CardDatabase::images), &mut read_failed).unwrap_or_default();
-        let mut ids: HashSet<Uuid> = saved.iter().map(|card| card.id).chain(saved_post_its.iter().map(|note| note.id)).chain(saved_images.iter().map(|image| image.id)).collect();
+        let saved_file_trees = read(stored.map(CardDatabase::file_trees), &mut read_failed).unwrap_or_default();
+        let mut ids: HashSet<Uuid> = saved.iter().map(|card| card.id).chain(saved_post_its.iter().map(|note| note.id)).chain(saved_images.iter().map(|image| image.id)).chain(saved_file_trees.iter().map(|tree| tree.id)).collect();
         ids.extend(read(stored.map(CardDatabase::browser_ids), &mut read_failed).unwrap_or_default());
         let mut lines = read(stored.map(CardDatabase::connections), &mut read_failed).unwrap_or_default();
         lines.retain(|line| ids.contains(&line.a) && ids.contains(&line.b));
@@ -249,6 +253,7 @@ impl Orchestrator {
             cards: saved,
             post_its: saved_post_its,
             images: saved_images,
+            file_trees: saved_file_trees,
             attention: Vec::new(),
             pending_questions: HashMap::new(),
             question_grace: Duration::from_secs(60),
@@ -281,6 +286,7 @@ impl Orchestrator {
         store.cards.iter_mut().for_each(|card| clean(&mut card.name, if card.runner.is_none() { "Agent" } else { "Runner" }));
         store.post_its.iter_mut().for_each(|note| clean(&mut note.name, "Post-it"));
         store.images.iter_mut().for_each(|image| clean(&mut image.name, "Image"));
+        store.file_trees.iter_mut().for_each(|tree| clean(&mut tree.name, "Files"));
         for index in 0..store.cards.len() {
             let (id, is_agent) = (store.cards[index].id, store.cards[index].runner.is_none());
             store.register(id, is_agent);
@@ -326,6 +332,10 @@ impl Orchestrator {
 
     pub fn images(&self) -> &[ImageRecord] {
         &self.store.images
+    }
+
+    pub fn file_trees(&self) -> &[FileTreeRecord] {
+        &self.store.file_trees
     }
 
     pub fn attention(&self) -> &[AttentionRequest] {
@@ -477,6 +487,10 @@ impl Store {
         self.images.iter().find(|image| image.id == id)
     }
 
+    pub(crate) fn file_tree(&self, id: Uuid) -> Option<&FileTreeRecord> {
+        self.file_trees.iter().find(|tree| tree.id == id)
+    }
+
     /// Whether the agent is answering the developer's questions or a prompt in its terminal:
     /// a message typed in now would land in that answer.
     fn is_awaiting_developer(&self, id: Uuid) -> bool {
@@ -496,7 +510,7 @@ impl Store {
 
 impl Elements for BoardView<'_> {
     fn elements(&self) -> Vec<Element> {
-        let ids = self.cards.iter().map(|card| card.id).chain(self.post_its.iter().map(|note| note.id)).chain(self.images.iter().map(|image| image.id)).chain(self.elements.keys().copied());
+        let ids = self.cards.iter().map(|card| card.id).chain(self.post_its.iter().map(|note| note.id)).chain(self.images.iter().map(|image| image.id)).chain(self.file_trees.iter().map(|tree| tree.id)).chain(self.elements.keys().copied());
         ids.filter_map(|id| self.element(id)).collect()
     }
 
@@ -528,6 +542,9 @@ impl Elements for BoardView<'_> {
             let detail = record.duration.map_or(size.clone(), |duration| format!("{size}, {} s; read with video_read", duration.round() as i64));
             let kind = if record.is_video() { ElementKind::video() } else { ElementKind::image() };
             return Some(Element { board: Some(board_key(&record.worktree, record.organization_id())), detail: Some(detail), ..Element::new(id, record.name.clone(), kind) });
+        }
+        if let Some(record) = self.file_tree(id) {
+            return Some(Element { board: Some(board_key(&record.worktree, record.organization_id())), ..Element::new(id, record.name.clone(), ElementKind::file_tree()) });
         }
         // An element the board told the core about (a browser).
         let info = self.elements.get(&id)?;
@@ -965,6 +982,7 @@ impl CoreService for Orchestrator {
             images: Some(store.images.clone()),
             decisions: (!store.decisions.is_empty()).then(|| store.decisions.clone()),
             elements: Some(store.elements.values().cloned().collect()),
+            file_trees: Some(store.file_trees.clone()),
         };
         Some(state.encoded())
     }
@@ -1186,6 +1204,29 @@ impl Turn<'_> {
                 image.frame = record.frame;
             }),
             BoardRequest::RemoveImage(Unlabelled { value: id }) => self.remove_image(id, sender),
+            BoardRequest::AddFileTree(Unlabelled { value: record }) => {
+                if self.file_tree(record.id).is_none() {
+                    self.save(|database| database.save_file_tree(&record));
+                    self.broadcast(&BoardEvent::FileTreeAdded(only(record.clone())), sender);
+                    self.file_trees.push(record);
+                }
+            }
+            BoardRequest::UpdateFileTree(Unlabelled { value: record }) => {
+                let Some(tree) = self.board.store.file_trees.iter_mut().find(|tree| tree.id == record.id) else { return };
+                tree.name = BoardName::clean(&record.name).unwrap_or_else(|| tree.name.clone());
+                tree.frame = record.frame;
+                let tree = tree.clone();
+                self.save(|database| database.save_file_tree(&tree));
+                self.broadcast(&BoardEvent::FileTreeUpdated(only(tree)), sender);
+            }
+            BoardRequest::RemoveFileTree(Unlabelled { value: id }) => {
+                if self.file_tree(id).is_some() {
+                    self.disconnect_element(id);
+                    self.file_trees.retain(|tree| tree.id != id);
+                    self.save(|database| database.delete_file_tree(id));
+                    self.broadcast(&BoardEvent::FileTreeRemoved(only(id)), sender);
+                }
+            }
             BoardRequest::DismissAttention(Unlabelled { value: id }) => self.dismiss_attention(id),
             BoardRequest::AnswerQuestions { id, answers } => self.answer_questions(id, answers),
             BoardRequest::AnswerDecision { id, answer } => self.board.answer_decision(id, answer),
