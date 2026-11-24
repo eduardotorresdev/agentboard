@@ -22,9 +22,9 @@ struct Sidebar: View {
     @State private var drag: ReorderDrag?
     /// Where each reorderable item is; not observed, so scrolling doesn't redraw the sidebar.
     @State private var frames = ReorderFrames()
-    /// How far the dragged item follows the pointer; apart from `drag`, so it moves at once while
-    /// the places it passes open and close with a spring.
-    @State private var dragOffset: CGSize = .zero
+    /// How far the dragged item follows the pointer; only the floating copy reads it, so a pointer
+    /// move redraws that alone, not the sidebar.
+    @State private var pointer = ReorderPointer()
     /// True while a press that may become a drag is held: a drag the system cancels (no `onEnded`) is undone when it goes false.
     @GestureState private var isPressing = false
 
@@ -74,7 +74,7 @@ struct Sidebar: View {
             Task { @MainActor in
                 if drag?.isDropping == false {
                     drag = nil
-                    dragOffset = .zero
+                    pointer.offset = .zero
                 }
             }
         }
@@ -185,7 +185,7 @@ struct Sidebar: View {
         let drag = drag?.keys == keys ? drag : nil
         let isDragged = drag?.key == key
         return VStack(alignment: .leading, spacing: 0) {
-            if let drag { ReorderPlaceholder(height: drag.slot(before: key), spacing: spacing) }
+            placeholder(drag?.slot(before: key) ?? 0, spacing: spacing)
             content()
                 .modifier(ReorderMeasure { frames.frames[key] = $0; frames.heights[key] = $0.height + spacing })
                 .padding(.bottom, isDragged ? 0 : spacing)
@@ -196,14 +196,20 @@ struct Sidebar: View {
     }
 
     /// The place at the end of `keys`, open while an item is dragged there.
-    @ViewBuilder private func reorderEnd(of keys: [String], spacing: CGFloat) -> some View {
-        if let drag, drag.keys == keys { ReorderPlaceholder(height: drag.slot(before: nil), spacing: spacing) }
+    private func reorderEnd(of keys: [String], spacing: CGFloat) -> some View {
+        placeholder(drag?.keys == keys ? drag?.slot(before: nil) ?? 0 : 0, spacing: spacing)
+    }
+
+    /// The place a dragged item would land, closed at 0; the open one is measured, for the drop to land on it exactly.
+    private func placeholder(_ height: CGFloat, spacing: CGFloat) -> some View {
+        ReorderPlaceholder(height: height, spacing: spacing)
+            .modifier(ReorderMeasure { if height > 0 { frames.placeholder = $0 } })
     }
 
     /// The dragged item, over the whole sidebar where the pointer takes it, on a solid fill.
     @ViewBuilder private var floating: some View {
         if let drag {
-            FloatingItem(isDropping: drag.isDropping) {
+            FloatingItem(isDropping: drag.isDropping, origin: drag.frame.origin, pointer: pointer) {
                 if let project = store.projects.first(where: { Self.reorderKey($0) == drag.key }) {
                     group(for: project, reorder: TapGesture())
                 } else if let project = store.projects.first(where: { store.worktrees[$0.id]?.contains { $0.id == drag.key } == true }),
@@ -212,7 +218,6 @@ struct Sidebar: View {
                 }
             }
             .frame(width: drag.frame.width, alignment: .topLeading)
-            .offset(x: drag.frame.minX + dragOffset.width, y: drag.frame.minY + dragOffset.height)
         }
     }
 
@@ -225,11 +230,13 @@ struct Sidebar: View {
             .onChanged { value in
                 guard case .second(true, let moved) = value, drag?.isDropping != true else { return }
                 guard var next = drag ?? frames.frames[key].map({ ReorderDrag(key: key, keys: keys, frame: $0, heights: frames.heights) }) else { return }
-                let translation = moved?.translation ?? .zero
-                next.move(to: translation.height)
-                dragOffset = translation
-                if drag == nil || next.target == drag?.target { drag = next } else {
-                    withAnimation(.snappy(duration: 0.35)) { drag = next }
+                pointer.offset = moved?.translation ?? .zero
+                // `drag` changes only on lift and when the place changes: a plain pointer move leaves the sidebar alone.
+                if drag == nil {
+                    drag = next
+                } else if let moved {
+                    next.move(pointer: moved.location.y)
+                    if next.target != drag?.target { withAnimation(.snappy(duration: 0.35)) { drag = next } }
                 }
             }
             .onEnded { _ in
@@ -237,15 +244,17 @@ struct Sidebar: View {
                 landing.isDropping = true
                 withAnimation(.snappy(duration: 0.35, extraBounce: 0.1), completionCriteria: .removed) {
                     drag = landing
-                    // Onto the open place: its top, with the list laid out as now.
-                    dragOffset = CGSize(width: 0, height: landing.top(landing.target) - landing.start)
+                    // Onto the open place, as measured; computed from the heights until it is.
+                    let place = frames.placeholder?.origin ?? CGPoint(x: landing.frame.minX, y: landing.frame.minY + landing.top(landing.target) - landing.start)
+                    pointer.offset = CGSize(width: place.x - landing.frame.minX, height: place.y - landing.frame.minY)
                 } completion: {
                     var instant = Transaction()
                     instant.disablesAnimations = true
                     withTransaction(instant) {
                         onMove(landing.order)
                         drag = nil
-                        dragOffset = .zero
+                        pointer.offset = .zero
+                        frames.placeholder = nil
                     }
                 }
             }
@@ -318,7 +327,7 @@ struct Sidebar: View {
 /// A project or worktree the user is dragging among its list (`keys`, as shown when the drag began).
 /// Places are counted among the others: `target` is where it lands, before the item at that index;
 /// the one it started in (`origin`) is its own place, which stays open.
-private struct ReorderDrag {
+struct ReorderDrag {
     let key: String
     let keys: [String]
     /// Where it was when the drag began, in the sidebar's space.
@@ -355,11 +364,23 @@ private struct ReorderDrag {
         return order
     }
 
-    /// Lands before the first item whose middle is below the dragged one's, wherever the pointer takes it.
-    mutating func move(to translation: CGFloat) {
-        let middle = start + translation + height / 2
-        target = others.indices.filter { top($0) + (heights[others[$0]] ?? 0) / 2 < middle }.count
+    /// Lands past each neighbor the pointer (`y`, in the sidebar's space) has crossed: one above once
+    /// it goes over that neighbor's middle, one below once it goes under it, as each is laid out
+    /// before it moves. Into a taller neighbor it takes only half the dragged one's height, so a
+    /// long project is passed without crossing all of it. A function of `y` alone, so it never
+    /// flickers between two places.
+    mutating func move(pointer y: CGFloat) {
+        let y = y - (frame.minY - start)
+        target = others.indices.filter { index in
+            let neighbor = heights[others[index]] ?? 0, into = min(neighbor, height) / 2
+            return y > (index < origin ? top(index) + neighbor - into : top(index) + height + into)
+        }.count
     }
+}
+
+/// How far the dragged item follows the pointer.
+@Observable private final class ReorderPointer {
+    var offset: CGSize = .zero
 }
 
 /// Where each reorderable item is, by its key: its frame in the sidebar's space, and its height
@@ -367,6 +388,8 @@ private struct ReorderDrag {
 private final class ReorderFrames {
     var frames: [String: CGRect] = [:]
     var heights: [String: CGFloat] = [:]
+    /// The open place a dragged item would land in.
+    var placeholder: CGRect?
 }
 
 /// Whether a view is the floating copy of a dragged item, which must not measure itself in the list's place.
@@ -387,6 +410,9 @@ private struct ReorderMeasure: ViewModifier {
 /// The dragged item lifted: larger, on a solid fill, back to its size as it lands.
 private struct FloatingItem<Content: View>: View {
     let isDropping: Bool
+    /// Where it was when the drag began, in the sidebar's space.
+    let origin: CGPoint
+    let pointer: ReorderPointer
     @ViewBuilder let content: Content
     @State private var isLifted = false
 
@@ -396,6 +422,7 @@ private struct FloatingItem<Content: View>: View {
             .environment(\.isReorderFloating, true)
             .scaleEffect(isLifted && !isDropping ? 1.15 : 1)
             .allowsHitTesting(false)
+            .offset(x: origin.x + pointer.offset.width, y: origin.y + pointer.offset.height)
             .onAppear { withAnimation(.bouncy(duration: 0.3)) { isLifted = true } }
     }
 }
@@ -626,9 +653,12 @@ private struct WorktreeRow: View {
         if isBoard {
             // Always filled, in the sky's blues: deeper when open.
             shape.fill(isSelected ? Theme.accentTint : isHovered ? Theme.accentTint.opacity(0.6) : Theme.accentSoft)
+        } else if isSelected && isFloating {
+            // Its own fill: a matched one would be drawn where the row is in the list.
+            shape.fill(Theme.ink.opacity(0.08))
         } else if isSelected {
             shape.fill(Theme.ink.opacity(0.08))
-                .matchedGeometryEffect(id: "selection", in: selectionSpace, isSource: !isFloating)
+                .matchedGeometryEffect(id: "selection", in: selectionSpace)
         } else {
             shape.fill(Theme.ink.opacity(isHovered ? 0.04 : 0))
         }
