@@ -19,17 +19,18 @@ struct VideoCard: View {
 }
 
 /// A worktree's board, as the Mac lays it out: cards at their frames, lines between them, on
-/// the sky. Pan with one finger, pinch to zoom, drag a card by its header, tap it to open.
+/// the sky. Pan with one finger, pinch to zoom around the fingers, tap a card to open it. Hold a
+/// card to lift it: it follows that finger while the other fingers keep panning and zooming.
 struct CanvasView: View {
     let link: HostLink
     let worktree: Worktree
     @State private var offset: CGSize = .zero
-    @State private var panStart: CGSize?
     @State private var zoom: CGFloat = 0
-    @State private var zoomStart: CGFloat?
     /// The zoom the cards' glyphs are drawn for: the last settled one.
     @State private var rasterZoom: CGFloat?
     @State private var dragging: (id: UUID, frame: CGRect)?
+    /// The lifted card and where it was held, in board points from its corner.
+    @State private var lifted: (id: UUID, grab: CGPoint)?
     @State private var opened: Card?
     @State private var watching: Element?
     @State private var adding: Adding?
@@ -100,12 +101,7 @@ struct CanvasView: View {
                     ForEach(cards) { card in
                         let rect = place(frame(card))
                         CardView(link: link, card: card, live: visible.intersects(frame(card)), zoom: rasterZoom ?? scale,
-                                 onDrag: { translation, ended in
-                            var moved = card.frame
-                            moved.origin.x += translation.width / scale
-                            moved.origin.y += translation.height / scale
-                            if ended { link.move(card.id, to: moved); dragging = nil } else { dragging = (card.id, moved) }
-                        })
+                                 lifted: lifted?.id == card.id)
                         .frame(width: rect.width, height: rect.height)
                         .offset(x: rect.minX, y: rect.minY)
                         .onTapGesture { opened = card }
@@ -118,21 +114,52 @@ struct CanvasView: View {
             .clipped()  // nothing of the board under the top bar
             .background(Theme.sky.ignoresSafeArea())
             .contentShape(Rectangle())
-            .gesture(DragGesture()
-                .onChanged { value in
-                    let start = panStart ?? offset
-                    panStart = start
-                    offset = CGSize(width: start.width + value.translation.width, height: start.height + value.translation.height)
-                }
-                .onEnded { _ in panStart = nil })
-            .simultaneousGesture(MagnifyGesture()
-                .onChanged { value in
-                    let start = zoomStart ?? scale
-                    zoomStart = start
-                    zoom = min(3, max(0.1, start * value.magnification))
-                }
-                // Glyphs are drawn again for the new size once the pinch ends, never during it.
-                .onEnded { _ in zoomStart = nil; rasterZoom = zoom })
+            .gesture(BoardTouches(
+                lift: { point in
+                    let at = CGPoint(x: (point.x + origin.x) / scale, y: (point.y + origin.y) / scale)
+                    guard let card = cards.last(where: { $0.frame.contains(at) }) else { return false }
+                    lifted = (card.id, CGPoint(x: at.x - card.frame.minX, y: at.y - card.frame.minY))
+                    dragging = (card.id, card.frame)
+                    return true
+                },
+                move: { previous, current, held in
+                    // Read live: several touches arrive between renders, so the values captured
+                    // by this body are already stale.
+                    let scale = zoom == 0 ? fit : zoom
+                    let origin = CGPoint(x: focus.midX * scale - geometry.size.width / 2 - offset.width,
+                                         y: focus.midY * scale - geometry.size.height / 2 - offset.height)
+                    // Zoom around the fingers' centroid and pan with it: the board point under the
+                    // fingers stays under them.
+                    var next = scale
+                    if current.count >= 2 {
+                        let spread = { (points: [CGPoint]) -> CGFloat in
+                            let c = Self.centroid(points)
+                            return points.map { hypot($0.x - c.x, $0.y - c.y) }.reduce(0, +)
+                        }
+                        let before = spread(previous)
+                        if before > 1 { next = min(3, max(0.1, scale * spread(current) / before)) }
+                    }
+                    var newOrigin = origin
+                    if !current.isEmpty {
+                        let c0 = Self.centroid(previous), c1 = Self.centroid(current)
+                        newOrigin = CGPoint(x: (c0.x + origin.x) / scale * next - c1.x, y: (c0.y + origin.y) / scale * next - c1.y)
+                        zoom = next
+                        offset = CGSize(width: focus.midX * next - geometry.size.width / 2 - newOrigin.x,
+                                        height: focus.midY * next - geometry.size.height / 2 - newOrigin.y)
+                    }
+                    if let held, let lifted, var moved = cards.first(where: { $0.id == lifted.id })?.frame {
+                        moved.origin = CGPoint(x: (held.x + newOrigin.x) / next - lifted.grab.x, y: (held.y + newOrigin.y) / next - lifted.grab.y)
+                        dragging = (lifted.id, moved)
+                    }
+                },
+                end: {
+                    if let dragging { link.move(dragging.id, to: dragging.frame) }
+                    dragging = nil
+                    withAnimation(.spring) { lifted = nil }
+                    // Glyphs are drawn again for the new size once the fingers lift, never during it.
+                    if zoom != 0 { rasterZoom = zoom }
+                }))
+            .sensoryFeedback(.impact(weight: .medium), trigger: lifted?.id) { _, now in now != nil }
             .onAppear { if rasterZoom == nil { rasterZoom = scale } }
             .overlay {
                 if cards.isEmpty, others.isEmpty {
@@ -393,13 +420,26 @@ struct CardView: View {
     let card: Card
     let live: Bool
     let zoom: CGFloat
-    let onDrag: (CGSize, Bool) -> Void
+    let lifted: Bool
 
     var body: some View {
         #if DEBUG
         let _ = DebugPerf.count("card")
         #endif
         content
+            .overlay {
+                if lifted {
+                    // Marching ants while the card is held. The phase stays within one dash period (8 + 6):
+                    // Core Graphics walks the pattern up to it, and a clock-sized phase stalls every frame.
+                    TimelineView(.animation) { timeline in
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [8, 6],
+                                dashPhase: -CGFloat((timeline.date.timeIntervalSinceReferenceDate * 28).truncatingRemainder(dividingBy: 14))))
+                    }
+                }
+            }
+            .scaleEffect(lifted ? 1.2 : 1)
+            .animation(.bouncy, value: lifted)
     }
 
     private var content: some View {
@@ -416,10 +456,6 @@ struct CardView: View {
             }
             .padding(.horizontal, 12).frame(height: 34)
             .background(.ultraThinMaterial)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 4)
-                .onChanged { onDrag($0.translation, false) }
-                .onEnded { onDrag($0.translation, true) })
             // As the Mac's card: the terminal inset 12 points on the card's surface.
             MetalTerminal(session: link.session(card.id), live: live, zoom: zoom)
                 .allowsHitTesting(false)
@@ -637,7 +673,17 @@ struct DecisionCardView: View {
             Text("\(number). \(card.claim)").font(Theme.Font.heading).foregroundStyle(Theme.ink)
             Group {
                 if let diagram = card.evidence.diagram {
-                    DiagramPicture(svg: diagram.svg)
+                    if let before = diagram.before {
+                        // A phone is narrow: before above after instead of a divider.
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Before").font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.inkMuted)
+                            DiagramPicture(svg: before)
+                            Text("After").font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.inkMuted)
+                            DiagramPicture(svg: diagram.svg)
+                        }
+                    } else {
+                        DiagramPicture(svg: diagram.svg)
+                    }
                 } else if let picture = card.evidence.image, let item = link.media.first(where: { $0.id == picture.after }) {
                     ZStack {
                         Theme.surfaceDeep
@@ -752,3 +798,84 @@ extension Decision {
     }
 }
 #endif
+
+extension CanvasView {
+    static func centroid(_ points: [CGPoint]) -> CGPoint {
+        guard !points.isEmpty else { return .zero }
+        return CGPoint(x: points.map(\.x).reduce(0, +) / CGFloat(points.count), y: points.map(\.y).reduce(0, +) / CGFloat(points.count))
+    }
+}
+
+/// Every finger on the board, one by one: SwiftUI's drag and pinch can't tell a finger holding a
+/// card from the ones navigating. `move` gets the navigating fingers before and after, and where
+/// the holding finger is.
+struct BoardTouches: UIGestureRecognizerRepresentable {
+    let lift: (CGPoint) -> Bool
+    let move: ([CGPoint], [CGPoint], CGPoint?) -> Void
+    let end: () -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> Recognizer { Recognizer() }
+
+    func updateUIGestureRecognizer(_ recognizer: Recognizer, context: Context) {
+        recognizer.lift = lift; recognizer.move = move; recognizer.end = end
+    }
+
+    final class Recognizer: UIGestureRecognizer {
+        var lift: (CGPoint) -> Bool = { _ in false }
+        var move: ([CGPoint], [CGPoint], CGPoint?) -> Void = { _, _, _ in }
+        var end: () -> Void = {}
+        private var held: UITouch?
+        private var start: CGPoint?
+        private var timer: Timer?
+
+        override init(target: Any? = nil, action: Selector? = nil) {
+            super.init(target: target, action: action)
+            cancelsTouchesInView = true
+            delaysTouchesBegan = false
+        }
+
+        private var active: Set<UITouch> = []
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            active.formUnion(touches)
+            if active.count == 1, held == nil, let touch = touches.first {
+                start = touch.location(in: view)
+                timer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+                    guard let self, self.active.count == 1, self.active.first === touch, self.state == .possible,
+                          self.lift(touch.location(in: self.view)) else { return }
+                    self.held = touch
+                    self.state = .began  // cancels the tap that would open the card
+                }
+            } else {
+                timer?.invalidate()
+            }
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            if state == .possible {
+                guard let start, let touch = touches.first,
+                      active.count > 1 || hypot(touch.location(in: view).x - start.x, touch.location(in: view).y - start.y) > 8 else { return }
+                timer?.invalidate()
+                state = .began
+            } else {
+                state = .changed
+            }
+            let navigating = active.filter { $0 !== held }
+            move(navigating.map { $0.previousLocation(in: view) }, navigating.map { $0.location(in: view) }, held?.location(in: view))
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { lose(touches) }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { lose(touches) }
+
+        private func lose(_ touches: Set<UITouch>) {
+            active.subtract(touches)
+            // The holding finger let go: drop the card, the others keep navigating.
+            if let held, touches.contains(held), !active.isEmpty { self.held = nil; end() }
+            guard active.isEmpty else { return }
+            timer?.invalidate()
+            if state == .possible { state = .failed } else { end(); state = .ended }
+        }
+
+        override func reset() { active = []; held = nil; start = nil; timer?.invalidate() }
+    }
+}

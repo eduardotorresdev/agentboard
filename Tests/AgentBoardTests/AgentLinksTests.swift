@@ -143,3 +143,25 @@ private func waitFor(_ seconds: Double = 30, _ condition: @MainActor () -> Bool)
     #expect(notice.contains("send_message to “Bob (shop › checkout)”"))
     #expect(notice.hasSuffix("\n\nrun the tests"))
 }
+
+/// Both agents on one core (two worktrees of this Mac): the core lists the first relay's line
+/// before it has the second, and that isn't the user taking the second away.
+@MainActor
+@Test func aLinkOnOneCoreKeepsBothRelays() async throws {
+    let mac = try Machine()
+    defer { mac.stop() }
+    let links = AgentLinks(database: nil, projects: nil)
+    links.store = { _ in mac.store }
+    links.stores = { [mac.store] }
+    links.attach(to: mac.store)
+    let (ada, _) = try await mac.agent("Ada")
+    let (bob, _) = try await mac.agent("Bob")
+
+    let link = try #require(links.link(ada.id, in: mac.store, with: bob.id, in: mac.store))
+    for end in link.ends {
+        try await waitFor { mac.store.connections.contains { $0.joins(end.agent, end.relay) } }
+    }
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(links.links.map(\.id) == [link.id])
+    #expect(link.ends.allSatisfy { end in mac.store.connections.contains { $0.joins(end.agent, end.relay) } })
+}

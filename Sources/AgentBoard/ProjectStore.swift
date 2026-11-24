@@ -17,13 +17,32 @@ final class ProjectStore {
     /// means the project path is not a git repository.
     var worktrees: [Project.ID: [Worktree]] {
         let known = hosts?.account.hosts ?? []
-        guard !known.isEmpty, !hostWorktrees.isEmpty else { return local }
         var all = local
         for project in projects where all[project.id] != nil {
             // The first a host lists is its clone itself, which isn't shown.
             for host in known { all[project.id]? += (hostWorktrees[host.id]?[project.path] ?? []).dropFirst() }
         }
-        return all
+        return all.mapValues { Self.ordered($0, by: worktreePositions) }
+    }
+    /// Where the user dragged worktrees in the sidebar, by `Worktree.id`.
+    private(set) var worktreePositions: [String: Int] = [:]
+
+    /// `worktrees` as the user ordered them: the ones dragged by their position, the rest after,
+    /// in the order given.
+    nonisolated static func ordered(_ worktrees: [Worktree], by positions: [String: Int]) -> [Worktree] {
+        worktrees.enumerated().sorted { (positions[$0.element.id] ?? .max, $0.offset) < (positions[$1.element.id] ?? .max, $1.offset) }.map(\.element)
+    }
+
+    /// Keeps the shown organization's projects in the order of `ids`, as dragged in the sidebar.
+    func moveProjects(to ids: [Project.ID]) {
+        projects = ids.compactMap { id in projects.first { $0.id == id } } + projects.filter { !ids.contains($0.id) }
+        do { try database?.setProjectOrder(ids) } catch { errorMessage = "\(error)" }
+    }
+
+    /// Keeps a project's worktrees in the order of `ids` (`Worktree.id`), as dragged in the sidebar.
+    func moveWorktrees(to ids: [Worktree.ID]) {
+        for (position, id) in ids.enumerated() { worktreePositions[id] = position }
+        do { try database?.setWorktreeOrder(ids) } catch { errorMessage = "\(error)" }
     }
     /// The worktrees on this Mac.
     private var local: [Project.ID: [Worktree]] = [:]
@@ -303,6 +322,7 @@ final class ProjectStore {
             agentTitles = try database.worktreeTitles()
             local = projects.reduce(into: [:]) { $0[$1.id] = listing ? Git.worktrees(at: $1.path) : listedBefore[$1.id] ?? [] }
             hostWorktrees = try database.hostWorktrees()
+            worktreePositions = try database.worktreePositions()
         } catch {
             errorMessage = "\(error)"
         }

@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-pub const MAX_BYTES: usize = 65_536;
+pub const MAX_BYTES: usize = 262_144;
 pub const MAX_ELEMENTS: usize = 2_000;
 /// How deep `g`, `use` and `marker` may nest, counting what a `use` brings in.
 pub const MAX_DEPTH: usize = 16;

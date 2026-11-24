@@ -66,11 +66,11 @@ final class DecisionTools: ToolProvider {
                     "cards": ["type": "array", "description": "1 to \(DecisionDraft.maxCards) cards, one idea each.", "items": [
                         "type": "object", "properties": [
                             "claim": ["type": "string", "description": "What the evidence shows, e.g. `The screen ended up like this`."],
-                            "evidence": ["type": "object", "description": "An image on the board, \(element); or a diagram you draw as SVG.", "properties": [
+                            "evidence": ["type": "object", "description": "An image on the board, \(element); or, preferred, a diagram you draw as SVG.", "properties": [
                                 "type": ["type": "string", "enum": DecisionDraft.kinds],
-                                "svg": ["type": "string", "description": "A diagram's SVG (type diagram): the subset decision_guide describes, at most 64 KB."],
-                                "after": ["type": "string", "description": "The image to evaluate (put a screenshot on the board with image_create)."],
-                                "before": ["type": "string", "description": "The image it replaces, shown behind a draggable divider."],
+                                "svg": ["type": "string", "description": "A diagram's SVG (type diagram): the subset decision_guide describes, at most 256 KB."],
+                                "after": ["type": "string", "description": "The image to evaluate, only for what a diagram can't draw, like a capture of the running app (put it on the board with image_create)."],
+                                "before": ["type": "string", "description": "What it replaces, shown behind a draggable divider: the image's name, or for a diagram its SVG."],
                             ] as [String: Any], "required": ["type"]] as [String: Any],
                             "reference": ["type": "string", "description": "What to compare against when there is no `before`: the justification or the alternative. Never “we already do it this way”."],
                             "pins": ["type": "array", "description": "Doubts at an exact place of the evidence, within this decision's scope.", "items": [
@@ -147,7 +147,7 @@ final class DecisionTools: ToolProvider {
         var cards: [Decision.Card] = []
         for (index, card) in draft.cards.enumerated() {
             if card.kind == "diagram" {
-                cards.append(Decision.Card(claim: card.claim, evidence: .diagram(svg: card.target), reference: card.reference, pins: card.pins))
+                cards.append(Decision.Card(claim: card.claim, evidence: .diagram(svg: card.target, before: card.before), reference: card.reference, pins: card.pins))
                 continue
             }
             let connected = store.bus.peers(of: agent.id, kind: .image)

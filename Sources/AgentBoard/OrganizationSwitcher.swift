@@ -105,6 +105,8 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
     private let above: Bool
     /// Where an `above` panel's bottom edge stays as its content grows.
     private var bottom: CGFloat = 0
+    /// Clicks in the app's other windows: the board doesn't always take key, so resigning key alone misses them.
+    private var clickMonitor: Any?
 
     init(leading: Bool = false, above: Bool = false) {
         self.leading = leading
@@ -145,6 +147,10 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
         state.editing = nil
         state.isShown = false
         panel.makeKeyAndOrderFront(nil)
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            if event.window !== self?.panel { self?.close() }
+            return event
+        }
         withAnimation(.snappy(duration: 0.28)) { state.isShown = true }
     }
 
@@ -152,6 +158,8 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
         guard let panel else { return }
         self.panel = nil
         closedAt = Date()
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
         withAnimation(.snappy(duration: 0.2)) { state.isShown = false }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { panel.orderOut(nil) }
     }

@@ -202,7 +202,8 @@ struct SignInDialog: View {
     }
 }
 
-/// The account menu: who is signed in, and signing out (here, or everywhere).
+/// The account menu: who is signed in, this Mac as host, and apart at the foot, signing out
+/// (here, or everywhere), each behind a confirmation.
 struct AccountMenu: View {
     let hosts: HostStores
     let state: OrganizationMenuState
@@ -210,11 +211,6 @@ struct AccountMenu: View {
     /// The corner it grows from: the one it hangs from.
     var anchor: UnitPoint = .topTrailing
     private var account: AccountStore { hosts.account }
-    /// "Sign out everywhere" was clicked once: the next click does it.
-    @State private var confirmingEverywhere = false
-    /// "Sign out" was clicked once: the next click does it, with or without `removingKey`.
-    @State private var confirmingSignOut = false
-    @State private var removingKey = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -226,26 +222,19 @@ struct AccountMenu: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                 macHostActions
-                MenuAction(title: confirmingSignOut ? L("Sign out? Click again") : L("Sign out"),
-                           caption: L("Agents on your hosts keep running; this Mac stops showing them.")) {
-                    guard confirmingSignOut else { return confirmingSignOut = true }
-                    close()
-                    Task { await hosts.signOut(removingKey: removingKey) }
-                }
-                if confirmingSignOut {
-                    MenuAction(title: (removingKey ? "✓ " : "") + L("Remove this Mac from its hosts first"),
-                               caption: L("Online hosts forget this Mac's key: it needs approval there again.")) {
-                        removingKey.toggle()
+                Spacer().frame(height: 10)
+                MenuAction(icon: "rectangle.portrait.and.arrow.right", title: L("Sign out of the account"),
+                           caption: L("Disconnects this Mac while agents on your hosts keep running")) {
+                    confirm(L("Sign out of this Mac?"), L("Agents on your hosts keep running; this Mac stops showing them."),
+                            button: L("Sign Out"), option: L("Remove this Mac from its hosts first (it needs approval there again)")) { removingKey in
+                        Task { await hosts.signOut(removingKey: removingKey) }
                     }
-                    .padding(.leading, 22)
-                    .accessibilityAddTraits(removingKey ? .isSelected : [])
                 }
-                MenuAction(title: confirmingEverywhere ? L("Sign out everywhere? Click again") : L("Sign out everywhere"),
-                           caption: L("Signs out every computer showing this account. Hosts keep running.")) {
-                    guard confirmingEverywhere else { return confirmingEverywhere = true }
-                    Task {
-                        // The menu stays when the server didn't do it: still signed in, to try again.
-                        if await account.signOutEverywhere() { close() } else { confirmingEverywhere = false }
+                MenuAction(icon: "laptopcomputer.and.arrow.down", title: L("Sign out on every computer"),
+                           caption: L("Disconnects them all while your hosts keep running their agents")) {
+                    confirm(L("Sign out everywhere?"), L("Every computer showing this account is signed out. Hosts keep running."),
+                            button: L("Sign Out Everywhere")) { _ in
+                        Task { _ = await account.signOutEverywhere() }
                     }
                 }
             }
@@ -255,16 +244,45 @@ struct AccountMenu: View {
         .modifier(MenuChrome(state: state, anchor: anchor))
     }
 
-    /// This Mac as a host: on or off, its own sign-in, and the boards waiting for approval.
+    /// Closes the menu, then asks; `option` adds a checkbox, on by default, passed to `action`.
+    private func confirm(_ title: String, _ text: String, button: String, option: String? = nil, action: @escaping (Bool) -> Void) {
+        close()
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = text
+            alert.addButton(withTitle: button).hasDestructiveAction = true
+            alert.addButton(withTitle: L("Cancel")).keyEquivalent = "\u{1b}"
+            if let option {
+                alert.showsSuppressionButton = true
+                alert.suppressionButton?.title = option
+                alert.suppressionButton?.state = .on
+            }
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            action(alert.suppressionButton?.state == .on)
+        }
+    }
+
+/// This Mac as a host: on or off, its own sign-in, and the boards waiting for approval.
     @ViewBuilder private var macHostActions: some View {
         let host = hosts.macHost
-        MenuAction(title: (host.isWanted ? "✓ " : "") + L("This Mac as host"),
-                   caption: L("Your other boards can run agents here, once you approve each one.")) {
-            host.setWanted(!host.isWanted, signedIn: account.account != nil)
+        Toggle(isOn: Binding(get: { host.isWanted }, set: { host.setWanted($0, signedIn: account.account != nil) })) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "desktopcomputer").foregroundStyle(Theme.inkMuted).frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L("This Mac as host")).font(Theme.Font.body).foregroundStyle(Theme.ink)
+                    Text(L("Your other boards can run agents here, once you approve each one."))
+                        .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .accessibilityAddTraits(host.isWanted ? .isSelected : [])
+        .toggleStyle(MenuSwitchStyle())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         if let signIn = host.signIn {
-            MenuAction(title: L("Confirm code \(signIn.code)"),
+            MenuAction(icon: "key", title: L("Confirm code \(signIn.code)"),
                        caption: L("The host signs in on its own, apart from this board: open the page and enter this code.")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(signIn.code, forType: .string)
@@ -277,7 +295,7 @@ struct AccountMenu: View {
                 .padding(.horizontal, 8).padding(.leading, 22)
         }
         ForEach(host.waiting) { board in
-            MenuAction(title: L("Approve \(board.fingerprint)"),
+            MenuAction(icon: "checkmark.shield", title: L("Approve \(board.fingerprint)"),
                        caption: board.name.isEmpty ? L("A board wants to use this Mac. Its own account menu shows the same fingerprint.")
                            : L("“\(board.name)” wants to use this Mac. Its own account menu shows the same fingerprint.")) {
                 host.approve(board)
@@ -289,6 +307,7 @@ struct AccountMenu: View {
 
 /// Something to do in the account menu: its name, and one line on what it does.
 private struct MenuAction: View {
+    let icon: String
     let title: String
     let caption: String
     let action: () -> Void
@@ -296,11 +315,14 @@ private struct MenuAction: View {
 
     var body: some View {
         Button(action: action) {
+            HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).font(Theme.Font.body).foregroundStyle(Theme.inkMuted).frame(width: 18).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(Theme.Font.body).foregroundStyle(Theme.ink)
                 Text(caption)
                     .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
                     .fixedSize(horizontal: false, vertical: true)
+            }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8)
@@ -310,5 +332,25 @@ private struct MenuAction: View {
         }
         .buttonStyle(.plain)
         .onHover { inside in withAnimation(.snappy(duration: 0.15)) { isHovered = inside } }
+    }
+}
+
+/// A switch drawn in the accent: the system one turns gray in a panel that isn't the main window.
+private struct MenuSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button { withAnimation(.snappy(duration: 0.2)) { configuration.isOn.toggle() } } label: {
+            HStack(alignment: .top, spacing: 8) {
+                configuration.label
+                Capsule()
+                    .fill(configuration.isOn ? Theme.accent : Theme.surfaceDeep)
+                    .frame(width: 30, height: 18)
+                    .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                        Circle().fill(Theme.surface).padding(2)
+                    }
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(configuration.isOn ? .isSelected : [])
     }
 }

@@ -114,20 +114,32 @@ enum CatalogSync {
     static func local(_ database: Database, macHost: String?, listing: (String) -> [Worktree]?) throws -> CatalogDocument {
         let organizations = try database.organizations()
         let projects = try organizations.flatMap { organization in
-            try database.projects(in: organization.id).map { CatalogProject(organization: organization.id, name: $0.name, path: $0.path) }
-        }
-        var worktrees: [CatalogWorktree] = []
-        if let macHost {
-            for project in projects {
-                worktrees += (listing(project.path) ?? []).enumerated().map {
-                    CatalogWorktree(project: project.path, host: macHost, path: $1.path, branch: $1.branch, isMain: $0 == 0)
-                }
+            try database.projects(in: organization.id).enumerated().map {
+                CatalogProject(organization: organization.id, name: $1.name, path: $1.path, position: $0)
             }
         }
-        for (host, byProject) in try database.hostWorktrees() where host.uuidString.lowercased() != macHost {
-            for (project, list) in byProject where projects.contains(where: { $0.path == project }) {
+        // The user's name wins over an agent's, as in the sidebar.
+        let titles = try database.worktreeTitles().merging(database.aliases()) { _, user in user }
+        let positions = try database.worktreePositions()
+        let hosts = try database.hostWorktrees().filter { $0.key.uuidString.lowercased() != macHost }
+        var worktrees: [CatalogWorktree] = []
+        var seen = Set<String>()
+        // A path in several organizations is one repository: its worktrees go up once.
+        for project in projects where seen.insert(project.path).inserted {
+            let mine = listing(project.path) ?? []
+            let theirs = hosts.sorted { $0.key.uuidString < $1.key.uuidString }.compactMap { host, byProject in byProject[project.path].map { (host, $0) } }
+            // As the sidebar shows them: a host's clone itself isn't there, so it has no place.
+            let shown = ProjectStore.ordered(mine + theirs.flatMap { $1.dropFirst() }, by: positions).map(\.id)
+            if let macHost {
+                worktrees += mine.enumerated().map {
+                    CatalogWorktree(project: project.path, host: macHost, path: $1.path, branch: $1.branch, isMain: $0 == 0,
+                                    title: titles[$1.path], position: shown.firstIndex(of: $1.id))
+                }
+            }
+            for (host, list) in theirs {
                 worktrees += list.enumerated().map {
-                    CatalogWorktree(project: project, host: host.uuidString.lowercased(), path: $1.path, branch: $1.branch, isMain: $0 == 0)
+                    CatalogWorktree(project: project.path, host: host.uuidString.lowercased(), path: $1.path, branch: $1.branch, isMain: $0 == 0,
+                                    title: titles[$1.path], position: shown.firstIndex(of: $1.id))
                 }
             }
         }

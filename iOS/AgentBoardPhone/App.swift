@@ -112,6 +112,9 @@ struct Fingerprint: View {
     var error: String?
     var loaded = false
 
+    /// Starts from the last hosts seen, so screens fill before the server answers.
+    init(cached: [Host] = []) { list = cached }
+
     func link(_ host: Host) -> HostLink {
         if let link = links[host.id.lowercased()] { return link }
         let link = HostLink(host: host)
@@ -129,6 +132,8 @@ struct Fingerprint: View {
             DebugTerm.log("hosts: 200, \(hosts.count) hosts, \(hosts.filter(\.online).count) online")
             #endif
             withAnimation(.smooth) { list = hosts.sorted { ($0.online ? 0 : 1, $0.name) < ($1.online ? 0 : 1, $1.name) }; error = nil }
+            // A link made from the cache holds the host's old addresses and key: made again from the fresh one.
+            for host in hosts where links[host.id.lowercased()]?.host != host { links[host.id.lowercased()] = nil }
             for host in hosts where host.online { link(host).connect(account: account) }
         } catch let failure as AccountServer.ServerError where failure.status == 401 {
             #if DEBUG
@@ -213,12 +218,22 @@ enum WaitingBanner {
 /// any host.
 struct BrowseView: View {
     let account: Account
-    @State private var hosts = Hosts()
-    @State private var groups: [OrganizationGroup] = []
+    @State private var hosts: Hosts
+    @State private var groups: [OrganizationGroup]
+    /// What the last full browse found, saved for the next launch.
+    @State private var found: Browse
     @State private var selected: String?
     @State private var path = NavigationPath()
     @State private var banner: (card: Card, link: HostLink, more: Int)?
     @Environment(\.scenePhase) private var scenePhase
+
+    init(account: Account) {
+        self.account = account
+        let cached = BrowseCache.load()
+        _hosts = State(initialValue: Hosts(cached: cached?.hosts ?? []))
+        _found = State(initialValue: cached?.browse ?? Browse())
+        _groups = State(initialValue: OrganizationGroup.group(cached?.browse ?? Browse()))
+    }
 
     private var current: OrganizationGroup? { groups.first { $0.id == selected } ?? groups.first }
     /// Changes whenever a host connects, drops or is asked to trust.
@@ -255,7 +270,7 @@ struct BrowseView: View {
                             let waiting = project.worktrees.reduce(0) { $0 + hosts.waiting(in: $1) }
                             NavigationLink(value: project) {
                                 ListRow(title: project.name, detail: project.worktrees.count == 1 ? "1 worktree" : "\(project.worktrees.count) worktrees",
-                                        state: waiting == 0 ? nil : ("\(waiting) waiting for you", Theme.deep))
+                                        state: waiting == 0 ? nil : ("\(waiting) waiting for you", Theme.deep), tile: true)
                             }
                         }
                         if current.projects.isEmpty {
@@ -359,8 +374,13 @@ struct BrowseView: View {
 
     private func browse() async {
         let catalog: any CatalogSource = AccountCatalog(server: account.server)
-        let found = OrganizationGroup.group(await catalog.browse(hosts.list.map(hosts.link)))
+        let links = hosts.list.map(hosts.link)
+        let browse = await catalog.browse(links)
+        // A host still connecting would only give the catalog's list: keep the cached one until it answers.
+        if !groups.isEmpty, links.contains(where: { $0.host.online && $0.phase == .connecting }) { return }
+        let found = OrganizationGroup.group(browse)
         withAnimation(.smooth) { groups = found }
+        if browse != self.found { self.found = browse; BrowseCache.save(.init(hosts: hosts.list, browse: browse)) }
         #if DEBUG
         if let name = DebugLaunch.value("openProject"), let project = found.flatMap(\.projects).first(where: { $0.name == name }) {
             if path.isEmpty { path.append(project) }
@@ -454,9 +474,12 @@ struct ListRow: View {
     let detail: String?
     var state: (text: String, color: Color)? = nil
     var fill: Color = Theme.surface
+    /// Shows the project's letter tile before the title, as the Mac's sidebar.
+    var tile = false
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
+            if tile { ProjectTile(name: title) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.Font.title).foregroundStyle(Theme.ink)
                 HStack(spacing: 6) {
@@ -624,5 +647,29 @@ struct WorktreesView: View {
                                 host: link.host.id.lowercased())
         withAnimation(.smooth) { if !worktrees.contains(worktree) { worktrees.append(worktree) } }
         path.append(worktree)
+    }
+}
+
+/// A project's mark, as on the Mac (`ProjectTile` in the sidebar): its first letter on a color
+/// picked from its name, the same color on both.
+struct ProjectTile: View {
+    let name: String
+    static let size: CGFloat = 28
+
+    /// Blue and slate steps that carry white text at AA; never red, which means an error.
+    private static let palette: [Color] = [Theme.accent, Theme.deep, Theme.ink, Theme.inkMuted]
+
+    /// Stable across launches, unlike `hashValue`; the Mac's formula.
+    static func colorIndex(for name: String) -> Int {
+        Int(name.unicodeScalars.reduce(UInt32(5381)) { ($0 &* 33) &+ $1.value } % UInt32(palette.count))
+    }
+
+    var body: some View {
+        Text(name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "•")
+            .font(Theme.Font.label)
+            .foregroundStyle(Theme.onAccent)
+            .frame(width: Self.size, height: Self.size)
+            .background(Self.palette[Self.colorIndex(for: name)], in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            .accessibilityHidden(true)
     }
 }

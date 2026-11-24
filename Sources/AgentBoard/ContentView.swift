@@ -209,8 +209,10 @@ struct ContentView: View {
             if !boardController.isZen {
                 if #available(macOS 26, *) {
                     ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }.sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .navigation) { AppUsage() }.sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }
+                    ToolbarItem(placement: .navigation) { AppUsage() }
                 }
             }
             // A build of the checkout (`./run`) says so, to tell it apart from the installed app.

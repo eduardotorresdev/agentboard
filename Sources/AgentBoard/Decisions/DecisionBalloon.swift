@@ -1,3 +1,4 @@
+import AgentRuntime
 import AppKit
 import Observation
 import Orchestration
@@ -165,12 +166,15 @@ struct DecisionBalloon: View {
                 switch current.evidence {
                 case .image(let before, let after):
                     if let picture = picture(after) {
-                        BeforeAfter(before: before.flatMap(picture(_:)), after: picture, pins: current.pins)
+                        BeforeAfter(before: before.flatMap(picture(_:)).map { AnyView(fitted($0)) }, after: AnyView(fitted(picture)),
+                                    aspect: picture.size, pins: current.pins)
                     } else {
                         unavailable(L("This image is no longer on the board."))
                     }
-                case .diagram(let svg):
-                    DiagramView(svg: svg).padding(12)
+                case .diagram(let svg, let before):
+                    BeforeAfter(before: before.map { AnyView(DiagramView(svg: $0)) }, after: AnyView(DiagramView(svg: svg)),
+                                aspect: (try? SVGDiagram(svg))?.viewBox.size ?? .zero, pins: current.pins)
+                        .padding(12)
                 case .browser(let id), .video(let id):
                     unavailable(L("The evidence is the card “\(store.image(id)?.name ?? L("Browser"))”, connected to this agent."))
                 }
@@ -211,6 +215,10 @@ struct DecisionBalloon: View {
             }
             .padding(.horizontal, 16).padding(.top, 10)
         }
+    }
+
+    private func fitted(_ image: NSImage) -> some View {
+        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
     }
 
     private func unavailable(_ text: String) -> some View {
@@ -431,10 +439,12 @@ struct PlaceTitle: View {
     }
 }
 
-/// The before and after of one screen behind a divider the user drags.
+/// The before and after of one screen (pictures or diagrams) behind a divider the user drags.
 private struct BeforeAfter: View {
-    let before: NSImage?
-    let after: NSImage
+    let before: AnyView?
+    let after: AnyView
+    /// The evidence's own size, to place pins where it lands once fitted.
+    let aspect: CGSize
     let pins: [Decision.Pin]
     /// Where the divider stands, 0 to 1 from the left: before on its left, after on its right.
     @State private var position: CGFloat = 0.5
@@ -444,9 +454,9 @@ private struct BeforeAfter: View {
             let size = geometry.size
             ZStack(alignment: .topLeading) {
                 if let before {
-                    fitted(before, in: size)
+                    before.frame(width: size.width, height: size.height)
                         .mask(alignment: .leading) { Rectangle().frame(width: size.width * position) }
-                    fitted(after, in: size)
+                    after.frame(width: size.width, height: size.height)
                         .mask(alignment: .trailing) { Rectangle().frame(width: size.width * (1 - position)) }
                     Rectangle().fill(Theme.accent).frame(width: 2, height: size.height).offset(x: size.width * position - 1)
                     Image(systemName: "chevron.left.chevron.right")
@@ -459,9 +469,9 @@ private struct BeforeAfter: View {
                     label(L("After")).opacity(position > 0.86 ? 0 : 1).padding(8)
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 } else {
-                    fitted(after, in: size)
+                    after.frame(width: size.width, height: size.height)
                 }
-                let shown = Self.fit(after.size, in: size)
+                let shown = Self.fit(aspect, in: size)
                 ForEach(Array(pins.enumerated()), id: \.offset) { index, pin in
                     PinMark(number: index + 1)
                         .position(x: shown.minX + shown.width * pin.x, y: shown.minY + shown.height * pin.y)
@@ -488,10 +498,6 @@ private struct BeforeAfter: View {
         guard before != nil else { return .ignored }
         withAnimation(.snappy) { position = min(1, max(0, position + by)) }
         return .handled
-    }
-
-    private func fitted(_ image: NSImage, in size: CGSize) -> some View {
-        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(width: size.width, height: size.height)
     }
 
     private func label(_ text: String) -> some View {

@@ -161,6 +161,60 @@
    }
   },
   {
+   "name": "a diagram with its before",
+   "set": {
+    "cards": [
+     {
+      "claim": "The answer goes to the core",
+      "evidence": {
+       "type": "diagram",
+       "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>",
+       "before": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>"
+      }
+     }
+    ],
+    "family": "foundation"
+   },
+   "refused": null,
+   "taken": {
+    "family": "foundation",
+    "framing": "Validate the invite screen",
+    "question": "Can the screen stay like this?",
+    "variants": [],
+    "verified": [
+     "Built and opened the screen"
+    ],
+    "blocking": false,
+    "final": false,
+    "cards": [
+     {
+      "claim": "The answer goes to the core",
+      "kind": "diagram",
+      "before": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>",
+      "target": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>",
+      "reference": null,
+      "pins": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "a before diagram that cannot be drawn",
+   "set": {
+    "cards": [
+     {
+      "claim": "x",
+      "evidence": {
+       "type": "diagram",
+       "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n  <defs>\n    <marker id=\"arrow\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto\">\n      <path d=\"M0,0 L10,5 L0,10 z\" fill=\"#1c2024\"/>\n    </marker>\n  </defs>\n  <rect x=\"10\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"60\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Phone</text>\n  <rect x=\"210\" y=\"30\" width=\"100\" height=\"60\" rx=\"8\" fill=\"#e6f4fe\" stroke=\"#0d74ce\" stroke-width=\"2\"/>\n  <text x=\"260\" y=\"65\" text-anchor=\"middle\" font-size=\"14\" fill=\"#1c2024\">Core</text>\n  <line x1=\"110\" y1=\"60\" x2=\"208\" y2=\"60\" stroke=\"#1c2024\" stroke-width=\"2\" marker-end=\"url(#arrow)\"/>\n  <text x=\"160\" y=\"50\" text-anchor=\"middle\" font-size=\"12\" fill=\"#60646c\">answer</text>\n</svg>",
+       "before": "<svg viewBox='0 0 9 9'><image/></svg>"
+      }
+     }
+    ]
+   },
+   "refused": "Card 1: the `before` diagram can't be drawn. `<image>` isn't drawn. A diagram draws shapes and text only."
+  },
+  {
    "name": "an unknown family",
    "set": {
     "family": "layout"

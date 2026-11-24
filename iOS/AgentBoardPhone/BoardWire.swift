@@ -96,7 +96,7 @@ struct Decision: Decodable, Identifiable, Equatable {
     /// looked at on the Mac.
     struct Evidence: Decodable, Equatable {
         struct Picture: Decodable, Equatable { var before: UUID?; let after: UUID }
-        struct Drawing: Decodable, Equatable { let svg: String }
+        struct Drawing: Decodable, Equatable { let svg: String; var before: String? }
         var image: Picture?
         var diagram: Drawing?
     }

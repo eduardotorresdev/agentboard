@@ -52,6 +52,8 @@ final class AgentLinks {
     static let relaySize = CGSize(width: 320, height: CardMetrics.titleHeight)
 
     private(set) var links: [Link] = []
+    /// Lines some core has listed: only these can be taken away.
+    @ObservationIgnored private var confirmedLines: Set<UUID> = []
     private let database: Database?
     @ObservationIgnored private weak var projects: ProjectStore?
     /// The store of a host in use (nil: this Mac), and every store in use; set by the app.
@@ -212,7 +214,10 @@ final class AgentLinks {
         guard let old else { return refresh() }
         do {
             let now = Set(store.connections.map(\.id))
-            for gone in old where !now.contains(gone.id) {
+            defer { confirmedLines.formUnion(now) }
+            // Only a line the core already had can have been taken away: one just drawn here and not
+            // yet in the core's list (the other end's, drawn right after) is still on its way.
+            for gone in old where !now.contains(gone.id) && confirmedLines.contains(gone.id) {
                 if let link = links.first(where: { $0.ends.contains { $0.host == host && gone.joins($0.agent, $0.relay) } }) {
                     remove(link)
                     return

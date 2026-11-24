@@ -124,6 +124,10 @@ final class Database {
             CREATE TABLE IF NOT EXISTS agent_links (
                 id TEXT PRIMARY KEY,
                 data TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS worktree_positions (
+                worktree TEXT PRIMARY KEY,
+                position INTEGER NOT NULL
             )
             """)
         if try !columns(of: "projects").contains("organization") {
@@ -157,6 +161,8 @@ final class Database {
         // "ios" or "android"; an Android card's host is the machine its emulator runs on.
         try addColumn("simulators", "platform TEXT NOT NULL DEFAULT 'ios'")
         try addColumn("simulators", "host TEXT")
+        // Where the user dragged a project in the sidebar; null (never moved) sorts after, by name.
+        try addColumn("projects", "position INTEGER")
     }
 
     /// Adds a column unless it is there. Another process adding it at the same moment (both
@@ -180,7 +186,7 @@ final class Database {
     deinit { sqlite3_close(db) }
 
     func projects(in organization: UUID) throws -> [Project] {
-        let stmt = try prepare("SELECT id, name, path FROM projects WHERE organization = ? ORDER BY name COLLATE NOCASE")
+        let stmt = try prepare("SELECT id, name, path FROM projects WHERE organization = ? ORDER BY position IS NULL, position, name COLLATE NOCASE")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, organization.uuidString)
         var result: [Project] = []
@@ -200,6 +206,45 @@ final class Database {
         bind(stmt, 2, path)
         bind(stmt, 3, organization.uuidString)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// Keeps `ids` in this order, as the user dragged them in the sidebar.
+    func setProjectOrder(_ ids: [Int64]) throws {
+        try setPositions(ids.map { "\($0)" }, sql: "UPDATE projects SET position = ? WHERE id = ?")
+    }
+
+    /// Where the user dragged worktrees, by `Worktree.id`; one never moved has none.
+    func worktreePositions() throws -> [String: Int] {
+        let stmt = try prepare("SELECT worktree, position FROM worktree_positions")
+        defer { sqlite3_finalize(stmt) }
+        var result: [String: Int] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result[String(cString: sqlite3_column_text(stmt, 0))] = Int(sqlite3_column_int64(stmt, 1))
+        }
+        return result
+    }
+
+    /// Keeps one project's worktrees (by `Worktree.id`) in this order.
+    func setWorktreeOrder(_ ids: [String]) throws {
+        try setPositions(ids, sql: "INSERT OR REPLACE INTO worktree_positions (position, worktree) VALUES (?, ?)")
+    }
+
+    /// Runs `sql` (position, key) for each of `keys`, its index as the position, in one transaction.
+    private func setPositions(_ keys: [String], sql: String) throws {
+        try execute("BEGIN")
+        do {
+            for (position, key) in keys.enumerated() {
+                let stmt = try prepare(sql)
+                defer { sqlite3_finalize(stmt) }
+                sqlite3_bind_int64(stmt, 1, Int64(position))
+                bind(stmt, 2, key)
+                guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+            }
+            try execute("COMMIT")
+        } catch {
+            try? execute("ROLLBACK")
+            throw error
+        }
     }
 
     func deleteProject(id: Int64) throws {

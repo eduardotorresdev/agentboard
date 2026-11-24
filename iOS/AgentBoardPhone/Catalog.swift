@@ -9,12 +9,12 @@ import Foundation
     func browse(_ links: [HostLink]) async -> Browse
 }
 
-struct Browse: Equatable {
+struct Browse: Equatable, Codable {
     var organizations: [Organization] = []
     var worktrees: [Worktree] = []
 }
 
-struct Organization: Hashable, Identifiable {
+struct Organization: Hashable, Identifiable, Codable {
     /// Nil when nothing says which organization a project is in (no catalog).
     let id: UUID?
     let name: String
@@ -30,7 +30,7 @@ extension Organization {
     static let local = Organization(id: OrganizationHome.defaultID, name: "Default")
 }
 
-struct Worktree: Identifiable, Hashable {
+struct Worktree: Identifiable, Hashable, Codable {
     let path: String
     var branch: String? = nil
     /// The project's name, and its organization when the catalog knows it.
@@ -38,8 +38,23 @@ struct Worktree: Identifiable, Hashable {
     var organization: UUID? = nil
     /// The host it is on (lowercase id).
     var host: String = ""
+    /// The project's own checkout, not an added worktree.
+    var isMain = false
+    /// The name the user or an agent gave it on the Mac, from the catalog.
+    var name: String? = nil
+    /// Its place in its project, and the project's in its organization, as the Mac's sidebar has them.
+    var position: Int? = nil
+    var projectPosition: Int? = nil
     var id: String { host + ":" + path }
-    var title: String { branch ?? (path as NSString).lastPathComponent }
+    /// As the Mac's sidebar (`WorktreeTitle`): its name, else "Main" or the folder made readable; never the branch.
+    var title: String {
+        if let name { return name }
+        if isMain { return "Main" }
+        let folder = (path as NSString).lastPathComponent
+        let words = folder.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ").joined(separator: " ")
+        return words.isEmpty ? folder : words.prefix(1).uppercased() + words.dropFirst()
+    }
 }
 
 /// Organization → project → worktrees, as the Mac's sidebar has them.
@@ -72,9 +87,13 @@ struct OrganizationGroup: Identifiable, Equatable {
             }
         }
         for index in result.indices {
-            result[index].projects.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            // As the Mac orders them; what it never placed goes after, by name.
+            result[index].projects.sort {
+                let a = $0.worktrees.compactMap(\.projectPosition).min() ?? .max, b = $1.worktrees.compactMap(\.projectPosition).min() ?? .max
+                return a != b ? a < b : $0.name.localizedStandardCompare($1.name) == .orderedAscending
+            }
             for p in result[index].projects.indices {
-                result[index].projects[p].worktrees.sort { ($0.title, $0.host) < ($1.title, $1.host) }
+                result[index].projects[p].worktrees.sort { ($0.position ?? .max, $0.title, $0.host) < ($1.position ?? .max, $1.title, $1.host) }
             }
         }
         return result
@@ -89,8 +108,8 @@ struct AccountCatalog: CatalogSource {
     /// The parts of `CatalogDocument` (Sources/AgentBoard/Catalog) the phone reads.
     struct Document: Decodable {
         struct Organization: Decodable { let id: UUID; let name: String; var color: Int? }
-        struct Project: Decodable { let organization: UUID; let name: String; let path: String }
-        struct Entry: Decodable { let project: String; let host: String; let path: String; let branch: String? }
+        struct Project: Decodable { let organization: UUID; let name: String; let path: String; var position: Int? }
+        struct Entry: Decodable { let project: String; let host: String; let path: String; let branch: String?; var isMain: Bool?; var title: String?; var position: Int? }
         let organizations: [Organization]
         let projects: [Project]
         let worktrees: [Entry]
@@ -176,7 +195,8 @@ struct AccountCatalog: CatalogSource {
         let host = hostID.lowercased()
         return (document?.worktrees ?? []).filter { $0.host.lowercased() == host }.map { entry in
             let project = document?.projects.first { $0.path == entry.project }
-            return Worktree(path: entry.path, branch: entry.branch, project: project?.name ?? "", organization: project?.organization, host: host)
+            return Worktree(path: entry.path, branch: entry.branch, project: project?.name ?? "", organization: project?.organization, host: host,
+                            isMain: entry.isMain ?? false, name: entry.title, position: entry.position, projectPosition: project?.position)
         }
     }
 
@@ -198,6 +218,7 @@ struct AccountCatalog: CatalogSource {
             if let project = projects.first(where: { ($0.path as NSString).lastPathComponent == found[index].project }) {
                 found[index].project = project.name
                 found[index].organization = project.organization
+                found[index].projectPosition = project.position
             }
         }
         // What the host's board shows (and the catalog lists for it) that git didn't: cards in a folder outside any clone.
@@ -206,7 +227,14 @@ struct AccountCatalog: CatalogSource {
         where !found.contains(where: { $0.path == extra.path }) {
             found.append(extra)
         }
-        for index in found.indices { found[index].host = host }
+        let listed = Self.listed(on: host, in: document)
+        for index in found.indices {
+            found[index].host = host
+            let entry = listed.first { $0.path == found[index].path }
+            found[index].name = entry?.name
+            found[index].position = entry?.position
+            found[index].projectPosition = found[index].projectPosition ?? entry?.projectPosition
+        }
         return found
     }
 
@@ -222,8 +250,23 @@ struct AccountCatalog: CatalogSource {
                 if line.hasPrefix("worktree ") { path = String(line.dropFirst(9)) }
                 if line.hasPrefix("branch ") { branch = String(line.dropFirst(7)).replacingOccurrences(of: "refs/heads/", with: "") }
             }
-            if let path, !result.contains(where: { $0.path == path }) { result.append(Worktree(path: path, branch: branch, project: project)) }
+            // git lists the checkout itself first for each project.
+            let isMain = !result.contains { $0.project == project }
+            if let path, !result.contains(where: { $0.path == path }) { result.append(Worktree(path: path, branch: branch, project: project, isMain: isMain)) }
         }
         return result
+    }
+}
+
+/// The home's last hosts and worktrees, shown at once on launch while they load again.
+enum BrowseCache {
+    struct Snapshot: Codable { var hosts: [Host]; var browse: Browse }
+    private static var file: URL { URL.cachesDirectory.appendingPathComponent("browse.json") }
+
+    static func load() -> Snapshot? { (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Snapshot.self, from: $0) } }
+
+    static func save(_ snapshot: Snapshot?) {
+        guard let snapshot else { try? FileManager.default.removeItem(at: file); return }
+        try? JSONEncoder().encode(snapshot).write(to: file, options: .atomic)
     }
 }

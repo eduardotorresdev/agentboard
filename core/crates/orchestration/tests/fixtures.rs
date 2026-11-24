@@ -179,7 +179,7 @@ fn events_encode_as_swift_does() {
     assert_eq!(decisions[0].cards[0].evidence, Evidence::Image { before: Some(id(6)), after: id(7) });
     assert_eq!(decisions[0].cards[1].evidence, Evidence::Image { before: None, after: id(7) });
     assert_eq!((decisions[0].organization, decisions[0].since, decisions[0].state), (Some(id(8)), DATE, DecisionState::Open));
-    assert_eq!(decisions[1].cards[0].evidence, Evidence::Diagram { svg: "<svg viewBox=\"0 0 9 9\"/>".into() });
+    assert_eq!(decisions[1].cards[0].evidence, Evidence::Diagram { svg: "<svg viewBox=\"0 0 9 9\"/>".into(), before: None });
     assert_eq!(decisions[1].ask.variants().iter().map(Variant::title).collect::<Vec<_>>(), ["A - Core", "B - Direct"]);
     assert_eq!((decisions[1].blocking, decisions[1].closing, decisions[1].state, decisions[1].answer.clone()), (true, true, DecisionState::AwaitingEcho, Some(Answer::UseRecommended {})));
     assert_eq!((decisions[2].cards[0].evidence.clone(), decisions[2].cards[1].evidence.clone()), (Evidence::Browser { id: id(5) }, Evidence::Video { id: id(7) }));

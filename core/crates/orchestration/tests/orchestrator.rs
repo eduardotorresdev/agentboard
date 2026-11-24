@@ -1219,7 +1219,7 @@ fn agents_add_post_its() {
 fn file_trees_are_in_the_way_of_new_cards() {
     let core = Core::new();
     let a = agent("Ada", &core.folder);
-    let mut board = Board::open(&core);
+    let board = Board::open(&core);
     board.add(&[&a]);
     wait_until("the card", || core.card("Ada").is_some());
     // Where a post-it would go, a file tree is put first.
@@ -1643,7 +1643,7 @@ fn a_validation_is_opened_answered_and_closed() {
     let (drawn, failed) = core.call("decision_open", decision_arguments(|arguments| drop(arguments.insert("cards".into(), json!([{"claim": "The answer goes to the core", "evidence": {"type": "diagram", "svg": svg}, "reference": "Before, the Mac answered alone."}])))), a.id);
     assert!(!failed, "{drawn}");
     let diagram = core.decisions().remove(0);
-    assert_eq!(diagram.cards[0].evidence, Evidence::Diagram { svg });
+    assert_eq!(diagram.cards[0].evidence, Evidence::Diagram { svg, before: None });
     board.send(BoardRequest::AnswerDecision { id: diagram.id, answer: Answer::Ok {} });
     wait_until("the diagram closed", || core.decisions().is_empty());
     board.wait("seen closed once", |events| {

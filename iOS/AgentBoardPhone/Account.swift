@@ -26,7 +26,7 @@ enum Keychain {
 }
 
 /// A host of the account, as `GET /v1/hosts` lists it.
-struct Host: Decodable, Identifiable, Hashable {
+struct Host: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let platform: String?
@@ -143,6 +143,7 @@ struct AccountServer {
         let server = server
         Task { _ = try? await server.call("POST", "v1/logout") }
         Keychain.write("token", nil)
+        BrowseCache.save(nil)
         token = nil
     }
 }

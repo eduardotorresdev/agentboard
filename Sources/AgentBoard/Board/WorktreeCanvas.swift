@@ -56,7 +56,6 @@ struct WorktreeCanvas: View {
                 }
                 .layoutPriority(1)
                 VStack(alignment: .trailing, spacing: 8) {
-                    AppUsage()
                     if !board.isZen {
                         TemplatesMenu(board: board, database: database, project: project, isEmpty: isEmpty,
                                       templates: templates, reload: reloadTemplates)
@@ -425,25 +424,24 @@ struct ToolbarButtonStyle: ButtonStyle {
 
 /// What the board itself uses, the app and its core together (not the agents they run),
 /// sampled every two seconds.
-private struct AppUsage: View {
+struct AppUsage: View {
     @State private var stats: RunnerStats?
 
     var body: some View {
-        Group {
-            if let stats {
-                HStack(spacing: 10) {
-                    Label(stats.cpu.map { String(format: "%.0f%%", $0) } ?? "–", systemImage: "cpu")
-                    Label(ByteCountFormatter.string(fromByteCount: Int64(stats.memory), countStyle: .memory), systemImage: "memorychip")
-                }
-                .font(.system(size: 11, weight: .medium).monospacedDigit())
-                .foregroundStyle(Theme.line.opacity(0.5))
-                .padding(.horizontal, 10)
-                .frame(height: 24)
-                .modifier(GlassCapsule())
-                .help(L("CPU and memory the board uses, without its agents."))
-                .transition(.opacity)
-            }
+        // Always laid out, dashes until the first sample: an empty toolbar item is dropped, and its task never runs.
+        HStack(spacing: 10) {
+            Label(stats?.cpu.map { String(format: "%.0f%%", $0) } ?? "–", systemImage: "cpu")
+            Label(stats.map { ByteCountFormatter.string(fromByteCount: Int64($0.memory), countStyle: .memory) } ?? "–", systemImage: "memorychip")
         }
+        // A toolbar shows labels as icons only by default.
+        .labelStyle(.titleAndIcon)
+        .font(Theme.Font.caption.monospacedDigit())
+        // On the white top bar, not the sky: muted ink keeps it readable.
+        .foregroundStyle(Theme.inkMuted)
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .modifier(GlassCapsule())
+        .help(L("CPU and memory the board uses, without its agents."))
         .task {
             var previous: ProcessInspector.Sample?
             let core = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("AgentBoardCore")

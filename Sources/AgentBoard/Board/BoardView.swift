@@ -223,6 +223,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var runnerChrome: [UUID: RunnerChromeLayer] = [:]
     /// Each agent card's composer, below the card.
     private var composers: [UUID: ZoomedView] = [:]
+    /// When each worktree was last shown or had an agent at work: its hidden views are kept this long after.
+    private var worktreeActive: [String: Date] = [:]
+    private static let hiddenViewsTTL: TimeInterval = 10 * 60
     /// Project and worktree of this board, for the balloons' title.
     var place = ProjectStore.Place(worktree: "")
     /// Decision balloons, by agent: its questions show one after the other in the same balloon.
@@ -256,6 +259,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// The lines hang as ropes between the handles they were drawn to; `routes` is where each
     /// one is now, for finding the line under the pointer and sending messages along it.
     private var ropes: [UUID: Rope] = [:]
+    /// Ropes of the lines on other worktrees, as they hung when the board left them.
+    /// shortcut: a removed line's rope stays here until the board closes; prune if boards live for days with heavy churn.
+    private var parkedRopes: [UUID: Rope] = [:]
     private var routes: [UUID: Route] = [:]
     /// The handles picked for lines made without them (by an agent), so their ends stay put.
     private var chosenSides: [UUID: (Side, Side)] = [:]
@@ -700,11 +706,23 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             runnerChrome[id] = nil
             dirty.remove(id)
         }
+        worktreeActive[worktree] = .now
+        for record in store.agents where record.organizationID == store.organizationID
+            && [.running, .waiting].contains(store.cardStatus(record)) {
+            worktreeActive[record.worktree] = .now
+        }
         for (id, view) in composers where !ids.contains(id) {
+            // Off this worktree it stays built, hidden, so switching back doesn't rebuild its SwiftUI.
+            // Only the shown organization's: switching organizations frees the others.
+            let record = store.record(id)
+            if let record, record.organizationID == store.organizationID, keepsHiddenViews(of: record.worktree) {
+                view.isHidden = true
+                continue
+            }
             view.removeFromSuperview()
             composers[id] = nil
-            // Off this worktree it keeps its draft; removed from the board it doesn't.
-            if store.record(id) == nil { ComposerDrafts.forget(id) }
+            // Off this organization it keeps its draft; removed from the board it doesn't.
+            if record == nil { ComposerDrafts.forget(id) }
         }
         let onScreen = isOnScreen
         var visible = Set<UUID>()
@@ -779,6 +797,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if !dirty.isEmpty { displayLink?.isPaused = false }
     }
 
+    /// Another worktree's views stay built until it has been idle and away for `hiddenViewsTTL`.
+    private func keepsHiddenViews(of worktree: String) -> Bool {
+        worktreeActive[worktree].map { Date.now.timeIntervalSince($0) < Self.hiddenViewsTTL } ?? false
+    }
+
     /// The field at the bottom of the agent card, laid out in world points and scaled with the
     /// camera like the rest of the card.
     private func placeComposer(for record: AgentRecord) {
@@ -790,6 +813,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             addSubview(view)
             return view
         }()
+        view.isHidden = false
         let rect = CardMetrics.composer(of: record)
         view.place(screen(rect), size: rect.size, zoom: zoom)
     }
@@ -937,13 +961,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             link.removeFromSuperlayer()
             links[id] = nil
         }
+        // Other worktrees' ropes are parked, not dropped: settling one again at rest is the slow part of a switch.
+        for (id, rope) in ropes where !ids.contains(id) { parkedRopes[id] = rope }
         ropes = ropes.filter { ids.contains($0.key) }
         routes = routes.filter { ids.contains($0.key) }
         if let hoveredLink, !ids.contains(hoveredLink) { self.hoveredLink = nil }
         for connection in connections {
             guard let (a, b) = anchors(of: connection, in: frames) else { continue }
             // Lines already there when the board opens hang at rest; drawn ones keep their swing.
-            var rope = ropes[connection.id] ?? .resting(from: a, to: b)
+            var rope = ropes[connection.id] ?? parkedRopes.removeValue(forKey: connection.id) ?? .resting(from: a, to: b)
             rope.tie(a, b)
             ropes[connection.id] = rope
             if links[connection.id] == nil {
@@ -3400,6 +3426,12 @@ extension BoardView {
             fileTreeCards[id] = nil
         }
         for (id, views) in fileTreeViews where !ids.contains(id) {
+            // Another worktree's tree stays built, hidden, for when the user comes back.
+            if let tree = fileTrees.record(id), tree.organizationID == store.organizationID, keepsHiddenViews(of: tree.worktree) {
+                views.content.isHidden = true
+                views.bar.isHidden = true
+                continue
+            }
             views.content.removeFromSuperview()
             views.bar.removeFromSuperview()
             fileTreeViews[id] = nil
@@ -3436,6 +3468,8 @@ extension BoardView {
                 return views
             }()
             if views.content.superview == nil { addSubview(views.content) }
+            views.content.isHidden = false
+            views.bar.isHidden = false
             let content = CardMetrics.content(of: record.frame)
             if views.host.size != content.size { views.host.size = content.size }
             if views.host.zoom != zoom { views.host.zoom = zoom }

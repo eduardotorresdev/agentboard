@@ -151,8 +151,8 @@
    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect x=\"ten\" width=\"5\" height=\"5\"/></svg>"
   },
   {
-   "name": "over 64 KB",
-   "refused": "The diagram is 67268 bytes; the limit is 65536. Draw less, or split it into cards.",
+   "name": "over 256 KB",
+   "refused": "The diagram is 263268 bytes; the limit is 262144. Draw less, or split it into cards.",
    "parts": [
     [
      "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\">",
@@ -160,7 +160,7 @@
     ],
     [
      "<rect width=\"1\" height=\"1\"/>",
-     2400
+     9400
     ],
     [
      "</svg>",

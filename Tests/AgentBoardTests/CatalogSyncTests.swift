@@ -224,6 +224,39 @@ private struct Mac {
         #expect(try mac.database.organizations().first { $0.id == self.organization }?.icon == nil)
         #expect(catalog.avatars[self.organization]?.version == 3)
     }
+
+    /// The order the user dragged in the sidebar stays in the database and goes up with the catalog,
+    /// so the phone lists them the same way.
+    @Test func theSidebarsOrderIsKeptAndGoesUp() async throws {
+        let mac = try macWithApp()
+        try mac.database.insertProject(name: "api", path: "/p/api", organization: organization)
+        try mac.database.insertProject(name: "web", path: "/p/web", organization: organization)
+        let byName = try mac.database.projects(in: organization)
+        #expect(byName.map(\.name) == ["api", "app", "web"])
+        try mac.database.setProjectOrder([byName[2].id, byName[0].id])
+        // One never moved goes after the moved ones.
+        #expect(try mac.database.projects(in: organization).map(\.name) == ["web", "api", "app"])
+
+        let listing: (String) -> [Worktree]? = { [Worktree(path: $0, branch: "main"), Worktree(path: $0 + "-a", branch: "a"), Worktree(path: $0 + "-b", branch: "b")] }
+        try mac.database.setWorktreeOrder(["/p/app-b", "/p/app"])
+        #expect(ProjectStore.ordered(listing("/p/app")!, by: try mac.database.worktreePositions()).map(\.path) == ["/p/app-b", "/p/app", "/p/app-a"])
+
+        let catalog = FakeCatalog()
+        _ = try await mac.sync(catalog, listing: listing)
+        #expect(catalog.current.projects.sorted { $0.position! < $1.position! }.map(\.name) == ["web", "api", "app"])
+        let app = catalog.current.worktrees.filter { $0.project == "/p/app" }
+        #expect(Dictionary(uniqueKeysWithValues: app.map { ($0.path, $0.position) }) == ["/p/app-b": 0, "/p/app": 1, "/p/app-a": 2])
+        // Only the order changed: it still goes up.
+        try mac.database.setProjectOrder(try mac.database.projects(in: organization).reversed().map(\.id))
+        _ = try await mac.sync(catalog, listing: listing)
+        #expect(catalog.current.projects.sorted { $0.position! < $1.position! }.map(\.name) == ["app", "api", "web"])
+    }
+
+    /// A catalog written before places existed still reads.
+    @Test func aCatalogWithoutPlacesDecodes() throws {
+        let data = Data(#"{"organizations":[],"projects":[{"organization":"6F9619FF-8B86-D011-B42D-00C04FC964FF","name":"app","path":"/p/app"}],"worktrees":[]}"#.utf8)
+        #expect(try CatalogCodec.decode(data).projects.first?.position == nil)
+    }
 }
 
 /// The relay the app runs as this Mac's host, built by `cargo build -p agentboard` in core/.

@@ -12,7 +12,7 @@ public struct SVGDiagram: Equatable, Sendable {
         public let reason: String
     }
 
-    public static let maxBytes = 65_536
+    public static let maxBytes = 262_144
     public static let maxElements = 2_000
     /// How deep `g`, `use` and `marker` may nest, counting what a `use` brings in.
     public static let maxDepth = 16

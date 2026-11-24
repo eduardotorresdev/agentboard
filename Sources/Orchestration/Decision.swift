@@ -20,7 +20,8 @@ public struct Decision: Codable, Equatable, Identifiable, Sendable {
         case browser(id: UUID)
         case video(id: UUID)
         /// An SVG the agent drew, checked by `SVGDiagram` (what passes is what gets drawn).
-        case diagram(svg: String)
+        /// `before`: the diagram it replaces, shown behind the same divider as an image's.
+        case diagram(svg: String, before: String? = nil)
     }
 
     /// A doubt at an exact place of the evidence, `x` and `y` from 0 to 1 from its top left.
@@ -218,11 +219,14 @@ struct DecisionDraft: Equatable {
                 guard let svg = text(evidence["svg"]) else {
                     throw refuse("Card \(number): give the diagram's SVG in `svg`.")
                 }
-                do { _ = try SVGDiagram(svg) } catch let refused as SVGDiagram.Refused {
-                    throw refuse("Card \(number): the diagram can't be drawn. \(refused.reason)")
+                for (drawing, which) in [(svg, "diagram"), (text(evidence["before"]), "`before` diagram")] {
+                    guard let drawing else { continue }
+                    do { _ = try SVGDiagram(drawing) } catch let refused as SVGDiagram.Refused {
+                        throw refuse("Card \(number): the \(which) can't be drawn. \(refused.reason)")
+                    }
                 }
                 target = svg
-                before = nil
+                before = text(evidence["before"])
             } else {
                 guard let after = text(evidence["after"]) else {
                     throw refuse("Card \(number): give the image to evaluate in `after` (and the one it replaces in `before`).")

@@ -34,7 +34,12 @@ pub enum Evidence {
     Browser { id: Uuid },
     Video { id: Uuid },
     /// An SVG the agent drew, checked by `runtime::svg_diagram`.
-    Diagram { svg: String },
+    Diagram {
+        svg: String,
+        /// The diagram it replaces, shown behind the same divider as an image's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<String>,
+    },
 }
 
 /// A doubt at an exact place of the evidence, `x` and `y` from 0 to 1 from its top left.
@@ -271,7 +276,11 @@ impl DecisionDraft {
         let (target, before) = if kind == "diagram" {
             let svg = text(evidence.get("svg")).ok_or_else(|| format!("Card {number}: give the diagram's SVG in `svg`."))?;
             runtime::svg_diagram::check(&svg).map_err(|reason| format!("Card {number}: the diagram can't be drawn. {reason}"))?;
-            (svg, None)
+            let before = text(evidence.get("before"));
+            if let Some(before) = &before {
+                runtime::svg_diagram::check(before).map_err(|reason| format!("Card {number}: the `before` diagram can't be drawn. {reason}"))?;
+            }
+            (svg, before)
         } else {
             let after = text(evidence.get("after"))
                 .ok_or_else(|| format!("Card {number}: give the image to evaluate in `after` (and the one it replaces in `before`)."))?;

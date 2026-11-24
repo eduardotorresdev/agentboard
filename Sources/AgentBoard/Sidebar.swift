@@ -18,6 +18,15 @@ struct Sidebar: View {
     /// The project a worktree is being added to.
     @State private var addingWorktreeTo: Project?
     @Namespace private var selectionSpace
+    /// The project or worktree being dragged to another place, if any.
+    @State private var drag: ReorderDrag?
+    /// Each reorderable item's height with the space after it, by `reorderKey`.
+    @State private var heights: [String: CGFloat] = [:]
+    /// How far the dragged item follows the pointer; apart from `drag`, so it moves at once while
+    /// the places it passes open and close with a spring.
+    @State private var dragOffset: CGFloat = 0
+    /// True while a press that may become a drag is held: a drag the system cancels (no `onEnded`) is undone when it goes false.
+    @GestureState private var isPressing = false
 
     static let width: CGFloat = 264
 
@@ -31,9 +40,22 @@ struct Sidebar: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     boardRow
-                    ForEach(store.projects) { project in
-                        group(for: project)
+                    let keys = store.projects.map { Self.reorderKey($0) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(store.projects) { project in
+                            let key = Self.reorderKey(project)
+                            reorderable(key, in: keys, spacing: 22) {
+                                group(for: project, reorder: reorderGesture(key, in: keys) { order in
+                                    store.moveProjects(to: order.compactMap { key in store.projects.first { Self.reorderKey($0) == key }?.id })
+                                })
+                            }
+                            // Over the other projects while one of its worktrees is dragged.
+                            .zIndex(drag.map { dragged in store.worktrees[project.id]?.contains { $0.id == dragged.key } == true } == true ? 1 : 0)
+                        }
+                        reorderEnd(of: keys, spacing: 22)
                     }
+                    // Each item keeps its own space after it, so a dragged one takes it along; not the last.
+                    .padding(.bottom, -22)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 16)
@@ -43,6 +65,16 @@ struct Sidebar: View {
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
+        .onChange(of: isPressing) { _, pressing in
+            guard !pressing else { return }
+            // Next turn: a normal release's `onEnded` runs around this reset and starts the drop first.
+            Task { @MainActor in
+                if drag?.isDropping == false {
+                    drag = nil
+                    dragOffset = 0
+                }
+            }
+        }
         .background { SidebarBackdrop() }
         .confirmationDialog(pendingRemoval.map { L("Remove \(store.displayName(of: $0.worktree))?") } ?? "",
                             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
@@ -93,16 +125,20 @@ struct Sidebar: View {
         store.removeWorktree(removal.worktree, from: removal.project, force: !removal.work.isEmpty)
     }
 
-    private func group(for project: Project) -> some View {
+    private func group(for project: Project, reorder: some Gesture) -> some View {
         let isCollapsed = collapsed.contains(project.id)
         let worktrees = store.worktrees[project.id]
+        let keys = worktrees?.map(\.id) ?? []
         return VStack(alignment: .leading, spacing: 6) {
             ProjectHeader(name: project.name, count: worktrees?.count, isCollapsed: isCollapsed,
                           onAddWorktree: worktrees == nil ? nil : { addingWorktreeTo = project }) {
+                // The release of a hold or drag isn't a click.
+                guard drag == nil else { return }
                 withAnimation(.snappy(duration: 0.28)) {
                     if isCollapsed { collapsed.remove(project.id) } else { collapsed.insert(project.id) }
                 }
             }
+            .simultaneousGesture(reorder)
             .contextMenu {
                 if worktrees != nil {
                     Button(L("New Worktree…")) { addingWorktreeTo = project }
@@ -111,11 +147,15 @@ struct Sidebar: View {
                 Button(L("Remove Project"), role: .destructive) { store.removeProject(project) }
             }
             if !isCollapsed {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 0) {
                     if let worktrees {
                         ForEach(worktrees) { worktree in
-                            row(for: worktree, in: project)
+                            reorderable(worktree.id, in: keys, spacing: 2) {
+                                row(for: worktree, in: project)
+                                    .simultaneousGesture(reorderGesture(worktree.id, in: keys) { store.moveWorktrees(to: $0) })
+                            }
                         }
+                        reorderEnd(of: keys, spacing: 2)
                     } else {
                         Text(L("Not a git repository"))
                             .font(Theme.Font.caption)
@@ -124,11 +164,74 @@ struct Sidebar: View {
                             .padding(.leading, WorktreeRow.textInset)
                     }
                 }
+                .padding(.bottom, -2)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .clipped()
+        // Clipped for folding; wider while a worktree is dragged, so its larger row shows whole.
+        .clipShape(Rectangle().inset(by: drag.map { keys.contains($0.key) } == true ? -24 : 0))
     }
+
+    // MARK: Reordering
+
+    private static func reorderKey(_ project: Project) -> String { "project:\(project.id)" }
+
+    /// An item of a list (`keys`, in order) the user can reorder, with the `spacing` after it. While
+    /// one of the list is dragged, the place it would land opens over the item it goes before, and
+    /// the dragged one leaves its own place to follow the pointer, larger.
+    private func reorderable(_ key: String, in keys: [String], spacing: CGFloat, @ViewBuilder content: () -> some View) -> some View {
+        let drag = drag?.keys == keys ? drag : nil
+        let isDragged = drag?.key == key
+        return VStack(alignment: .leading, spacing: 0) {
+            if let drag, !isDragged { ReorderPlaceholder(height: drag.slot(before: key), spacing: spacing) }
+            content()
+                .scaleEffect(isDragged && drag?.isDropping == false ? 1.15 : 1)
+                .animation(.bouncy(duration: 0.3), value: isDragged && drag?.isDropping == false)
+                .padding(.bottom, spacing)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[key] = $0 }
+                // The pointer's move alone, apart from making up for the place opening above.
+                .offset(y: isDragged ? dragOffset : 0)
+                .offset(y: isDragged ? -(drag?.raised ?? 0) : 0)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(height: isDragged ? 0 : nil, alignment: .top)
+        }
+        .zIndex(isDragged ? 1 : 0)
+    }
+
+    /// The place at the end of `keys`, open while an item is dragged there.
+    @ViewBuilder private func reorderEnd(of keys: [String], spacing: CGFloat) -> some View {
+        if let drag, drag.keys == keys { ReorderPlaceholder(height: drag.slot(before: nil), spacing: spacing) }
+    }
+
+    /// Press and hold, then drag: moves `key` among `keys`, and on release lands it in its new
+    /// place before handing `onMove` the new order.
+    private func reorderGesture(_ key: String, in keys: [String], onMove: @escaping ([String]) -> Void) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.3)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .updating($isPressing) { _, pressing, _ in pressing = true }
+            .onChanged { value in
+                guard case .second(true, let moved) = value, drag?.isDropping != true else { return }
+                var next = drag ?? ReorderDrag(key: key, keys: keys, heights: heights)
+                next.move(to: moved?.translation.height ?? 0)
+                dragOffset = next.translation
+                if drag == nil || next.target == drag?.target { drag = next } else {
+                    withAnimation(.snappy(duration: 0.3)) { drag = next }
+                }
+            }
+            .onEnded { _ in
+                guard var landing = drag, landing.keys == keys else { drag = nil; return }
+                landing.isDropping = true
+                landing.translation = landing.top(landing.target) - landing.start
+                withAnimation(.snappy(duration: 0.3), completionCriteria: .removed) {
+                    drag = landing
+                    dragOffset = landing.translation
+                } completion: {
+                    onMove(landing.order)
+                    drag = nil
+                }
+            }
+    }
+
 
     /// The user's own board, over the projects: it belongs to none.
     private var boardRow: some View {
@@ -164,8 +267,8 @@ struct Sidebar: View {
                            host: worktree.host == nil ? nil : host?.name ?? "", isOffline: host?.online == false,
                            isSelected: selection == tag, isRenaming: renaming == worktree,
                            selectionSpace: selectionSpace,
-                           onSelect: { withAnimation(.snappy(duration: 0.3)) { selection = tag } },
-                           onStartRename: { renaming = worktree },
+                           onSelect: { if drag == nil { withAnimation(.snappy(duration: 0.3)) { selection = tag } } },
+                           onStartRename: { if drag == nil { renaming = worktree } },
                            onRename: { draft, opened, confirmed in
                                if case .set(let name) = WorktreeTitle.renameAction(draft: draft, opened: opened,
                                                                                     openedIsFallback: source == .fallback, confirmed: confirmed) {
@@ -192,6 +295,65 @@ struct Sidebar: View {
                                 runners: cards.filter { $0.runner != nil }.map(agents.cardStatus).max())
     }
 
+}
+
+/// A project or worktree the user is dragging among its list (`keys`, as shown when the drag began).
+/// Places are counted among the others: `target` is where it lands, before the item at that index.
+private struct ReorderDrag {
+    let key: String
+    let keys: [String]
+    /// Each item's height with the space after it.
+    let heights: [String: CGFloat]
+    var translation: CGFloat = 0
+    var target: Int
+    var isDropping = false
+
+    init(key: String, keys: [String], heights: [String: CGFloat]) {
+        self.key = key
+        self.keys = keys
+        self.heights = heights
+        target = keys.firstIndex(of: key) ?? 0
+    }
+
+    private var others: [String] { keys.filter { $0 != key } }
+    private var height: CGFloat { heights[key] ?? 0 }
+    private var origin: Int { keys.firstIndex(of: key) ?? 0 }
+
+    /// Where the item at `index` among the others starts, with the dragged one out of the list.
+    func top(_ index: Int) -> CGFloat { others.prefix(index).reduce(0) { $0 + (heights[$1] ?? 0) } }
+    /// Where the dragged one started.
+    var start: CGFloat { top(origin) }
+    /// How far the open place above pushes the dragged one's own (empty) place down.
+    var raised: CGFloat { target < origin ? height : 0 }
+    /// The open place's height before `key` (nil: the end).
+    func slot(before key: String?) -> CGFloat { (key.flatMap(others.firstIndex) ?? others.count) == target ? height : 0 }
+    var order: [String] {
+        var order = others
+        order.insert(key, at: target)
+        return order
+    }
+
+    /// Follows the pointer, kept within the list, and lands before the first item whose middle is below its own.
+    mutating func move(to translation: CGFloat) {
+        self.translation = min(max(translation, -start), top(others.count) - start)
+        let middle = start + self.translation + height / 2
+        target = others.indices.filter { top($0) + (heights[others[$0]] ?? 0) / 2 < middle }.count
+    }
+}
+
+/// Where a dragged item will land: its shape, empty, opening from nothing.
+private struct ReorderPlaceholder: View {
+    let height: CGFloat
+    let spacing: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.control)
+            .fill(Theme.surfaceDeep)
+            .padding(.bottom, spacing)
+            .frame(height: height, alignment: .top)
+            .clipped()
+            .accessibilityHidden(true)
+    }
 }
 
 /// A worktree waiting on the user to confirm its removal, with what removing it would lose.
@@ -363,7 +525,8 @@ private struct WorktreeRow: View {
         .background { background }
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onStartRename)
-        .onTapGesture(perform: onSelect)
+        // Simultaneous: a plain second tap gesture would wait out the double-click interval before selecting.
+        .simultaneousGesture(TapGesture().onEnded(onSelect))
         .onHover { isHovered = $0 }
         .animation(.snappy(duration: 0.2), value: isHovered)
         .accessibilityElement(children: .combine)

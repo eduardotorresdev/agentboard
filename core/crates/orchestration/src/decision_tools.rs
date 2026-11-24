@@ -67,11 +67,11 @@ impl<'a> ToolProvider<Turn<'a>> for DecisionTools {
                     "cards": {"type": "array", "description": format!("1 to {MAX_CARDS} cards, one idea each."), "items": {
                         "type": "object", "properties": {
                             "claim": {"type": "string", "description": "What the evidence shows, e.g. `The screen ended up like this`."},
-                            "evidence": {"type": "object", "description": format!("An image on the board, {element}; or a diagram you draw as SVG."), "properties": {
+                            "evidence": {"type": "object", "description": format!("An image on the board, {element}; or, preferred, a diagram you draw as SVG."), "properties": {
                                 "type": {"type": "string", "enum": KINDS},
-                                "svg": {"type": "string", "description": "A diagram's SVG (type diagram): the subset decision_guide describes, at most 64 KB."},
-                                "after": {"type": "string", "description": "The image to evaluate (put a screenshot on the board with image_create)."},
-                                "before": {"type": "string", "description": "The image it replaces, shown behind a draggable divider."},
+                                "svg": {"type": "string", "description": "A diagram's SVG (type diagram): the subset decision_guide describes, at most 256 KB."},
+                                "after": {"type": "string", "description": "The image to evaluate, only for what a diagram can't draw, like a capture of the running app (put it on the board with image_create)."},
+                                "before": {"type": "string", "description": "What it replaces, shown behind a draggable divider: the image's name, or for a diagram its SVG."},
                             }, "required": ["type"]},
                             "reference": {"type": "string", "description": "What to compare against when there is no `before`: the justification or the alternative. Never “we already do it this way”."},
                             "pins": {"type": "array", "description": "Doubts at an exact place of the evidence, within this decision's scope.", "items": {
@@ -157,7 +157,7 @@ fn open(turn: &mut Turn, arguments: &Map<String, Value>, caller: Uuid) -> ToolRe
     let mut cards = Vec::new();
     for (index, card) in draft.cards.iter().enumerate() {
         if card.kind == "diagram" {
-            cards.push(Card { claim: card.claim.clone(), evidence: Evidence::Diagram { svg: card.target.clone() }, reference: card.reference.clone(), pins: card.pins.clone() });
+            cards.push(Card { claim: card.claim.clone(), evidence: Evidence::Diagram { svg: card.target.clone(), before: card.before.clone() }, reference: card.reference.clone(), pins: card.pins.clone() });
             continue;
         }
         let connected = turn.bus.peers_of_kind(caller, &ElementKind::image(), &turn.board);

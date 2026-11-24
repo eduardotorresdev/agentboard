@@ -53,6 +53,11 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(list.map(\.path), ["/h/agentboard/projects/app", "/h/w/feat", "/h/agentboard/projects/api"])
         XCTAssertEqual(list.map(\.project), ["app", "app", "api"])
         XCTAssertEqual(list.map(\.branch), ["main", nil, "dev"])
+        // Titled as the Mac's sidebar: never the branch.
+        XCTAssertEqual(list.map(\.title), ["Main", "Feat", "Main"])
+        var named = list[1]
+        named.name = "Login fix"
+        XCTAssertEqual(named.title, "Login fix")
     }
 
     func testGroupsWorktreesByOrganizationThenProjectAcrossHosts() {
@@ -134,6 +139,19 @@ final class WireTests: XCTestCase {
         XCTAssertEqual(groups.map(\.organization), [.local])
         XCTAssertEqual(groups.first?.organization.id, OrganizationHome.defaultID)
         XCTAssertEqual(groups.first?.projects.map(\.name), ["api", "app"])
+    }
+
+    /// Projects and worktrees in the order the Mac's sidebar has them; what it never placed after, by name.
+    func testProjectsAndWorktreesFollowTheMacsOrder() {
+        let groups = OrganizationGroup.group(Browse(organizations: [], worktrees: [
+            Worktree(path: "/a/app", project: "app", host: "h1", position: 1, projectPosition: 1),
+            Worktree(path: "/a/app-zed", project: "app", host: "h1", position: 0, projectPosition: 1),
+            Worktree(path: "/a/app-new", project: "app", host: "h1", projectPosition: 1),
+            Worktree(path: "/b/web", project: "web", host: "h1", position: 0, projectPosition: 0),
+            Worktree(path: "/c/api", project: "api", host: "h2"),
+        ]))
+        XCTAssertEqual(groups.first?.projects.map(\.name), ["web", "app", "api"])
+        XCTAssertEqual(groups.first?.projects[1].worktrees.map(\.path), ["/a/app-zed", "/a/app", "/a/app-new"])
     }
 
     /// A banner for each agent that starts waiting, but not for one already waiting, nor for one
@@ -222,7 +240,7 @@ final class WireTests: XCTestCase {
         let json: [String: Any] = ["decisions": ["_0": [[
             "id": id.uuidString, "agent": id.uuidString, "framing": "Validate", "state": "open",
             "ask": ["validation": ["question": "Ship?"]],
-            "cards": [["claim": "Flow", "evidence": ["diagram": ["svg": svg]], "reference": "Why", "pins": []],
+            "cards": [["claim": "Flow", "evidence": ["diagram": ["svg": svg, "before": svg]], "reference": "Why", "pins": []],
                       ["claim": "Screen", "evidence": ["image": ["after": after.uuidString]], "pins": []],
                       ["claim": "Page", "evidence": ["browser": ["id": after.uuidString]], "pins": []]],
         ]]]]
@@ -231,6 +249,7 @@ final class WireTests: XCTestCase {
         let cards = try XCTUnwrap(list.first?.cards)
         XCTAssertEqual(cards.map(\.claim), ["Flow", "Screen", "Page"])
         XCTAssertEqual(cards[0].evidence.diagram?.svg, svg)
+        XCTAssertEqual(cards[0].evidence.diagram?.before, svg)
         XCTAssertEqual(cards[0].reference, "Why")
         XCTAssertEqual(cards[1].evidence.image?.after, after)
         XCTAssertNil(cards[2].evidence.image ?? nil)

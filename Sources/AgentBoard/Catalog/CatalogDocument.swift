@@ -35,11 +35,14 @@ public struct CatalogProject: Codable, Equatable, Sendable, Identifiable {
     public var organization: UUID
     public var name: String
     public var path: String
+    /// Its place among its organization's projects in the board's sidebar; nil when unknown.
+    public var position: Int?
 
-    public init(organization: UUID, name: String, path: String) {
+    public init(organization: UUID, name: String, path: String, position: Int? = nil) {
         self.organization = organization
         self.name = name
         self.path = path
+        self.position = position
     }
 }
 
@@ -56,13 +59,20 @@ public struct CatalogWorktree: Codable, Equatable, Sendable, Identifiable {
     public var branch: String?
     /// The checkout itself (a Mac's project folder, or a host's clone), not an added worktree.
     public var isMain: Bool
+    /// The name the user or an agent gave it (see `WorktreeTitle`); nil when it has none.
+    public var title: String?
+    /// Its place among its project's worktrees in the board's sidebar; nil when the sidebar doesn't
+    /// show it (a host's clone itself).
+    public var position: Int?
 
-    public init(project: String, host: String, path: String, branch: String?, isMain: Bool) {
+    public init(project: String, host: String, path: String, branch: String?, isMain: Bool, title: String? = nil, position: Int? = nil) {
         self.project = project
         self.host = host
         self.path = path
         self.branch = branch
         self.isMain = isMain
+        self.title = title
+        self.position = position
     }
 }
 
