@@ -20,15 +20,17 @@ struct Sidebar: View {
     @Namespace private var selectionSpace
     /// The project or worktree being dragged to another place, if any.
     @State private var drag: ReorderDrag?
-    /// Each reorderable item's height with the space after it, by `reorderKey`.
-    @State private var heights: [String: CGFloat] = [:]
+    /// Where each reorderable item is; not observed, so scrolling doesn't redraw the sidebar.
+    @State private var frames = ReorderFrames()
     /// How far the dragged item follows the pointer; apart from `drag`, so it moves at once while
     /// the places it passes open and close with a spring.
-    @State private var dragOffset: CGFloat = 0
+    @State private var dragOffset: CGSize = .zero
     /// True while a press that may become a drag is held: a drag the system cancels (no `onEnded`) is undone when it goes false.
     @GestureState private var isPressing = false
 
     static let width: CGFloat = 264
+    /// Where the dragged item and the pointer are measured.
+    fileprivate static let space = "sidebar"
 
     private var collapsed: Set<Project.ID> {
         get { Set(collapsedIDs.split(separator: ",").compactMap { Int64($0) }) }
@@ -49,8 +51,6 @@ struct Sidebar: View {
                                     store.moveProjects(to: order.compactMap { key in store.projects.first { Self.reorderKey($0) == key }?.id })
                                 })
                             }
-                            // Over the other projects while one of its worktrees is dragged.
-                            .zIndex(drag.map { dragged in store.worktrees[project.id]?.contains { $0.id == dragged.key } == true } == true ? 1 : 0)
                         }
                         reorderEnd(of: keys, spacing: 22)
                     }
@@ -61,17 +61,20 @@ struct Sidebar: View {
                 .padding(.vertical, 16)
             }
             .scrollIndicators(.never)
+            .scrollDisabled(drag != nil)
             AccountBlock(hosts: hosts)
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity)
+        .overlay(alignment: .topLeading) { floating }
+        .coordinateSpace(.named(Self.space))
         .onChange(of: isPressing) { _, pressing in
             guard !pressing else { return }
             // Next turn: a normal release's `onEnded` runs around this reset and starts the drop first.
             Task { @MainActor in
                 if drag?.isDropping == false {
                     drag = nil
-                    dragOffset = 0
+                    dragOffset = .zero
                 }
             }
         }
@@ -168,8 +171,7 @@ struct Sidebar: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        // Clipped for folding; wider while a worktree is dragged, so its larger row shows whole.
-        .clipShape(Rectangle().inset(by: drag.map { keys.contains($0.key) } == true ? -24 : 0))
+        .clipped()
     }
 
     // MARK: Reordering
@@ -177,25 +179,20 @@ struct Sidebar: View {
     private static func reorderKey(_ project: Project) -> String { "project:\(project.id)" }
 
     /// An item of a list (`keys`, in order) the user can reorder, with the `spacing` after it. While
-    /// one of the list is dragged, the place it would land opens over the item it goes before, and
-    /// the dragged one leaves its own place to follow the pointer, larger.
+    /// one of the list is dragged, the dragged one's own place stays open until it heads elsewhere;
+    /// then that place closes as the one it would land in opens over the item it goes before.
     private func reorderable(_ key: String, in keys: [String], spacing: CGFloat, @ViewBuilder content: () -> some View) -> some View {
         let drag = drag?.keys == keys ? drag : nil
         let isDragged = drag?.key == key
         return VStack(alignment: .leading, spacing: 0) {
-            if let drag, !isDragged { ReorderPlaceholder(height: drag.slot(before: key), spacing: spacing) }
+            if let drag { ReorderPlaceholder(height: drag.slot(before: key), spacing: spacing) }
             content()
-                .scaleEffect(isDragged && drag?.isDropping == false ? 1.15 : 1)
-                .animation(.bouncy(duration: 0.3), value: isDragged && drag?.isDropping == false)
-                .padding(.bottom, spacing)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[key] = $0 }
-                // The pointer's move alone, apart from making up for the place opening above.
-                .offset(y: isDragged ? dragOffset : 0)
-                .offset(y: isDragged ? -(drag?.raised ?? 0) : 0)
-                .fixedSize(horizontal: false, vertical: true)
+                .modifier(ReorderMeasure { frames.frames[key] = $0; frames.heights[key] = $0.height + spacing })
+                .padding(.bottom, isDragged ? 0 : spacing)
+                // Drawn floating instead (see `floating`); kept here, out of sight, as its gesture lives on it.
                 .frame(height: isDragged ? 0 : nil, alignment: .top)
+                .clipped()
         }
-        .zIndex(isDragged ? 1 : 0)
     }
 
     /// The place at the end of `keys`, open while an item is dragged there.
@@ -203,35 +200,56 @@ struct Sidebar: View {
         if let drag, drag.keys == keys { ReorderPlaceholder(height: drag.slot(before: nil), spacing: spacing) }
     }
 
+    /// The dragged item, over the whole sidebar where the pointer takes it, on a solid fill.
+    @ViewBuilder private var floating: some View {
+        if let drag {
+            FloatingItem(isDropping: drag.isDropping) {
+                if let project = store.projects.first(where: { Self.reorderKey($0) == drag.key }) {
+                    group(for: project, reorder: TapGesture())
+                } else if let project = store.projects.first(where: { store.worktrees[$0.id]?.contains { $0.id == drag.key } == true }),
+                          let worktree = store.worktrees[project.id]?.first(where: { $0.id == drag.key }) {
+                    row(for: worktree, in: project)
+                }
+            }
+            .frame(width: drag.frame.width, alignment: .topLeading)
+            .offset(x: drag.frame.minX + dragOffset.width, y: drag.frame.minY + dragOffset.height)
+        }
+    }
+
     /// Press and hold, then drag: moves `key` among `keys`, and on release lands it in its new
     /// place before handing `onMove` the new order.
     private func reorderGesture(_ key: String, in keys: [String], onMove: @escaping ([String]) -> Void) -> some Gesture {
         LongPressGesture(minimumDuration: 0.3)
-            .sequenced(before: DragGesture(minimumDistance: 0))
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space)))
             .updating($isPressing) { _, pressing, _ in pressing = true }
             .onChanged { value in
                 guard case .second(true, let moved) = value, drag?.isDropping != true else { return }
-                var next = drag ?? ReorderDrag(key: key, keys: keys, heights: heights)
-                next.move(to: moved?.translation.height ?? 0)
-                dragOffset = next.translation
+                guard var next = drag ?? frames.frames[key].map({ ReorderDrag(key: key, keys: keys, frame: $0, heights: frames.heights) }) else { return }
+                let translation = moved?.translation ?? .zero
+                next.move(to: translation.height)
+                dragOffset = translation
                 if drag == nil || next.target == drag?.target { drag = next } else {
-                    withAnimation(.snappy(duration: 0.3)) { drag = next }
+                    withAnimation(.snappy(duration: 0.35)) { drag = next }
                 }
             }
             .onEnded { _ in
                 guard var landing = drag, landing.keys == keys else { drag = nil; return }
                 landing.isDropping = true
-                landing.translation = landing.top(landing.target) - landing.start
-                withAnimation(.snappy(duration: 0.3), completionCriteria: .removed) {
+                withAnimation(.snappy(duration: 0.35, extraBounce: 0.1), completionCriteria: .removed) {
                     drag = landing
-                    dragOffset = landing.translation
+                    // Onto the open place: its top, with the list laid out as now.
+                    dragOffset = CGSize(width: 0, height: landing.top(landing.target) - landing.start)
                 } completion: {
-                    onMove(landing.order)
-                    drag = nil
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) {
+                        onMove(landing.order)
+                        drag = nil
+                        dragOffset = .zero
+                    }
                 }
             }
     }
-
 
     /// The user's own board, over the projects: it belongs to none.
     private var boardRow: some View {
@@ -298,19 +316,22 @@ struct Sidebar: View {
 }
 
 /// A project or worktree the user is dragging among its list (`keys`, as shown when the drag began).
-/// Places are counted among the others: `target` is where it lands, before the item at that index.
+/// Places are counted among the others: `target` is where it lands, before the item at that index;
+/// the one it started in (`origin`) is its own place, which stays open.
 private struct ReorderDrag {
     let key: String
     let keys: [String]
+    /// Where it was when the drag began, in the sidebar's space.
+    let frame: CGRect
     /// Each item's height with the space after it.
     let heights: [String: CGFloat]
-    var translation: CGFloat = 0
     var target: Int
     var isDropping = false
 
-    init(key: String, keys: [String], heights: [String: CGFloat]) {
+    init(key: String, keys: [String], frame: CGRect, heights: [String: CGFloat]) {
         self.key = key
         self.keys = keys
+        self.frame = frame
         self.heights = heights
         target = keys.firstIndex(of: key) ?? 0
     }
@@ -323,21 +344,59 @@ private struct ReorderDrag {
     func top(_ index: Int) -> CGFloat { others.prefix(index).reduce(0) { $0 + (heights[$1] ?? 0) } }
     /// Where the dragged one started.
     var start: CGFloat { top(origin) }
-    /// How far the open place above pushes the dragged one's own (empty) place down.
-    var raised: CGFloat { target < origin ? height : 0 }
-    /// The open place's height before `key` (nil: the end).
-    func slot(before key: String?) -> CGFloat { (key.flatMap(others.firstIndex) ?? others.count) == target ? height : 0 }
+    /// The open place's height before `key` (the dragged one's own place, nil: the end).
+    func slot(before key: String?) -> CGFloat {
+        if key == self.key { return target == origin ? height : 0 }
+        return target != origin && (key.flatMap(others.firstIndex) ?? others.count) == target ? height : 0
+    }
     var order: [String] {
         var order = others
         order.insert(key, at: target)
         return order
     }
 
-    /// Follows the pointer, kept within the list, and lands before the first item whose middle is below its own.
+    /// Lands before the first item whose middle is below the dragged one's, wherever the pointer takes it.
     mutating func move(to translation: CGFloat) {
-        self.translation = min(max(translation, -start), top(others.count) - start)
-        let middle = start + self.translation + height / 2
+        let middle = start + translation + height / 2
         target = others.indices.filter { top($0) + (heights[others[$0]] ?? 0) / 2 < middle }.count
+    }
+}
+
+/// Where each reorderable item is, by its key: its frame in the sidebar's space, and its height
+/// with the space after it.
+private final class ReorderFrames {
+    var frames: [String: CGRect] = [:]
+    var heights: [String: CGFloat] = [:]
+}
+
+/// Whether a view is the floating copy of a dragged item, which must not measure itself in the list's place.
+private extension EnvironmentValues {
+    @Entry var isReorderFloating = false
+}
+
+/// Keeps an item's frame in the sidebar's space, except in the floating copy.
+private struct ReorderMeasure: ViewModifier {
+    @Environment(\.isReorderFloating) private var isFloating
+    let action: (CGRect) -> Void
+
+    func body(content: Content) -> some View {
+        content.onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Sidebar.space)) } action: { if !isFloating { action($0) } }
+    }
+}
+
+/// The dragged item lifted: larger, on a solid fill, back to its size as it lands.
+private struct FloatingItem<Content: View>: View {
+    let isDropping: Bool
+    @ViewBuilder let content: Content
+    @State private var isLifted = false
+
+    var body: some View {
+        content
+            .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.control))
+            .environment(\.isReorderFloating, true)
+            .scaleEffect(isLifted && !isDropping ? 1.15 : 1)
+            .allowsHitTesting(false)
+            .onAppear { withAnimation(.bouncy(duration: 0.3)) { isLifted = true } }
     }
 }
 
@@ -480,6 +539,8 @@ private struct WorktreeRow: View {
     @State private var draft = ""
     @State private var opened = ""
     @FocusState private var fieldFocused: Bool
+    /// The floating copy of a dragged row leaves the selection's place to the row in the list.
+    @Environment(\.isReorderFloating) private var isFloating
 
     /// Where the title starts, under the project's name.
     static let textInset: CGFloat = 8 + ProjectTile.size + 9
@@ -567,7 +628,7 @@ private struct WorktreeRow: View {
             shape.fill(isSelected ? Theme.accentTint : isHovered ? Theme.accentTint.opacity(0.6) : Theme.accentSoft)
         } else if isSelected {
             shape.fill(Theme.ink.opacity(0.08))
-                .matchedGeometryEffect(id: "selection", in: selectionSpace)
+                .matchedGeometryEffect(id: "selection", in: selectionSpace, isSource: !isFloating)
         } else {
             shape.fill(Theme.ink.opacity(isHovered ? 0.04 : 0))
         }
