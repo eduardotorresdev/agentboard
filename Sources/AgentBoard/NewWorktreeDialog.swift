@@ -250,8 +250,8 @@ final class WorktreeDraft {
         guard !name.isEmpty else { check = nil; return }
         try? await Task.sleep(for: .milliseconds(120))
         guard !Task.isCancelled, !isCreating else { return }
-        let result = await Task.detached { Self.inspect(name, in: repository, on: host) }.value
-        guard !Task.isCancelled, !isCreating, result.name == trimmedName else { return }
+        // Never throws: the body doesn't, and cancelling only stops its git.
+        guard let result = try? await Git.blocking({ Self.inspect(name, in: repository, on: host) }), !Task.isCancelled, !isCreating, result.name == trimmedName else { return }
         check = result
         if wantsSubmit {
             wantsSubmit = false
@@ -271,7 +271,7 @@ final class WorktreeDraft {
         error = nil
         let branch = check.branch, repository = repository, host = host
         let work = Task.detached {
-            try host.map { try Git.createWorktree(branch: branch, in: repository, on: $0) } ?? Git.createWorktree(branch: branch, in: repository)
+            try await Git.blocking { try host.map { try Git.createWorktree(branch: branch, in: repository, on: $0) } ?? Git.createWorktree(branch: branch, in: repository) }
         }
         do {
             let result = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }

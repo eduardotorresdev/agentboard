@@ -355,7 +355,7 @@ final class ProjectStore {
     /// Runs `body` off the main thread with git routed to `host` (see `Git.host`).
     func onHost<T: Sendable>(_ host: UUID, _ body: @escaping @Sendable (GitHost) throws -> T) async throws -> T {
         let git = try await gitHost(host)
-        return try await Task.detached { try Git.$host.withValue(git) { try body(git) } }.value
+        return try await Git.blocking { try Git.$host.withValue(git) { try body(git) } }
     }
 
     /// Reads what `host`'s clone of the project at `repository` holds, and keeps it. A host

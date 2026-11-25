@@ -98,6 +98,31 @@ package enum Git {
     /// below then goes there, with paths that are the host's.
     @TaskLocal package static var host: GitHost?
 
+    /// Runs `body` on a thread of its own, for git that may go to a host: `GitHost` blocks its
+    /// caller until a task answers, so blocking Swift's cooperative pool with it deadlocks once
+    /// every pool thread is waiting (one listing per project is enough). Cancelling the calling
+    /// task stops `body`'s git as `run` does on a task.
+    package static func blocking<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
+        let stop = Stop()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { done in
+                Thread.detachNewThread { done.resume(with: Result { try $stop.withValue(stop) { try body() } }) }
+            }
+        } onCancel: { stop.cancel() }
+    }
+
+    /// Set by `blocking` for the git it runs: whether its task was cancelled.
+    @TaskLocal private static var stop: Stop?
+
+    private final class Stop: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+        var isCancelled: Bool { lock.withLock { cancelled } }
+        func cancel() { lock.withLock { cancelled = true } }
+    }
+
+    private static var isCancelled: Bool { Task.isCancelled || stop?.isCancelled == true }
+
     /// Whether `path` exists where git runs.
     package static func exists(_ path: String) -> Bool {
         guard let host else { return FileManager.default.fileExists(atPath: path) }
@@ -425,7 +450,7 @@ package enum Git {
     /// if `cancellable`.
     @discardableResult
     package static func run(_ arguments: [String], cancellable: Bool = true, timeout: TimeInterval = 600) throws -> String {
-        if cancellable && Task.isCancelled { throw CancellationError() }
+        if cancellable && isCancelled { throw CancellationError() }
         // By name: a host's git may be anywhere in its PATH (~/.local/bin).
         if let host { return try host.output("git", arguments) }
         let process = Process()
@@ -451,7 +476,7 @@ package enum Git {
         let deadline = Date().addingTimeInterval(timeout)
         var stopped: Error?
         while process.isRunning {
-            if cancellable && Task.isCancelled { stopped = CancellationError() }
+            if cancellable && isCancelled { stopped = CancellationError() }
             if Date() > deadline { stopped = GitError(message: L("git took too long and was stopped.")) }
             if stopped != nil { process.terminate(); break }
             Thread.sleep(forTimeInterval: 0.02)

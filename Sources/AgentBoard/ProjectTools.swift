@@ -123,7 +123,7 @@ final class ProjectTools {
                 return .text("Created the worktree at \(created.path) on This Mac, on \(branch)." + (created.warning.map { " git reported: \(WorktreeDraft.cause(of: $0))" } ?? ""))
             }
             let git = try await projects.gitHost(host)
-            let created = try await Task.detached { try Git.createWorktree(branch: branch, in: repository, on: git) }.value
+            let created = try await Git.blocking { try Git.createWorktree(branch: branch, in: repository, on: git) }
             _ = await projects.hostWorktree(at: created.path, branch: branch, on: host, in: project)
             return .text("Created the worktree at \(created.path) on \(git.name), on \(branch)." + (created.warning.map { " git reported: \(WorktreeDraft.cause(of: $0))" } ?? ""))
         } catch {
