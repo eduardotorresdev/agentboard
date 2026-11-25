@@ -407,7 +407,7 @@ private struct ReorderMeasure: ViewModifier {
     }
 }
 
-/// The dragged item lifted: larger, on a solid fill, back to its size as it lands.
+/// The dragged item lifted: larger, on the sidebar's frosted backdrop, back to its size as it lands.
 private struct FloatingItem<Content: View>: View {
     let isDropping: Bool
     /// Where it was when the drag began, in the sidebar's space.
@@ -418,7 +418,7 @@ private struct FloatingItem<Content: View>: View {
 
     var body: some View {
         content
-            .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.control))
+            .background { SidebarBackdrop(shade: SidebarBackdrop.lifted).clipShape(.rect(cornerRadius: Theme.Radius.control)) }
             .environment(\.isReorderFloating, true)
             .scaleEffect(isLifted && !isDropping ? 1.15 : 1)
             .allowsHitTesting(false)
@@ -433,8 +433,8 @@ private struct ReorderPlaceholder: View {
     let spacing: CGFloat
 
     var body: some View {
-        RoundedRectangle(cornerRadius: Theme.Radius.control)
-            .fill(Theme.surfaceDeep)
+        SidebarBackdrop(shade: SidebarBackdrop.lifted)
+            .clipShape(.rect(cornerRadius: Theme.Radius.control))
             .padding(.bottom, spacing)
             .frame(height: height, alignment: .top)
             .clipped()
@@ -674,12 +674,15 @@ struct SidebarBackdrop: View {
     static let tint = 0.65
     /// The slate (ink) tint over that, which sets the sidebar apart.
     static let shade = 0.03
+    /// A dragged sidebar item and its placeholder: a little more slate, to stand out over the sidebar.
+    static let lifted = 0.07
+    var shade = Self.shade
 
     var body: some View {
         Rectangle()
             .fill(.ultraThinMaterial)
             .overlay(Theme.surface.opacity(Self.tint))
-            .overlay(Theme.ink.opacity(Self.shade))
+            .overlay(Theme.ink.opacity(shade))
             .ignoresSafeArea()
     }
 }

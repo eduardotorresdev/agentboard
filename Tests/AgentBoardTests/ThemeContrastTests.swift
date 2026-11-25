@@ -38,13 +38,17 @@ final class ThemeContrastTests: XCTestCase {
             }
         }
         for sky in [darkestSky, H.sky] {
-            let backdrop = over(H.ink, over(H.paper, sky, SidebarBackdrop.tint), SidebarBackdrop.shade)
-            XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, backdrop), 4.5, "inkMuted on sidebar")
-            XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, backdrop), 4.5, "ink on sidebar")
-            // Status dots are graphics: 3:1.
-            XCTAssertGreaterThanOrEqual(Theme.contrast(H.accent, backdrop), 3, "running dot")
-            XCTAssertGreaterThanOrEqual(Theme.contrast(H.deep, backdrop), 3, "waiting dot")
-            XCTAssertGreaterThanOrEqual(Theme.contrast(H.danger, backdrop), 3, "crashed dot")
+            let sidebar = over(H.ink, over(H.paper, sky, SidebarBackdrop.tint), SidebarBackdrop.shade)
+            // A dragged item and its placeholder: the same backdrop, more shaded, over the sidebar.
+            let lifted = over(H.ink, over(H.paper, sidebar, SidebarBackdrop.tint), SidebarBackdrop.lifted)
+            for backdrop in [sidebar, lifted] {
+                XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, backdrop), 4.5, "inkMuted on sidebar")
+                XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, backdrop), 4.5, "ink on sidebar")
+                // Status dots are graphics: 3:1.
+                XCTAssertGreaterThanOrEqual(Theme.contrast(H.accent, backdrop), 3, "running dot")
+                XCTAssertGreaterThanOrEqual(Theme.contrast(H.deep, backdrop), 3, "waiting dot")
+                XCTAssertGreaterThanOrEqual(Theme.contrast(H.danger, backdrop), 3, "crashed dot")
+            }
         }
     }
 

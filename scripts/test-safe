@@ -58,7 +58,7 @@ installed_app_running() {
 installed_app_files() {
     installed_app_running || return 0
     printf '%s\n' ./agentboard.sqlite ./agentboard.sqlite-wal ./agentboard.sqlite-shm ./makers.json ./composer-drafts.json \
-        ./workspace.json ./tools.port ./images/ ./hosts/*/images/ ./attachments/ ./Browsers/ ./Simulators/
+        ./workspace.json ./tools.port ./images/ ./hosts/*/images/ ./attachments/ ./Browsers/ ./Simulators/ ./host/relay.status ./catalog.base
 }
 # An entry ending in / is a folder: everything under it. `*` stands for one path component.
 installed_app_files_only() { awk 'FILENAME == ARGV[1] { owned[$0]; next }
