@@ -971,7 +971,7 @@ fn the_tools_are_listed_with_their_instructions() {
     let tools = rpc("tools/list")["tools"].clone();
     let names: Vec<&str> = tools.as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap()).collect();
     let expected = "list_peers send_message runner_start runner_list runner_logs runner_stop runner_restart runner_input runner_close postit_create postit_read postit_write postit_edit \
-                    image_create image_read image_replace image_remove video_create video_read video_replace video_remove browser_open browser_list browser_navigate browser_snapshot \
+                    image_create image_read image_replace image_resize image_remove video_create video_read video_replace video_resize video_remove browser_open browser_list browser_navigate browser_snapshot \
                     browser_screenshot browser_click browser_type browser_press browser_scroll browser_evaluate browser_console browser_wait simulator_open simulator_list \
                     simulator_snapshot simulator_screenshot simulator_tap simulator_swipe simulator_type simulator_press simulator_wait simulator_close project_list project_create \
                     worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove element_connect browser_close \
@@ -983,7 +983,7 @@ fn the_tools_are_listed_with_their_instructions() {
     assert_eq!(start["required"], json!(["command"]));
     assert_eq!(start["properties"].as_object().unwrap().keys().collect::<Vec<_>>(), ["command", "directory", "name", "timeout", "wait"]);
     assert_eq!(tools[4]["inputSchema"]["properties"]["runner"]["description"], "Which connected runner, by name or id (as list_peers shows it). Needed only when several are connected.");
-    assert_eq!(tools[17]["inputSchema"]["properties"]["path"]["description"], "The video file: absolute, with `~`, or relative to your worktree. MP4, MOV or M4V, up to 200 MB.");
+    assert_eq!(tools[18]["inputSchema"]["properties"]["path"]["description"], "The video file: absolute, with `~`, or relative to your worktree. MP4, MOV or M4V, up to 200 MB.");
 }
 
 /// Cards and lines are kept on disk by the core, and a new core loads them; its agents keep
@@ -1333,7 +1333,9 @@ fn agents_create_and_read_images() {
     assert!(peers.contains("- “Login screen” (image, id: ") && peers.contains("connected: true, 800×400)"), "{peers}");
     // The same name again gets a number.
     assert_eq!(core.call("image_create", json!({"path": "~/nowhere/../../..".to_string() + &core.folder.join("shot.png").to_string_lossy(), "name": "login screen"}), a.id).1, true);
-    assert_eq!(core.call("image_create", json!({"path": core.folder.join("shot.png"), "name": "login screen"}), a.id).0, "Added image “login screen 2” (800×400), connected to you.");
+    assert_eq!(core.call("image_create", json!({"path": core.folder.join("shot.png"), "name": "login screen", "width": 1000}), a.id).0, "Added image “login screen 2” (800×400), connected to you.");
+    // An asked-for width: the height follows the picture.
+    assert_eq!(core.images().iter().find(|image| image.name == "login screen 2").unwrap().frame.size, connections::Size::new(1000.0, 532.0));
     assert_eq!(core.call("image_read", json!({}), a.id), ("Several images are connected; say which with `image`: Login screen, login screen 2.".to_string(), true));
 
     // As stored when small enough; scaled down to 1568 on its longer side otherwise.
@@ -1355,6 +1357,16 @@ fn agents_create_and_read_images() {
     assert_eq!(read["content"][1]["mimeType"], "image/jpeg");
     let scaled = serde_json::from_value::<runtime::Data>(read["content"][1]["data"].clone()).unwrap().0;
     assert_eq!(imagesize::blob_size(&scaled).map(|size| (size.width, size.height)).unwrap(), (1568, 784));
+
+    // Resizing keeps the proportion and the place; a width out of range or left out is refused.
+    let width_refusal = ("`width` is a number of points from 160 to 4000.".to_string(), true);
+    assert_eq!(core.call("image_resize", json!({"image": "Login screen", "width": 100}), a.id), width_refusal);
+    assert_eq!(core.call("image_resize", json!({"image": "Login screen", "width": "big"}), a.id), width_refusal);
+    assert_eq!(core.call("image_resize", json!({"image": "Login screen"}), a.id), ("Give the card's width with `width`.".to_string(), true));
+    assert_eq!(core.call("image_create", json!({"path": "shot.png", "width": 9000}), a.id), width_refusal);
+    assert_eq!(core.call("image_resize", json!({"image": "Login screen", "width": 960}), a.id), ("Resized “Login screen” to 960×512 points.".to_string(), false));
+    let resized = core.images().into_iter().find(|image| image.id == record.id).unwrap();
+    assert_eq!((resized.frame.size, resized.frame.origin), (connections::Size::new(960.0, 512.0), swapped.frame.origin));
 
     assert_eq!(core.call("video_create", json!({"path": "shot.png"}), a.id), (format!("{}/shot.png isn't a video; pictures go on the board with image_create.", core.folder.display()), true));
     let (removed, _) = core.call("image_remove", json!({"image": "login screen 2"}), a.id);

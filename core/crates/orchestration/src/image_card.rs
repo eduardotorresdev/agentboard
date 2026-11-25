@@ -43,6 +43,8 @@ impl ImageRecord {
     pub const INITIAL_SIDE: f64 = 480.0;
     /// The narrowest a card gets.
     pub const MINIMUM_WIDTH: f64 = 160.0;
+    /// The widest card an agent may ask for.
+    pub const MAXIMUM_WIDTH: f64 = 4000.0;
 
     /// Whether the stored file is a video: told by its extension, which the store chose.
     pub fn is_video(&self) -> bool {

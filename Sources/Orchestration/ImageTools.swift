@@ -36,7 +36,8 @@ final class ImageTools: ToolProvider {
             Videos are clips on the user's board (MP4, MOV or M4V), kept apart from images. You hear in your context \
             when one is connected to you, replaced or disconnected; video_read gives its size, length and \(ImageFiles.readFrames) \
             frames sampled evenly through it. video_create puts a video file you made (a screen recording) on the \
-            board next to you, connected to you; video_replace swaps its clip, video_remove takes it off the board. \
+            board next to you, connected to you; video_replace swaps its clip, video_resize makes its card wider or \
+            narrower, video_remove takes it off the board. \
             Give a file path; videos are never passed inline.
             """
         }
@@ -44,9 +45,24 @@ final class ImageTools: ToolProvider {
         Images are pictures on the user's board. You hear in your context when one is connected to you, replaced \
         or disconnected; see its pixels with image_read. image_create puts a picture file you made (a screenshot, \
         a chart) on the board next to you, connected to you; image_replace swaps the picture of a connected image, \
-        image_remove takes one off the board. Give a file path; images are never passed inline. For videos use the \
-        video_ tools.
+        image_resize makes its card wider or narrower, image_remove takes one off the board. Give a file path; \
+        images are never passed inline. For videos use the video_ tools.
         """
+    }
+
+    private var widthArgument: [String: Any] {
+        ["type": "number",
+         "description": "The card's width in board points, \(Int(ImageRecord.minimumWidth)) to \(Int(ImageRecord.maximumWidth)); its height follows the \(medium == .image ? "picture" : "clip")'s proportion."]
+    }
+
+    /// The `width` argument: nil when left out, or why it can't be used.
+    private func width(_ arguments: [String: Any]) -> Result<CGFloat?, Refusal> {
+        guard let value = arguments["width"] else { return .success(nil) }
+        guard let number = (value as? NSNumber)?.doubleValue, number.isFinite,
+              (Double(ImageRecord.minimumWidth)...Double(ImageRecord.maximumWidth)).contains(number) else {
+            return .failure(Refusal(text: "`width` is a number of points from \(Int(ImageRecord.minimumWidth)) to \(Int(ImageRecord.maximumWidth))."))
+        }
+        return .success(CGFloat(number).rounded())
     }
 
     private var elementArgument: [String: Any] {
@@ -77,6 +93,7 @@ final class ImageTools: ToolProvider {
                 inputSchema: ["type": "object", "properties": [
                     "path": pathArgument,
                     "name": ["type": "string", "description": "Its title, e.g. `\(picture ? "Login screen" : "Signup flow")`. “\(medium.title)” when left out."],
+                    "width": widthArgument,
                 ] as [String: Any], "required": ["path"]]),
             ToolDefinition(
                 name: "\(word)_read",
@@ -88,8 +105,13 @@ final class ImageTools: ToolProvider {
                 name: "\(word)_replace",
                 description: picture ? "Replaces the picture of a connected image with a file, keeping its card and name."
                     : "Replaces the clip of a connected video with a file, keeping its card and name.",
-                inputSchema: ["type": "object", "properties": ["path": pathArgument, word: elementArgument] as [String: Any],
+                inputSchema: ["type": "object", "properties": ["path": pathArgument, word: elementArgument, "width": widthArgument] as [String: Any],
                               "required": ["path"]]),
+            ToolDefinition(
+                name: "\(word)_resize",
+                description: "Makes the card of a connected \(word) wider or narrower, keeping its proportion and place.",
+                inputSchema: ["type": "object", "properties": [word: elementArgument, "width": widthArgument] as [String: Any],
+                              "required": ["width"]]),
             ToolDefinition(
                 name: "\(word)_remove",
                 description: "Takes a connected \(word) off the board.",
@@ -136,7 +158,22 @@ final class ImageTools: ToolProvider {
             }
             return ToolResult([.text("\(record.name), \(Int(record.pixelSize.width))×\(Int(record.pixelSize.height)) pixels."),
                                .image(picture.data, mimeType: picture.mimeType)])
+        case "\(word)_resize":
+            let wide: CGFloat
+            switch width(arguments) {
+            case .success(let found?): wide = found
+            case .success(nil): return .error("Give the card's width with `width`.")
+            case .failure(let refusal): return .error(refusal.text)
+            }
+            store.updateImage(record.id) { $0.frame.size = ImageRecord.cardSize(width: wide, for: $0.pixelSize) }
+            let size = ImageRecord.cardSize(width: wide, for: record.pixelSize)
+            return .text("Resized “\(record.name)” to \(Int(size.width))×\(Int(size.height)) points.")
         case "\(word)_replace":
+            let wide: CGFloat?
+            switch width(arguments) {
+            case .success(let found): wide = found
+            case .failure(let refusal): return .error(refusal.text)
+            }
             let stored: ImageFiles.Stored
             switch await storeFile(arguments, caller: caller) {
             case .success(let found): stored = found
@@ -151,7 +188,7 @@ final class ImageTools: ToolProvider {
                 $0.file = stored.file
                 $0.pixelSize = stored.pixelSize
                 $0.duration = stored.duration
-                $0.frame.size = ImageRecord.cardSize(width: $0.frame.width, for: stored.pixelSize)
+                $0.frame.size = ImageRecord.cardSize(width: wide ?? $0.frame.width, for: stored.pixelSize)
             }
             delivered[caller]?[record.id] = Delivered(name: record.name, file: stored.file)
             return .text("Replaced the \(medium == .image ? "picture" : "clip") of “\(record.name)”.")
@@ -172,6 +209,11 @@ final class ImageTools: ToolProvider {
         case .success(let name): trimmed = name ?? ""
         case .failure(let error): return .error("\(error)")
         }
+        let wide: CGFloat?
+        switch width(arguments) {
+        case .success(let found): wide = found
+        case .failure(let refusal): return .error(refusal.text)
+        }
         let stored: ImageFiles.Stored
         switch await storeFile(arguments, caller: caller) {
         case .success(let found): stored = found
@@ -182,7 +224,7 @@ final class ImageTools: ToolProvider {
             return .error("Only agents on the board can add \(medium.word)s.")
         }
         let siblings = store.images.filter { $0.worktree == agent.worktree && $0.organizationID == agent.organizationID }
-        let size = ImageRecord.cardSize(for: stored.pixelSize)
+        let size = wide.map { ImageRecord.cardSize(width: $0, for: stored.pixelSize) } ?? ImageRecord.cardSize(for: stored.pixelSize)
         let record = ImageRecord(id: UUID(), worktree: agent.worktree,
                                  name: ImageRecord.uniqueName(trimmed.isEmpty ? medium.title : trimmed, among: siblings),
                                  frame: CGRect(origin: store.origin(near: agent, size: size), size: size),

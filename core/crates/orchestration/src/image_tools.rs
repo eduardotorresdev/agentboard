@@ -51,6 +51,19 @@ impl ImageTools {
         };
         json!({"type": "string", "description": description})
     }
+
+    fn width_argument(&self) -> Value {
+        json!({"type": "number", "description": format!("The card's width in board points, {} to {}; its height follows the {}'s proportion.", ImageRecord::MINIMUM_WIDTH as i64, ImageRecord::MAXIMUM_WIDTH as i64, if self.video { "clip" } else { "picture" })})
+    }
+}
+
+/// The `width` argument: `None` when left out, or why it can't be used.
+fn width(arguments: &Map<String, Value>) -> Result<Option<f64>, String> {
+    let Some(value) = arguments.get("width") else { return Ok(None) };
+    match value.as_f64() {
+        Some(number) if (ImageRecord::MINIMUM_WIDTH..=ImageRecord::MAXIMUM_WIDTH).contains(&number) => Ok(Some(number.round())),
+        _ => Err(format!("`width` is a number of points from {} to {}.", ImageRecord::MINIMUM_WIDTH as i64, ImageRecord::MAXIMUM_WIDTH as i64)),
+    }
 }
 
 impl<'a> ToolProvider<Turn<'a>> for ImageTools {
@@ -60,7 +73,8 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
                 "Videos are clips on the user's board (MP4, MOV or M4V), kept apart from images. You hear in your context \
                  when one is connected to you, replaced or disconnected; video_read gives its size, length and {} \
                  frames sampled evenly through it. video_create puts a video file you made (a screen recording) on the \
-                 board next to you, connected to you; video_replace swaps its clip, video_remove takes it off the board. \
+                 board next to you, connected to you; video_replace swaps its clip, video_resize makes its card wider or \
+                 narrower, video_remove takes it off the board. \
                  Give a file path; videos are never passed inline.",
                 ImageFiles::READ_FRAMES
             ));
@@ -69,8 +83,8 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
             "Images are pictures on the user's board. You hear in your context when one is connected to you, replaced \
              or disconnected; see its pixels with image_read. image_create puts a picture file you made (a screenshot, \
              a chart) on the board next to you, connected to you; image_replace swaps the picture of a connected image, \
-             image_remove takes one off the board. Give a file path; images are never passed inline. For videos use the \
-             video_ tools."
+             image_resize makes its card wider or narrower, image_remove takes one off the board. Give a file path; \
+             images are never passed inline. For videos use the video_ tools."
                 .to_string(),
         )
     }
@@ -88,6 +102,9 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
         }
         let mut replaced = which();
         replaced.insert("path".into(), self.path_argument());
+        replaced.insert("width".into(), self.width_argument());
+        let mut resized = which();
+        resized.insert("width".into(), self.width_argument());
         vec![
             ToolDefinition::with_schema(
                 &format!("{word}_create"),
@@ -95,6 +112,7 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
                 json!({"type": "object", "properties": {
                     "path": self.path_argument(),
                     "name": {"type": "string", "description": format!("Its title, e.g. `{}`. “{}” when left out.", if picture { "Login screen" } else { "Signup flow" }, self.title())},
+                    "width": self.width_argument(),
                 }, "required": ["path"]}),
             ),
             ToolDefinition::with_schema(
@@ -106,6 +124,11 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
                 &format!("{word}_replace"),
                 if picture { "Replaces the picture of a connected image with a file, keeping its card and name." } else { "Replaces the clip of a connected video with a file, keeping its card and name." },
                 json!({"type": "object", "properties": replaced, "required": ["path"]}),
+            ),
+            ToolDefinition::with_schema(
+                &format!("{word}_resize"),
+                &format!("Makes the card of a connected {word} wider or narrower, keeping its proportion and place."),
+                json!({"type": "object", "properties": resized, "required": ["width"]}),
             ),
             ToolDefinition::with_schema(&format!("{word}_remove"), &format!("Takes a connected {word} off the board."), json!({"type": "object", "properties": which(), "required": []})),
         ]
@@ -158,7 +181,22 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
                 Some((data, mime_type)) => ToolResult::new(vec![ToolContent::Text(format!("{}, {size} pixels.", record.name)), ToolContent::Image { data, mime_type }]),
                 None => ToolResult::error(format!("The picture of {} can't be read.", record.name)),
             }),
-            "_replace" => self.store_file(
+            "_resize" => {
+                let wide = match width(arguments) {
+                    Ok(Some(wide)) => wide,
+                    Ok(None) => return reply.send(ToolResult::error("Give the card's width with `width`.")),
+                    Err(refusal) => return reply.send(ToolResult::error(refusal)),
+                };
+                let size = ImageRecord::card_size_wide(wide, record.pixel_size);
+                turn.update_image(record.id, None, |image| image.frame.size = size);
+                reply.send(ToolResult::text(format!("Resized “{}” to {}×{} points.", record.name, size.width as i64, size.height as i64)))
+            }
+            "_replace" => {
+                let wide = match width(arguments) {
+                    Ok(wide) => wide,
+                    Err(refusal) => return reply.send(ToolResult::error(refusal)),
+                };
+                self.store_file(
                 turn,
                 arguments,
                 caller,
@@ -177,14 +215,15 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
                         image.file = stored.file;
                         image.pixel_size = stored.pixel_size;
                         image.duration = stored.duration;
-                        image.frame.size = ImageRecord::card_size_wide(image.frame.width(), stored.pixel_size);
+                        image.frame.size = ImageRecord::card_size_wide(wide.unwrap_or(image.frame.width()), stored.pixel_size);
                     });
                     if let Some(delivered) = turn.delivered_images.get_mut(&(video, caller)) {
                         delivered.insert(record.id, (record.name.clone(), file));
                     }
                     reply.send(ToolResult::text(format!("Replaced the {} of “{}”.", if video { "clip" } else { "picture" }, record.name)))
                 }),
-            ),
+                )
+            }
             "_remove" => {
                 if let Some(delivered) = turn.delivered_images.get_mut(&(video, caller)) {
                     delivered.remove(&record.id);
@@ -238,6 +277,10 @@ impl ImageTools {
             Ok(name) => name.unwrap_or_default(),
             Err(error) => return reply.send(ToolResult::error(error.to_string())),
         };
+        let wide = match width(arguments) {
+            Ok(wide) => wide,
+            Err(refusal) => return reply.send(ToolResult::error(refusal)),
+        };
         self.store_file(
             turn,
             arguments,
@@ -253,7 +296,7 @@ impl ImageTools {
                 };
                 let siblings = turn.images.iter().filter(|image| image.worktree == agent.worktree && image.organization_id() == agent.organization_id());
                 let name = ImageRecord::unique_name(if trimmed.is_empty() { title } else { &trimmed }, siblings);
-                let size = ImageRecord::card_size(stored.pixel_size);
+                let size = wide.map_or_else(|| ImageRecord::card_size(stored.pixel_size), |wide| ImageRecord::card_size_wide(wide, stored.pixel_size));
                 let record = ImageRecord {
                     id: Uuid::new(),
                     worktree: agent.worktree.clone(),

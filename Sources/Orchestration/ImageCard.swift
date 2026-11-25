@@ -48,6 +48,8 @@ public struct ImageRecord: Identifiable, Hashable, Codable, Sendable {
     public static let initialSide: CGFloat = 480
     /// The narrowest a card gets.
     public static let minimumWidth: CGFloat = 160
+    /// The widest card an agent may ask for.
+    public static let maximumWidth: CGFloat = 4000
 
     /// The size of a new card showing a picture of `pixelSize`: one point per pixel, scaled
     /// down so the longer side is at most `initialSide` and never scaled up, at least

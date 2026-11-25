@@ -229,6 +229,18 @@ struct ImageTests {
         try await waitUntil { otherInbox.events.contains { if case .imageUpdated(let r) = $0 { r.file == now.file } else { false } } }
         #expect(otherInbox.events.contains { if case .imageUpdated(let r) = $0 { r.file == now.file } else { false } })
 
+        // Resizing keeps the proportion and the place; a width out of range or left out is refused.
+        for arguments in [["width": 100], ["width": "big"], [:]] as [[String: Any]] {
+            let refused = try await call("image_resize", arguments, as: a.id, on: core)
+            #expect(refused.isError, "\(arguments)")
+        }
+        let resized = try await call("image_resize", ["width": 960], as: a.id, on: core)
+        #expect(resized.text == "Resized “Shot” to 960×992 points.", "\(resized.text)")
+        let wide = try #require(await core.orchestrator.image(image.id))
+        #expect(wide.frame == CGRect(origin: now.frame.origin, size: CGSize(width: 960, height: 960 + ImageRecord.titleHeight)))
+        _ = try await call("image_replace", ["path": "square.png", "width": 500], as: a.id, on: core)
+        #expect(await core.orchestrator.image(image.id)?.frame.size == CGSize(width: 500, height: 500 + ImageRecord.titleHeight))
+
         // The user's image: a board is asked first (whichever the core picks), and allows it here.
         for (board, events) in [(client, inbox), (other, otherInbox)] {
             board.send(.elements([]))  // boards that run board tools say which elements they have
