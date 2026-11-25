@@ -172,15 +172,16 @@ struct SimulatorHostTests {
         #expect(width > 300 && height > width)
 
         try sidecar.post("button", ["card": card, "name": "home"])
-        // A freshly booted device draws the home screen's icons a while after it says it is up.
+        // A freshly booted device draws the home screen's icons a while after it says it is up:
+        // past 30 s on a loaded machine (a first boot, other suites running).
         var elements: [[String: Any]] = []
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(90)
         while !elements.contains(where: { $0["role"] as? String == "AXButton" }), Date() < deadline {
             Thread.sleep(forTimeInterval: 1)
             let snapshot = try sidecar.request("snapshot", ["card": card], events: &events)
             elements = try #require((snapshot["result"] as? [String: Any])?["elements"] as? [[String: Any]], "\(snapshot)")
         }
-        #expect(elements.contains { $0["role"] as? String == "AXButton" })
+        #expect(elements.contains { $0["role"] as? String == "AXButton" }, "\(elements.prefix(12))")
 
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("\(card).jpg").path
         defer { try? FileManager.default.removeItem(atPath: path) }
