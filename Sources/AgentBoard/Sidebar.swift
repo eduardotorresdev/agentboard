@@ -29,9 +29,13 @@ struct Sidebar: View {
     /// True while a press that may become a drag is held: a drag the system cancels (no `onEnded`) is undone when it goes false.
     @GestureState private var isPressing = false
     /// The item being held, before it lifts: it grows slowly toward `pressedScale`.
-    @GestureState private var pressedKey: String?
+    @State private var hold: ReorderHold?
+    /// Watches the trackpad's force click, which lifts a held item at once.
+    @State private var pressureMonitor: Any?
     /// How far a held item grows while the hold runs; past it, it lifts to 1.15.
     static let pressedScale: CGFloat = 1.05
+    /// How long a press is held before the item lifts.
+    static let holdDuration = 0.3
 
     static let width: CGFloat = 264
     /// Where the dragged item and the pointer are measured.
@@ -77,12 +81,21 @@ struct Sidebar: View {
             guard !pressing else { return }
             // Next turn: a normal release's `onEnded` runs around this reset and starts the drop first.
             Task { @MainActor in
+                hold = nil
                 if drag?.isDropping == false {
                     drag = nil
                     pointer.offset = .zero
                 }
             }
         }
+        .onAppear {
+            pressureMonitor = NSEvent.addLocalMonitorForEvents(matching: .pressure) { event in
+                // Stage 2 is the trackpad's deeper (force) click: no need to wait out the hold.
+                if event.stage >= 2, let hold { lift(hold) }
+                return event
+            }
+        }
+        .onDisappear { pressureMonitor.map(NSEvent.removeMonitor) }
         .background { SidebarBackdrop() }
         .confirmationDialog(pendingRemoval.map { L("Remove \(store.displayName(of: $0.worktree))?") } ?? "",
                             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
@@ -199,8 +212,8 @@ struct Sidebar: View {
                 .frame(height: isDragged ? 0 : nil, alignment: .top)
                 .clipped()
                 // Grows over the hold's length, so reaching the threshold feels like the lift.
-                .scaleEffect(pressedKey == key && drag == nil ? Self.pressedScale : 1)
-                .animation(pressedKey == key ? .smooth(duration: 0.3) : .snappy(duration: 0.25), value: pressedKey == key)
+                .scaleEffect(isHeld(key) && drag == nil ? Self.pressedScale : 1)
+                .animation(isHeld(key) ? .smooth(duration: 0.3) : .snappy(duration: 0.25), value: isHeld(key))
         }
     }
 
@@ -230,28 +243,46 @@ struct Sidebar: View {
         }
     }
 
-    /// Press and hold, then drag: moves `key` among `keys`, and on release lands it in its new
-    /// place before handing `onMove` the new order.
+    private func isHeld(_ key: String) -> Bool { hold?.key == key && hold?.isCancelled == false }
+
+    /// Lifts the held item into the drag, once its hold runs out or on a force click.
+    private func lift(_ held: ReorderHold) {
+        guard hold?.id == held.id, !held.isCancelled, drag == nil, let frame = frames.frames[held.key] else { return }
+        drag = ReorderDrag(key: held.key, keys: held.keys, frame: frame, heights: frames.heights)
+        hold = nil
+    }
+
+    /// Press and hold (or force click), then drag: moves `key` among `keys`, and on release lands it
+    /// in its new place before handing `onMove` the new order.
     private func reorderGesture(_ key: String, in keys: [String], onMove: @escaping ([String]) -> Void) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.3)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space)))
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
             .updating($isPressing) { _, pressing, _ in pressing = true }
-            .updating($pressedKey) { value, pressed, _ in if case .first(true) = value { pressed = key } }
             .onChanged { value in
-                guard case .second(true, let moved) = value, drag?.isDropping != true else { return }
-                guard var next = drag ?? frames.frames[key].map({ ReorderDrag(key: key, keys: keys, frame: $0, heights: frames.heights) }) else { return }
-                pointer.offset = moved?.translation ?? .zero
-                // `drag` changes only on lift and when the place changes: a plain pointer move leaves the sidebar alone.
-                if drag == nil {
-                    drag = next
-                    // A tap on the trackpad as the item lifts into reorder mode.
-                    NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-                } else if let moved {
-                    next.move(pointer: moved.location.y)
-                    if next.target != drag?.target { withAnimation(.snappy(duration: 0.35)) { drag = next } }
+                guard drag?.isDropping != true else { return }
+                if let current = drag {
+                    guard current.key == key else { return }
+                    pointer.offset = value.translation
+                    // `drag` changes only when the place changes: a plain pointer move leaves the sidebar alone.
+                    var next = current
+                    next.move(pointer: value.location.y)
+                    if next.target != current.target { withAnimation(.snappy(duration: 0.35)) { drag = next } }
+                    return
                 }
+                if hold == nil {
+                    let held = ReorderHold(key: key, keys: keys)
+                    hold = held
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(Self.holdDuration))
+                        lift(held)
+                    }
+                }
+                guard hold?.key == key else { return }
+                pointer.offset = value.translation
+                // Moving off before the hold runs out is a plain click or drag, not a reorder.
+                if hold?.isCancelled == false, hypot(value.translation.width, value.translation.height) > 10 { hold?.isCancelled = true }
             }
             .onEnded { _ in
+                hold = nil
                 guard var landing = drag, landing.keys == keys else { drag = nil; return }
                 landing.isDropping = true
                 withAnimation(.snappy(duration: 0.35, extraBounce: 0.1), completionCriteria: .removed) {
@@ -417,6 +448,14 @@ private struct ReorderMeasure: ViewModifier {
     func body(content: Content) -> some View {
         content.onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Sidebar.space)) } action: { if !isFloating { action($0) } }
     }
+}
+
+/// A press on a reorderable item, before it lifts; `id` tells one press from the next.
+private struct ReorderHold: Equatable {
+    let id = UUID()
+    let key: String
+    let keys: [String]
+    var isCancelled = false
 }
 
 /// The dragged item lifted: larger, on the sidebar's frosted backdrop, back to its size as it lands.
