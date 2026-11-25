@@ -138,7 +138,8 @@ final class ProjectStore {
 
     /// Whether `path` is a project's own checkout, in the shown organization.
     func isMainCheckout(_ path: String) -> Bool {
-        worktrees.values.contains { $0.first?.path == path }
+        // git's order, not the sidebar's: a worktree dragged to the top isn't the checkout.
+        local.values.contains { $0.first?.path == path }
     }
 
     /// Whether the user named the worktree (since an agent last titled it).
@@ -213,7 +214,7 @@ final class ProjectStore {
 
     /// Whether the worktree is the repository's own checkout, which can't be removed.
     func isMain(_ worktree: Worktree, in project: Project) -> Bool {
-        worktrees[project.id]?.first == worktree
+        local[project.id]?.first == worktree
     }
 
     /// Adds a worktree on `branch` to the project and returns it.

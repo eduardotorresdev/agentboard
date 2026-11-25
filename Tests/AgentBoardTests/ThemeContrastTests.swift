@@ -40,7 +40,7 @@ final class ThemeContrastTests: XCTestCase {
         for sky in [darkestSky, H.sky] {
             let sidebar = over(H.ink, over(H.paper, sky, SidebarBackdrop.tint), SidebarBackdrop.shade)
             // A dragged item and its placeholder: the same backdrop, more shaded, over the sidebar.
-            let lifted = over(H.ink, over(H.paper, sidebar, SidebarBackdrop.tint), SidebarBackdrop.lifted)
+            let lifted = over(H.paper, sidebar, SidebarBackdrop.liftedTint)
             for backdrop in [sidebar, lifted] {
                 XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, backdrop), 4.5, "inkMuted on sidebar")
                 XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, backdrop), 4.5, "ink on sidebar")
