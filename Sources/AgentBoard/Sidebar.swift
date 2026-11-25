@@ -1,5 +1,6 @@
 import Orchestration
 import AgentRuntime
+import AppKit
 import SwiftUI
 
 /// Projects and their worktrees, in a panel floating over the canvas. The canvas shows through
@@ -234,6 +235,8 @@ struct Sidebar: View {
                 // `drag` changes only on lift and when the place changes: a plain pointer move leaves the sidebar alone.
                 if drag == nil {
                     drag = next
+                    // A tap on the trackpad as the item lifts into reorder mode.
+                    NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
                 } else if let moved {
                     next.move(pointer: moved.location.y)
                     if next.target != drag?.target { withAnimation(.snappy(duration: 0.35)) { drag = next } }
@@ -418,7 +421,12 @@ private struct FloatingItem<Content: View>: View {
 
     var body: some View {
         content
-            .background { SidebarBackdrop(tint: SidebarBackdrop.liftedTint, shade: 0).clipShape(.rect(cornerRadius: Theme.Radius.control)) }
+            .background {
+                SidebarBackdrop(tint: SidebarBackdrop.liftedTint, shade: 0).clipShape(.rect(cornerRadius: Theme.Radius.control))
+                    // Fades in as it lifts and out as it lands, on its own smooth spring (no bounce on opacity).
+                    .opacity(isLifted && !isDropping ? 1 : 0)
+                    .animation(.smooth(duration: 0.3), value: isLifted && !isDropping)
+            }
             .environment(\.isReorderFloating, true)
             .scaleEffect(isLifted && !isDropping ? 1.15 : 1)
             .allowsHitTesting(false)
@@ -435,6 +443,9 @@ private struct ReorderPlaceholder: View {
     var body: some View {
         SidebarBackdrop(tint: SidebarBackdrop.liftedTint, shade: 0)
             .clipShape(.rect(cornerRadius: Theme.Radius.control))
+            // The origin's slot opens at once at lift (nothing may move), so its fill fades in instead.
+            .opacity(height > 0 ? 1 : 0)
+            .animation(.smooth(duration: 0.3), value: height > 0)
             .padding(.bottom, spacing)
             .frame(height: height, alignment: .top)
             .clipped()
