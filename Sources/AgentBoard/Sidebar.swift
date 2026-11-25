@@ -28,6 +28,10 @@ struct Sidebar: View {
     @State private var pointer = ReorderPointer()
     /// True while a press that may become a drag is held: a drag the system cancels (no `onEnded`) is undone when it goes false.
     @GestureState private var isPressing = false
+    /// The item being held, before it lifts: it grows slowly toward `pressedScale`.
+    @GestureState private var pressedKey: String?
+    /// How far a held item grows while the hold runs; past it, it lifts to 1.15.
+    static let pressedScale: CGFloat = 1.05
 
     static let width: CGFloat = 264
     /// Where the dragged item and the pointer are measured.
@@ -172,7 +176,8 @@ struct Sidebar: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .clipped()
+        // Clipped for folding, vertically only, so a held row's growth isn't cut at the sides.
+        .mask { Rectangle().padding(.horizontal, -24) }
     }
 
     // MARK: Reordering
@@ -193,6 +198,9 @@ struct Sidebar: View {
                 // Drawn floating instead (see `floating`); kept here, out of sight, as its gesture lives on it.
                 .frame(height: isDragged ? 0 : nil, alignment: .top)
                 .clipped()
+                // Grows over the hold's length, so reaching the threshold feels like the lift.
+                .scaleEffect(pressedKey == key && drag == nil ? Self.pressedScale : 1)
+                .animation(pressedKey == key ? .smooth(duration: 0.3) : .snappy(duration: 0.25), value: pressedKey == key)
         }
     }
 
@@ -228,6 +236,7 @@ struct Sidebar: View {
         LongPressGesture(minimumDuration: 0.3)
             .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space)))
             .updating($isPressing) { _, pressing, _ in pressing = true }
+            .updating($pressedKey) { value, pressed, _ in if case .first(true) = value { pressed = key } }
             .onChanged { value in
                 guard case .second(true, let moved) = value, drag?.isDropping != true else { return }
                 guard var next = drag ?? frames.frames[key].map({ ReorderDrag(key: key, keys: keys, frame: $0, heights: frames.heights) }) else { return }
@@ -428,7 +437,7 @@ private struct FloatingItem<Content: View>: View {
                     .animation(.smooth(duration: 0.3), value: isLifted && !isDropping)
             }
             .environment(\.isReorderFloating, true)
-            .scaleEffect(isLifted && !isDropping ? 1.15 : 1)
+            .scaleEffect(isDropping ? 1 : isLifted ? 1.15 : Sidebar.pressedScale)
             .allowsHitTesting(false)
             .offset(x: origin.x + pointer.offset.width, y: origin.y + pointer.offset.height)
             .onAppear { withAnimation(.bouncy(duration: 0.3)) { isLifted = true } }
