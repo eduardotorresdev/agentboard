@@ -29,29 +29,22 @@ final class ThemeContrastTests: XCTestCase {
         }
     }
 
-    /// Sidebar text over its translucent backdrop, with the darkest sky behind it: the darkest
-    /// pixel of the frosted sky over a sweep of its frames (the greener blue pooled along the bottom).
-    func testSidebarTextOverTheBlurredSky() {
-        let darkestSky: UInt32 = 0x94C4D7
-        func over(_ top: UInt32, _ bottom: UInt32, _ alpha: Double) -> UInt32 {
-            [16, 8, 0].reduce(0) { hex, shift in
-                let a = Double(top >> UInt32(shift) & 0xFF), b = Double(bottom >> UInt32(shift) & 0xFF)
-                return hex | UInt32((a * alpha + b * (1 - alpha)).rounded()) << UInt32(shift)
+    /// Sidebar rows on its solid plane, on a hovered or dragged row (a surface) and on the
+    /// selected row (accentSoft): text passes AA, the status dots 3:1.
+    func testSidebarRowsOnItsPlane() {
+        for (name, fill) in [("plane", H.plane), ("surface", H.paper), ("selected", H.accentSoft)] as [(String, UInt32)] {
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, fill), 4.5, "ink on \(name)")
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, fill), 4.5, "inkMuted on \(name)")
+            for (dot, color) in [("running", H.accentText), ("waiting", H.you), ("crashed", H.danger), ("idle", H.faint)] as [(String, UInt32)] {
+                XCTAssertGreaterThanOrEqual(Theme.contrast(color, fill), 3, "\(dot) dot on \(name)")
             }
         }
-        for sky in [darkestSky, H.sky] {
-            let sidebar = over(H.ink, over(H.paper, sky, SidebarBackdrop.tint), SidebarBackdrop.shade)
-            // A dragged item and its placeholder: the same backdrop, more shaded, over the sidebar.
-            let lifted = over(H.paper, sidebar, SidebarBackdrop.liftedTint)
-            for backdrop in [sidebar, lifted] {
-                XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, backdrop), 4.5, "inkMuted on sidebar")
-                XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, backdrop), 4.5, "ink on sidebar")
-                // Status dots are graphics: 3:1.
-                XCTAssertGreaterThanOrEqual(Theme.contrast(H.accent, backdrop), 3, "running dot")
-                XCTAssertGreaterThanOrEqual(Theme.contrast(H.deep, backdrop), 3, "waiting dot")
-                XCTAssertGreaterThanOrEqual(Theme.contrast(H.danger, backdrop), 3, "crashed dot")
-            }
-        }
+        // The footer's toggles: their fill is their state.
+        XCTAssertGreaterThanOrEqual(Theme.contrast(H.ink, H.paperDeep), 4.5, "toggle off")
+        XCTAssertGreaterThanOrEqual(Theme.contrast(H.white, H.accent), 4.5, "zen on")
+        XCTAssertGreaterThanOrEqual(Theme.contrast(H.onCaffeinate, H.caffeinate), 4.5, "caffeinate on")
+        // The computers' count on its dark badge.
+        XCTAssertGreaterThanOrEqual(Theme.contrast(H.accentText, H.window), 4.5, "compute count")
     }
 
     func testContrastMatchesWCAGReference() {

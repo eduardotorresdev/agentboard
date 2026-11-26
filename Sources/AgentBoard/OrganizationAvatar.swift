@@ -5,13 +5,15 @@ import SwiftUI
 struct OrganizationAvatar: View {
     let organization: Organization
     let size: CGFloat
+    /// A rounded square with this corner instead of a circle.
+    var corner: CGFloat?
 
-    /// Avatar colors, from the app's slate and blue palette; white initials pass AA on each.
+    /// Avatar colors, from the app's blues and graphite; each initial passes AA on its fill.
     static let palette: [(fill: Color, ink: Color)] = [
         (Theme.accent, Theme.onAccent),
-        (Theme.deep, Theme.onAccent),
-        (Theme.ink, Theme.onAccent),
-        (Theme.inkMuted, Theme.onAccent),
+        (Theme.deep, Theme.onDeep),
+        (Theme.accentTint, Theme.deep),
+        (Theme.ink, Theme.window),
     ]
 
     /// The stored name, with the default organization's translated until the user renames it.
@@ -33,7 +35,8 @@ struct OrganizationAvatar: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(.circle)
+        // A circular rounded square of half the size is a circle.
+        .clipShape(RoundedRectangle(cornerRadius: corner ?? size / 2, style: corner == nil ? .circular : .continuous))
     }
 }
 

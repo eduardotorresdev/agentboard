@@ -41,54 +41,6 @@ struct AccountControl: View {
     }
 }
 
-/// The account at the foot of the sidebar: a box as wide as it, flush with its bottom, with the
-/// user's avatar and name, which opens "Sign out"; "Sign in" when there is no account.
-struct AccountBlock: View {
-    let hosts: HostStores
-    private var account: AccountStore { hosts.account }
-    @State private var menu = OrganizationMenuPanel(leading: true, above: true)
-    @State private var isHovered = false
-
-    var body: some View {
-        let signedIn = account.account
-        Button {
-            if signedIn != nil { toggle() } else { account.signIn() }
-        } label: {
-            HStack(spacing: 10) {
-                if let signedIn {
-                    AccountAvatar(account: signedIn, size: 26)
-                    Text(signedIn.name ?? signedIn.login).font(Theme.Font.heading).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.up.chevron.down").font(Theme.Font.caption.weight(.semibold)).foregroundStyle(Theme.inkMuted)
-                        .accessibilityHidden(true)
-                } else {
-                    Image(systemName: "person.crop.circle").font(Theme.Font.title).foregroundStyle(Theme.accent).frame(width: 26, height: 26)
-                    Text(L("Sign in")).font(Theme.Font.heading).foregroundStyle(Theme.ink)
-                    Spacer(minLength: 4)
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 52)
-            .frame(maxWidth: .infinity)
-            .background(isHovered ? Theme.surfaceDeep : Theme.surface)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .background(OrganizationMenuAnchor(panel: menu))
-        .onHover { hovering in withAnimation(.snappy(duration: 0.2)) { isHovered = hovering } }
-        .help(signedIn != nil ? L("Account: sign out") : SignInDialog.purpose)
-        .accessibilityLabel(signedIn.map { L("Account: \($0.name ?? $0.login)") } ?? L("Sign in"))
-        .onAppear {
-            // For screenshots of a build under test (see docs/core.md).
-            if DebugShow.items.contains("account-menu") { DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: toggle) }
-        }
-    }
-
-    private func toggle() {
-        menu.toggle { state, close in AccountMenu(hosts: hosts, state: state, close: close, anchor: .bottomLeading) }
-    }
-}
-
 extension HostChannel.Path {
     /// How a host is reached, for its row and its stats.
     var note: String {
@@ -210,17 +162,34 @@ struct AccountMenu: View {
     let close: () -> Void
     /// The corner it grows from: the one it hangs from.
     var anchor: UnitPoint = .topTrailing
+
+    var body: some View {
+        AccountMenuItems(hosts: hosts, close: close)
+            .padding(6)
+            .onExitCommand(perform: close)
+            .modifier(MenuChrome(state: state, anchor: anchor))
+    }
+}
+
+/// The account's entries, in its own menu or at the foot of the organization menu: who is signed
+/// in, this Mac as host and signing out; "Sign in" when there is no account.
+struct AccountMenuItems: View {
+    let hosts: HostStores
+    let close: () -> Void
     private var account: AccountStore { hosts.account }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let signedIn = account.account {
-                Text(signedIn.name ?? signedIn.login)
-                    .font(Theme.Font.heading)
-                    .foregroundStyle(Theme.ink)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 6)
+                HStack(spacing: 10) {
+                    AccountAvatar(account: signedIn, size: 24)
+                    Text(signedIn.name ?? signedIn.login)
+                        .font(Theme.Font.heading)
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
                 macHostActions
                 Spacer().frame(height: 10)
                 MenuAction(icon: "rectangle.portrait.and.arrow.right", title: L("Sign out of the account"),
@@ -237,11 +206,13 @@ struct AccountMenu: View {
                         Task { _ = await account.signOutEverywhere() }
                     }
                 }
+            } else {
+                MenuAction(icon: "person.crop.circle", title: L("Sign in"), caption: SignInDialog.purpose) {
+                    close()
+                    account.signIn()
+                }
             }
         }
-        .padding(6)
-        .onExitCommand(perform: close)
-        .modifier(MenuChrome(state: state, anchor: anchor))
     }
 
     /// Closes the menu, then asks; `option` adds a checkbox, on by default, passed to `action`.

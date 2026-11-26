@@ -732,3 +732,17 @@
 "↵ open" = "↵ abrir";
 "⌘↵ open without leaving the canvas" = "⌘↵ abrir sem sair do canvas";
 "Tab changes the scope" = "Tab muda o escopo";
+/* Sidebar */
+"Organization" = "Organização";
+"Projects" = "Projetos";
+"Caffeinated" = "Onda do Pilão";
+"Relaxed" = "Relaxado";
+"Zen" = "Zen";
+"Mem" = "Mem";
+"of %@" = "de %@";
+"%@ of %@" = "%1$@ de %2$@";
+"Of every processor together." = "De todos os processadores juntos.";
+"Memory in use, of what the computer has." = "Memória em uso, do total do computador.";
+"Session" = "Sessão";
+"Used of the current 5-hour session." = "O que já foi usado da sessão de 5 horas.";
+"Used of this week's limit across every model." = "O que já foi usado do limite da semana, somando todos os modelos.";

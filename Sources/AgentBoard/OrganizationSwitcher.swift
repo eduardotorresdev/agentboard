@@ -1,79 +1,76 @@
 import AppKit
 import SwiftUI
 
-/// Every organization's avatar in the top bar, the active one on a tinted disc. A dot in an
-/// avatar's corner tells that organization has an agent waiting for the user (deep blue) or
-/// crashed (red). Clicking another organization switches to it; clicking the active one opens the
-/// organization menu, which edits and adds.
+/// The organization at the head of the sidebar: its avatar, its name and "Organization". A dot
+/// in the avatar's corner tells another organization has an agent waiting for the user or
+/// crashed. Clicking opens the organization menu, which switches, edits and adds, and holds the
+/// account.
 struct OrganizationSwitcher: View {
     let store: ProjectStore
     let agents: AgentStore
-    @State private var menu = OrganizationMenuPanel()
-    @State private var hovered: UUID?
+    /// The account's entries at the menu's foot; none without it.
+    var hosts: HostStores?
+    @State private var menu = OrganizationMenuPanel(leading: true)
+    @State private var isHovered = false
 
     private var attention: [UUID: OrganizationAttention] {
         OrganizationAttention.byOrganization(cards: agents.agents, status: agents.cardStatus, active: store.organizationID)
     }
 
     var body: some View {
-        let others = attention
-        HStack(spacing: 2) {
-            ForEach(store.organizations) { organization in
-                let isActive = organization.id == store.organizationID
-                let name = OrganizationAvatar.displayName(organization)
-                Button {
-                    if isActive {
-                        menu.toggle(store: store, attention: { attention })
-                    } else {
-                        withAnimation(.snappy(duration: 0.3)) { store.selectOrganization(organization.id) }
-                    }
-                } label: {
-                    OrganizationBarAvatar(organization: organization, status: others[organization.id]?.status,
-                                          isActive: isActive, isHovered: hovered == organization.id)
+        let others = attention.values.compactMap(\.status).max()
+        let organization = store.organizations.first { $0.id == store.organizationID }
+        let name = organization.map(OrganizationAvatar.displayName) ?? ""
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+        Button(action: toggle) {
+            HStack(spacing: 10) {
+                if let organization {
+                    OrganizationAvatar(organization: organization, size: 28, corner: Theme.Radius.thumb)
+                        .overlay(alignment: .topTrailing) {
+                            if let others {
+                                // A knockout ring in the block's own fill keeps the dot apart from the avatar.
+                                Circle().fill(others.color)
+                                    .frame(width: 8, height: 8)
+                                    .padding(2)
+                                    .background(isHovered ? Theme.surfaceDeep : Theme.surface, in: .circle)
+                                    .offset(x: 4, y: -4)
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                        }
                 }
-                .buttonStyle(.plain)
-                .onHover { inside in
-                    withAnimation(.snappy(duration: 0.2)) {
-                        if inside { hovered = organization.id } else if hovered == organization.id { hovered = nil }
-                    }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name).font(Theme.Font.title).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                    Text(L("Organization")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
                 }
-                .help(isActive ? L("Organizations: switch, edit or add") : name)
-                .accessibilityLabel(L("Organization: \(name)"))
-                .accessibilityValue(others[organization.id]?.summary ?? "")
-                .accessibilityHint(isActive ? L("Opens the list of organizations") : "")
-                .accessibilityAddTraits(isActive ? .isSelected : [])
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down")
+                    .font(Theme.Font.caption.weight(.bold))
+                    .foregroundStyle(Theme.inkMuted)
+                    .rotationEffect(.degrees(menu.isOpen ? 180 : 0))
+                    .accessibilityHidden(true)
             }
+            .padding(.horizontal, 10)
+            .frame(height: 50)
+            .background(isHovered || menu.isOpen ? Theme.surfaceDeep : Theme.surface, in: shape)
+            .contentShape(shape)
         }
+        .buttonStyle(.plain)
         .background(OrganizationMenuAnchor(panel: menu))
-    }
-}
-
-/// One of the bar's avatars, with what waits on the user in its organization in its corner.
-struct OrganizationBarAvatar: View {
-    let organization: Organization
-    let status: CardStatus?
-    var isActive = true
-    var isHovered = false
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            OrganizationAvatar(organization: organization, size: 22)
-                .scaleEffect(isHovered ? 1.06 : 1)
-                .opacity(isActive || isHovered ? 1 : 0.55)
-                .frame(width: 30, height: 30)
-                .background(isActive ? Theme.accentTint : .clear, in: .circle)
-            if let status {
-                // A 2pt knockout ring in the bar's own white keeps the dot apart from the avatar.
-                Circle().fill(status.color)
-                    .frame(width: 8, height: 8)
-                    .padding(2)
-                    .background(Theme.surface, in: .circle)
-                    .transition(.scale.combined(with: .opacity))
-            }
+        .onHover { inside in withAnimation(.snappy(duration: 0.2)) { isHovered = inside } }
+        .animation(.bouncy(duration: 0.35), value: others)
+        .animation(.snappy(duration: 0.25), value: menu.isOpen)
+        .help(L("Organizations: switch, edit or add"))
+        .accessibilityLabel(L("Organization: \(name)"))
+        .accessibilityValue(attention.values.compactMap(\.summary).joined(separator: ", "))
+        .accessibilityHint(L("Opens the list of organizations"))
+        .onAppear {
+            // For screenshots of a build under test (see docs/core.md).
+            if DebugShow.items.contains("account-menu") { DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: toggle) }
         }
-        .frame(width: 30, height: 30)
-        .contentShape(.circle)
-        .animation(.bouncy(duration: 0.35), value: status)
+    }
+
+    private func toggle() {
+        menu.toggle(store: store, hosts: hosts, attention: { attention })
     }
 }
 
@@ -108,9 +105,16 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
     /// Clicks in the app's other windows: the board doesn't always take key, so resigning key alone misses them.
     private var clickMonitor: Any?
 
-    init(leading: Bool = false, above: Bool = false) {
+    /// Opens beside the anchor, past its trailing edge, its bottom level with the anchor's, growing upward.
+    private let beside: Bool
+
+    /// Whether it is open, for the anchor to show it.
+    var isOpen: Bool { state.isShown }
+
+    init(leading: Bool = false, above: Bool = false, beside: Bool = false) {
         self.leading = leading
-        self.above = above
+        self.above = above || beside
+        self.beside = beside
         super.init()
         // A non-activating panel stays key when another app comes forward, so resigning key
         // never fires: without this the menu floats over the other app.
@@ -120,8 +124,8 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
 
     @objc private func appDidResignActive() { close() }
 
-    func toggle(store: ProjectStore, attention: @escaping () -> [UUID: OrganizationAttention]) {
-        toggle { state, close in OrganizationMenu(store: store, attention: attention, state: state, close: close) }
+    func toggle(store: ProjectStore, hosts: HostStores? = nil, attention: @escaping () -> [UUID: OrganizationAttention]) {
+        toggle { state, close in OrganizationMenu(store: store, hosts: hosts, attention: attention, state: state, close: close) }
     }
 
     /// Opens the panel on `content` (which shows itself as `state.isShown` turns), or closes it.
@@ -131,8 +135,10 @@ final class OrganizationMenuPanel: NSObject, NSWindowDelegate {
         let host = NSHostingView(rootView: content(state, { [weak self] in self?.close() }))
         let size = host.fittingSize
         let below = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
-        let panel = NSPanel(contentRect: CGRect(x: leading ? below.minX + (above ? 8 : -8) : below.maxX - size.width + 8,
-                                                y: above ? below.maxY + 6 : below.minY - size.height - 6,
+        // Leading menus hang from the sidebar's blocks, flush with their edge (the panel pads its content by 1).
+        let x = beside ? below.maxX + 18 : leading ? below.minX - 1 : below.maxX - size.width + 8
+        let y = beside ? below.minY - 1 : above ? below.maxY + 6 : below.minY - size.height - 6
+        let panel = NSPanel(contentRect: CGRect(x: x, y: y,
                                                 width: size.width, height: size.height),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -192,9 +198,10 @@ final class OrganizationMenuState {
 }
 
 /// The menu's content: each organization with its avatar, name and status, the active one marked;
-/// then "New organization". Arrows move, Return chooses, Escape closes.
+/// then "New organization", then the account. Arrows move, Return chooses, Escape closes.
 private struct OrganizationMenu: View {
     let store: ProjectStore
+    let hosts: HostStores?
     let attention: () -> [UUID: OrganizationAttention]
     let state: OrganizationMenuState
     let close: () -> Void
@@ -211,7 +218,7 @@ private struct OrganizationMenu: View {
                 list
             }
         }
-        .modifier(MenuChrome(state: state))
+        .modifier(MenuChrome(state: state, anchor: .topLeading))
     }
 
     private var list: some View {
@@ -224,6 +231,10 @@ private struct OrganizationMenu: View {
             }
             Divider().padding(.vertical, 4).opacity(0) // spacing only: rows are separated by fill
             createRow(highlighted: navigation.highlightedItem == .create)
+            if let hosts {
+                Spacer().frame(height: 10)
+                AccountMenuItems(hosts: hosts, close: close)
+            }
         }
         .padding(6)
         .focusable()
@@ -357,7 +368,7 @@ private struct OrganizationMenu: View {
     }
 }
 
-/// A top bar menu's panel: its width and glass, growing from the corner it hangs from.
+/// A menu's panel: its width on a popover's solid surface, growing from the corner it hangs from.
 struct MenuChrome: ViewModifier {
     let state: OrganizationMenuState
     var width: CGFloat = 280
@@ -366,22 +377,9 @@ struct MenuChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(width: width)
-            .modifier(MenuGlass(corner: 14))
+            .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
             .scaleEffect(state.isShown ? 1 : 0.94, anchor: anchor)
             .opacity(state.isShown ? 1 : 0)
             .padding(1)
-    }
-}
-
-/// The chrome's material: Liquid Glass where the system has it, a translucent material before.
-private struct MenuGlass: ViewModifier {
-    let corner: CGFloat
-
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content.glassEffect(.regular, in: .rect(cornerRadius: corner))
-        } else {
-            content.background(.regularMaterial, in: .rect(cornerRadius: corner))
-        }
     }
 }
