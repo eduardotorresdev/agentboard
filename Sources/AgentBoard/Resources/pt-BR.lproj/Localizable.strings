@@ -691,3 +691,44 @@
 "Disconnects this Mac while agents on your hosts keep running" = "Desconecta este Mac e os agentes nos seus hosts seguem rodando";
 "Sign out on every computer" = "Sair da conta em todos os computadores";
 "Disconnects them all while your hosts keep running their agents" = "Desconecta todos e os seus hosts seguem rodando os agentes";
+
+/* Top bar */
+"Search" = "Buscar";
+"Finds agents, cards, worktrees and actions." = "Encontra agentes, cards, worktrees e ações.";
+"Now:" = "Agora:";
+"wants your approval" = "quer sua aprovação";
+"finished its turn" = "terminou a vez";
+"My Queue" = "Minha Fila";
+"My Queue: %lld" = "Minha Fila: %lld";
+
+/* Search palette */
+"Search agents, cards, worktrees and actions" = "Buscar agentes, cards, worktrees e ações";
+"Nothing matches." = "Nada encontrado.";
+"IN MY QUEUE" = "NA MINHA FILA";
+"AGENTS AND CARDS" = "AGENTES E CARDS";
+"WORKTREES" = "WORKTREES";
+"ACTIONS" = "AÇÕES";
+"All" = "Tudo";
+"This worktree" = "Este worktree";
+"Agents" = "Agentes";
+"Cards" = "Cards";
+"Actions" = "Ações";
+"Searches everything in this organization." = "Busca em tudo desta organização.";
+"Only what is on the canvas you are looking at." = "Só o que está no canvas aberto.";
+"Only agents, waiting on you or not." = "Só agentes, esperando por você ou não.";
+"Runners, post-its, browsers and the other cards." = "Runners, post-its, navegadores e os outros cards.";
+"Things to do, such as a new agent or a new worktree." = "O que dá para fazer, como um novo agente ou um novo worktree.";
+"this worktree" = "neste worktree";
+"answer" = "responder";
+"go to card" = "ir ao card";
+"open" = "abrir";
+"1 agent in your queue" = "1 agente na sua fila";
+"%lld agents in your queue" = "%lld agentes na sua fila";
+"New %@ agent in %@" = "Novo agente %1$@ em %2$@";
+"New worktree in %@" = "Novo worktree em %@";
+"A branch of its own, in a folder of its own." = "Um branch próprio, numa pasta própria.";
+"Shows or hides the projects beside the canvas." = "Mostra ou oculta os projetos ao lado do canvas.";
+"↑↓ navigate" = "↑↓ navegar";
+"↵ open" = "↵ abrir";
+"⌘↵ open without leaving the canvas" = "⌘↵ abrir sem sair do canvas";
+"Tab changes the scope" = "Tab muda o escopo";

@@ -39,6 +39,8 @@ struct ContentView: View {
     @State private var isSidebarVisible = true
     @State private var addProjectStep: AddProjectDialog.Step?
     @State private var isNeedsYouOpen = false
+    @State private var isSearchOpen = false
+    @State private var addingWorktreeTo: Project?
     /// Set in code per screen; not a user-facing toggle.
     var canvasMode: CanvasMode = .canvas
 
@@ -77,17 +79,34 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .overlay {
+            if isSearchOpen {
+                SearchPalette(entries: SearchEntry.all(projects: store, hosts: hosts, selection: selection),
+                              worktree: selection?.worktree.path, isOpen: $isSearchOpen, onOpen: open)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+            }
+        }
         .toolbar {
+            // Pushes the search and the queue to the trailing edge.
+            if #available(macOS 26, *) { ToolbarSpacer(.flexible) }
+            if !boardController.isZen && !store.projects.isEmpty {
+                if #available(macOS 26, *) {
+                    ToolbarItem(placement: .automatic) { searchButton }.sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .automatic) { searchButton }
+                }
+            }
             if #available(macOS 26, *) {
-                // The button is its own capsule: no toolbar glass around it.
-                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, projects: store, isOpen: $isNeedsYouOpen) }
+                // The strip is its own shape: no toolbar glass around it.
+                ToolbarItem(placement: .automatic) { NeedsYouButton(hosts: hosts, projects: store, isOpen: $isNeedsYouOpen) }
                     .sharedBackgroundVisibility(.hidden)
             } else {
-                ToolbarItem(placement: .principal) { NeedsYouButton(hosts: hosts, projects: store, isOpen: $isNeedsYouOpen) }
+                ToolbarItem(placement: .automatic) { NeedsYouButton(hosts: hosts, projects: store, isOpen: $isNeedsYouOpen) }
             }
-            if !boardController.isZen {
-                // With projects, the account is at the foot of the sidebar.
-                if store.projects.isEmpty { ToolbarItem(placement: .primaryAction) { AccountControl(hosts: hosts) } }
+            // With projects, the organizations and the account are in the sidebar; without, no
+            // sidebar shows, so a new organization's first run can still leave it from here.
+            if !boardController.isZen && store.projects.isEmpty {
+                ToolbarItem(placement: .primaryAction) { AccountControl(hosts: hosts) }
                 ToolbarItem(placement: .primaryAction) { OrganizationSwitcher(store: store, agents: agents) }
             }
         }
@@ -115,6 +134,7 @@ struct ContentView: View {
                 hosts.account.signIn()
             }
             if DebugShow.items.contains("vault-question") { hosts.showSample() }
+            if DebugShow.items.contains("search") { isSearchOpen = true }
             if DebugShow.items.contains("removal-dialog") { agents.showSampleRemoval() }
             if let path = DebugShow.worktree, !DebugShow.items.isDisjoint(with: ["image-marks", "image-marks-agent"]) {
                 Task {
@@ -157,6 +177,11 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { hosts.editingHost != nil }, set: { if !$0 { hosts.editingHost = nil } })) {
             if let editing = hosts.editingHost { HostDialog(hosts: hosts, editing: editing) }
         }
+        .sheet(item: $addingWorktreeTo) { project in
+            NewWorktreeDialog(store: store, project: project, hosts: hosts) { worktree in
+                selection = WorktreeSelection(projectID: project.id, worktree: worktree)
+            }
+        }
         .sheet(item: $addProjectStep) { step in
             AddProjectDialog(store: store, initialStep: step, onAdded: select)
         }
@@ -192,27 +217,25 @@ struct ContentView: View {
         .onChange(of: showsSidebar, initial: true) { _, visible in
             boardController.leadingInset = visible ? sidebarInset : 0
         }
-        .toolbar {
-            // The sidebar and the project actions, one group beside the title.
-            if !boardController.isZen { ToolbarItemGroup(placement: .navigation) {
-                Button(action: toggleSidebar) { Label(L("Toggle Sidebar"), systemImage: "sidebar.left") }
+        // The sidebar's toggle has no button in the top bar: only its shortcut.
+        .background {
+            if !boardController.isZen {
+                Button(L("Toggle Sidebar"), action: toggleSidebar)
                     .keyboardShortcut("s", modifiers: [.command, .control])
-                Button(action: addProject) { Label(L("Add Project"), systemImage: "plus") }
-                    .help(L("Clone, create, or open a project."))
-                Button {
-                    store.reload()
-                    store.refreshHostWorktrees(probing: true)
-                } label: { Label(L("Refresh"), systemImage: "arrow.clockwise") }
-                    .help(L("Reloads the projects and their worktrees."))
-            } }
-            // The hosts, a button of their own beside the project actions: its own capsule, out of their group.
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+        }
+        .toolbar {
+            // Where the canvas is: the project, then the worktree. No glass behind it.
             if !boardController.isZen {
                 if #available(macOS 26, *) {
-                    ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }.sharedBackgroundVisibility(.hidden)
-                    ToolbarItem(placement: .navigation) { AppUsage() }.sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .navigation) { breadcrumb }.sharedBackgroundVisibility(.hidden)
+                    ToolbarItem(placement: .navigation) { addProjectButton }.sharedBackgroundVisibility(.hidden)
                 } else {
-                    ToolbarItem(placement: .navigation) { HostsControl(hosts: hosts) }
-                    ToolbarItem(placement: .navigation) { AppUsage() }
+                    ToolbarItem(placement: .navigation) { breadcrumb }
+                    ToolbarItem(placement: .navigation) { addProjectButton }
                 }
             }
             // A build of the checkout (`./run`) says so, to tell it apart from the installed app.
@@ -225,6 +248,65 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// The selected worktree's project in bold, then the worktree.
+    private var breadcrumb: some View {
+        let place = selection.map { store.place(ofPath: $0.worktree.path) }
+        return HStack(spacing: 8) {
+            if let project = place?.project {
+                Text(verbatim: project)
+                    .font(Theme.Font.heading.weight(.bold))
+                    .foregroundStyle(Theme.ink)
+                Text(verbatim: "/")
+                    .font(Theme.Font.heading.weight(.regular))
+                    .foregroundStyle(Theme.faint)
+            }
+            if let place {
+                Text(verbatim: place.worktree)
+                    .font(Theme.Font.heading.weight(.regular))
+                    .foregroundStyle(Theme.inkMuted)
+            }
+        }
+        .lineLimit(1)
+        .padding(.leading, 8)
+        .animation(.snappy(duration: 0.25), value: place)
+    }
+
+    private var addProjectButton: some View {
+        Button(action: addProject) {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.inkMuted)
+                .frame(width: 26, height: 26)
+                .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.thumb, style: .continuous))
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(L("Add Project"))
+        .help(L("Clone, create, or open a project."))
+    }
+
+    /// Opens the search palette.
+    private var searchButton: some View {
+        Button {
+            withAnimation(.snappy(duration: 0.25)) { isSearchOpen.toggle() }
+        } label: {
+            HStack(spacing: 10) {
+                Text(L("Search"))
+                    .font(Theme.Font.heading.weight(.semibold))
+                    .foregroundStyle(Theme.ink)
+                KeyChip(text: "⌘K")
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 7)
+            .frame(height: 32)
+            .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("k", modifiers: .command)
+        .help(L("Finds agents, cards, worktrees and actions."))
     }
 
     private var devLabel: some View {
@@ -315,6 +397,38 @@ struct ContentView: View {
         boardController.reveal(record.id)
     }
 
+    /// Opens what the search palette picked. `stay` (⌘↵) reveals a request's card on the canvas
+    /// instead of opening the queue.
+    private func open(_ entry: SearchEntry, stay: Bool) {
+        switch entry.target {
+        case .queue(let id):
+            if stay, let record = hosts.store(of: id)?.record(id) { reveal(record) }
+            else { withAnimation(.snappy(duration: 0.35)) { isNeedsYouOpen = true } }
+        case .card(let id, let worktree, let isRecord):
+            if isRecord, let record = hosts.store(of: id)?.record(id) { reveal(record) }
+            // shortcut: only agents and runners can be framed (BoardController.reveal); other cards open their worktree.
+            else { select(path: worktree) }
+        case .worktree(let path):
+            select(path: path)
+        case .action(let action):
+            perform(action)
+        }
+    }
+
+    private func perform(_ action: SearchEntry.Action) {
+        switch action {
+        case .newAgent(let id): if let provider = AgentCatalog.provider(id: id) { boardController.add(provider) }
+        case .newWorktree(let id): addingWorktreeTo = store.projects.first { $0.id == id }
+        case .addProject: addProject()
+        case .reload:
+            store.reload()
+            store.refreshHostWorktrees(probing: true)
+        case .zen: boardController.isZen.toggle()
+        case .caffeinate: Caffeinate.shared.isOn.toggle()
+        case .sidebar: toggleSidebar()
+        }
+    }
+
     private func select(_ project: Project) {
         if let worktree = store.worktrees[project.id]?.first {
             selection = WorktreeSelection(projectID: project.id, worktree: worktree)
@@ -353,9 +467,9 @@ private struct WindowChrome: ViewModifier {
         if #available(macOS 15, *) {
             content
                 .toolbar(removing: .title)
-                .toolbarBackground(Color.white, for: .windowToolbar)
+                .toolbarBackground(Theme.window, for: .windowToolbar)
                 .toolbarBackgroundVisibility(isZen ? .hidden : .visible, for: .windowToolbar)
-                .toolbarColorScheme(.light, for: .windowToolbar)
+                .toolbarColorScheme(.dark, for: .windowToolbar)
         } else {
             content.toolbarBackground(isZen ? .hidden : .automatic, for: .windowToolbar)
         }

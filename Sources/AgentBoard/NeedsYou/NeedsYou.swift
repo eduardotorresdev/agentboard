@@ -56,7 +56,8 @@ extension HostStores {
     var needsYou: [NeedsYouItem] { NeedsYouItem.queue(stores: connected, attention: attention) }
 }
 
-/// The count of agents waiting on the developer, centered in the toolbar. Opens the deck.
+/// The top bar's queue strip: what asked last, marks of the agents waiting, and the amber
+/// "My Queue" button with their count, which opens the deck.
 struct NeedsYouButton: View {
     let hosts: HostStores
     let projects: ProjectStore
@@ -65,90 +66,89 @@ struct NeedsYouButton: View {
 
     private var waiting: [AgentRecord] { hosts.needsYou.compactMap { hosts.store(of: $0.agent)?.record($0.agent) } }
     private var count: Int { hosts.needsYou.count }
+    private var isLit: Bool { count > 0 }
 
-    /// How many projects have an agent waiting; a worktree outside every project counts as its own.
-    private var projectCount: Int {
-        Set(waiting.map { record in
-            projects.projects.first { project in
-                project.path == record.worktree || projects.worktrees[project.id]?.contains { $0.path == record.worktree } == true
-            }?.path ?? record.worktree
-        }).count
+    /// The worktree of the request that came in last, and whether it asks for something (as
+    /// opposed to only having finished its turn).
+    private var latest: (worktree: String, asks: Bool)? {
+        hosts.needsYou.compactMap { item -> (since: Date, path: String, asks: Bool)? in
+            guard let store = hosts.store(of: item.agent), let record = store.record(item.agent) else { return nil }
+            switch item {
+            case .attention(let request): return (request.since, record.worktree, request.needsUser)
+            case .decisions:
+                return (store.decisions.filter { $0.agent == item.agent }.map(\.since).max() ?? .distantPast, record.worktree, true)
+            }
+        }
+        .max { $0.since < $1.since }
+        .map { (projects.displayName(ofPath: $0.path), $0.asks) }
     }
 
     var body: some View {
+        HStack(spacing: 10) {
+            if let latest {
+                HStack(spacing: 8) {
+                    Circle().fill(Theme.you).frame(width: 6, height: 6)
+                    (Text(L("Now:")) + Text(verbatim: " ")
+                        + Text(verbatim: latest.worktree).fontWeight(.semibold).foregroundStyle(Theme.ink)
+                        + Text(verbatim: " ") + Text(latest.asks ? L("wants your approval") : L("finished its turn")))
+                        .font(Theme.Font.label.weight(.regular))
+                        .foregroundStyle(Theme.inkMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: 340, alignment: .leading)
+                .transition(.opacity)
+                // The agents waiting, in their brand colors.
+                HStack(spacing: 2) {
+                    ForEach(Array(waiting.prefix(4).enumerated()), id: \.offset) { _, record in
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(record.provider?.brandColor.map(Theme.color) ?? Theme.accentText)
+                            .frame(width: 7, height: 12)
+                    }
+                }
+                .accessibilityHidden(true)
+            }
+            button
+        }
+        .padding(.leading, latest == nil ? 3 : 12)
+        .padding(.trailing, 3)
+        .frame(height: 34)
+        .background(Theme.surface, in: .rect(cornerRadius: Theme.Radius.control, style: .continuous))
+        .animation(.snappy(duration: 0.3), value: latest?.worktree)
+    }
+
+    private var button: some View {
         Button {
             withAnimation(.snappy(duration: 0.35)) { isOpen.toggle() }
         } label: {
-            if count == 0 && !isOpen {
-                // Quiet while nothing waits.
-                Label(L("All clear"), systemImage: "checkmark")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.inkMuted)
-                    .padding(.horizontal, 12)
-                    .frame(height: 32)
-            } else {
-            HStack(spacing: 6) {
-                Label(L("Needs you"), systemImage: "bell.fill")
-                    .font(.system(size: 13, weight: .bold))
-                    .padding(.trailing, 4)
-                // Open, the badge closes the screen; the cards show how many wait.
-                if isOpen {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .heavy))
-                        .modifier(Tally(isLit: count > 0))
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
-                } else {
-                    tally("folder.fill", projectCount, L("Projects with an agent waiting"))
-                    tally("sparkles", count, L("Agents waiting"))
-                }
+            HStack(spacing: 7) {
+                Text(L("My Queue"))
+                    .font(Theme.Font.heading.weight(.bold))
+                Text(count, format: .number)
+                    .font(Theme.Font.label.weight(.bold).monospacedDigit())
+                    .contentTransition(.numericText(value: Double(count)))
+                    .foregroundStyle(isLit ? Theme.you : Theme.inkMuted)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(isLit ? Theme.onYou : Theme.surface, in: .rect(cornerRadius: Theme.Radius.thumb - 2, style: .continuous))
+                Image(systemName: isOpen ? "xmark" : "chevron.down")
+                    .font(.system(size: 9, weight: .heavy))
             }
+            .foregroundStyle(isLit ? Theme.onYou : Theme.ink)
             .padding(.leading, 12)
-            .padding(.trailing, 5)
-            .frame(height: 32)
-            .foregroundStyle(count > 0 ? Theme.onAccent : Theme.inkMuted)
-            // Deep blue: the "waiting for you" color.
-            .background(count > 0 ? Theme.deep.opacity(isHovered ? 0.88 : 1) : Theme.line.opacity(isHovered ? 0.07 : 0.04),
-                        in: .rect(cornerRadius: Theme.Radius.control))
-            .contentShape(.rect(cornerRadius: Theme.Radius.control))
-            .transition(.scale(scale: 0.8).combined(with: .opacity))
-            }
+            .padding(.trailing, 9)
+            .frame(height: 28)
+            .background(isLit ? Theme.you.opacity(isHovered ? 0.88 : 1) : Theme.surfaceDeep.opacity(isHovered ? 0.8 : 1),
+                        in: .rect(cornerRadius: Theme.Radius.control - 2, style: .continuous))
+            .contentShape(.rect(cornerRadius: Theme.Radius.control - 2, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .animation(.bouncy(duration: 0.4), value: isOpen)
         .keyboardShortcut("j", modifiers: .command)
         .help(isOpen ? L("Back to the board (Esc)") : L("Agents waiting on you, across every organization"))
-        .animation(.bouncy(duration: 0.4), value: count == 0)
+        .accessibilityLabel(L("My Queue: \(count)"))
         .animation(.snappy(duration: 0.3), value: count)
-        .animation(.snappy(duration: 0.3), value: projectCount)
         .animation(.snappy(duration: 0.2), value: isHovered)
-    }
-
-    /// An icon and how many of it wait.
-    private func tally(_ symbol: String, _ value: Int, _ meaning: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol).font(.system(size: 10, weight: .bold))
-            Text(value, format: .number)
-                .font(.system(size: 12, weight: .bold).monospacedDigit())
-                .contentTransition(.numericText(value: Double(value)))
-        }
-        .modifier(Tally(isLit: count > 0))
-        .transition(.scale(scale: 0.5).combined(with: .opacity))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(meaning): \(value)")
-    }
-
-    /// A white block on the button's fill.
-    private struct Tally: ViewModifier {
-        let isLit: Bool
-
-        func body(content: Content) -> some View {
-            content
-                .padding(.horizontal, 7)
-                .frame(minWidth: 22, minHeight: 22)
-                .foregroundStyle(isLit ? Theme.deep : Theme.inkMuted)
-                .background(isLit ? Theme.surface : Theme.line.opacity(0.08), in: .rect(cornerRadius: Theme.Radius.thumb))
-        }
+        .animation(.bouncy(duration: 0.4), value: isOpen)
     }
 }
 
@@ -481,7 +481,7 @@ private struct NeedsYouCard: View {
                     if isLive {
                         LiveTerminal(store: agents, record: record, onEscape: onEscape, takesFocus: takesFocus)
                     } else {
-                        Color.white
+                        Theme.canvas
                     }
                 }
                 .frame(height: terminalHeight)
@@ -496,7 +496,7 @@ private struct NeedsYouCard: View {
             // Says what letting go does, once the drag is most of the way there.
             Label(L("Done"), systemImage: "checkmark")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.onAccent)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
                 .background(Theme.accent, in: .rect(cornerRadius: Theme.Radius.control))
@@ -505,7 +505,6 @@ private struct NeedsYouCard: View {
                 .scaleEffect(progress >= 1 ? 1.06 : 1)
                 .animation(.snappy(duration: 0.2), value: progress >= 1)
         }
-        .shadow(color: Theme.line.opacity(isLive ? 0.14 : 0.08), radius: isLive ? 30 : 16, y: isLive ? 14 : 8)
     }
 
     /// Where the agent works leads: the project, then the worktree. The agent's name and its
@@ -515,14 +514,14 @@ private struct NeedsYouCard: View {
             VStack(alignment: .leading, spacing: 3) {
                 PlaceTitle(place: place)
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(Theme.line)
+                    .foregroundStyle(Theme.ink)
                 Label(L("Agent: \([record.name, organization].compactMap { $0 }.joined(separator: " - "))"), systemImage: "sparkles")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.line.opacity(0.5))
+                    .foregroundStyle(Theme.inkMuted)
                     .padding(.top, 3)
                 Text(message)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
                     .padding(.top, 6)
                 if let orchestrators = request.orchestrators {
                     // Its orchestrator can't give this one: it waits on the developer directly.
@@ -538,7 +537,7 @@ private struct NeedsYouCard: View {
                 Text(Self.age.localizedString(for: request.since, relativeTo: max(context.date, request.since)))
             }
             .font(.system(size: 12).monospacedDigit())
-            .foregroundStyle(Theme.line.opacity(0.5))
+            .foregroundStyle(Theme.inkMuted)
         }
     }
 
@@ -548,7 +547,7 @@ private struct NeedsYouCard: View {
         if let text = request.context {
             let body = Text(Self.markdown(text))
                 .font(.system(size: 13))
-                .foregroundStyle(Theme.line.opacity(0.85))
+                .foregroundStyle(Theme.ink)
                 .lineSpacing(3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -571,12 +570,12 @@ private struct NeedsYouCard: View {
         HStack {
             Text(position)
                 .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(Theme.line.opacity(0.5))
+                .foregroundStyle(Theme.inkMuted)
             Spacer()
             if showsHint {
                 Text(L("Drag aside when you're done"))
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.line.opacity(0.5))
+                    .foregroundStyle(Theme.inkMuted)
             }
             if isActive {
                 Button(action: onReveal) {

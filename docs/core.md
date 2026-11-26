@@ -77,7 +77,7 @@ Status: in progress, see `GOAL.md`.
 - For looking at it: `AGENTBOARD_SHOTS=<folder>` (on SIGUSR2, writes a PNG of each of its
   windows there, menus and sheets included, then an empty `done`), and `AGENTBOARD_SHOW`, a
   list separated by commas of what to open at launch: `account-menu`, `hosts-menu`, `sign-in`,
-  `new-worktree` (of the first project), `image-marks` and `image-marks-agent` (a sample picture with annotations on it in the worktree given, without and with an agent to send them to), `vault-question` (the account's one question), `host-servers` (the first host's "MCP servers" sheet with sample servers), `host-waiting` and `host-approval` (the first host as
+  `new-worktree` (of the first project), `search` (the search palette), `image-marks` and `image-marks-agent` (a sample picture with annotations on it in the worktree given, without and with an agent to send them to), `vault-question` (the account's one question), `host-servers` (the first host's "MCP servers" sheet with sample servers), `host-waiting` and `host-approval` (the first host as
   one that doesn't trust this Mac yet, or with sample computers to approve and forget) and the
   path of a worktree. `AGENTBOARD_ACCOUNT=<file>`
   (JSON with `token` and `account`) signs the instance in from that file without touching the
