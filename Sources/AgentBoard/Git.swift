@@ -37,8 +37,17 @@ extension Git {
 
     /// Removes the worktree at `path` from the repository at `repository`, deleting its folder.
     /// `force` discards its changed and untracked files.
+    /// Unlocks it first (worktrees are made locked, see `Git.lockReason`), and locks it again
+    /// when it can't be removed.
     static func removeWorktree(at path: String, from repository: String, force: Bool) throws {
-        try run(["-C", repository, "worktree", "remove"] + (force ? ["--force"] : []) + ["--", path])
+        // Fails on one made before locking, or that someone unlocked: nothing to undo then.
+        let unlocked = (try? run(["-C", repository, "worktree", "unlock", "--", path])) != nil
+        do {
+            try run(["-C", repository, "worktree", "remove"] + (force ? ["--force"] : []) + ["--", path])
+        } catch {
+            if unlocked { _ = try? run(["-C", repository, "worktree", "lock", "--reason", lockReason, "--", path], cancellable: false) }
+            throw error
+        }
     }
 
     /// `createWorktree` on another host: in its clone of the repository, made from `origin` on

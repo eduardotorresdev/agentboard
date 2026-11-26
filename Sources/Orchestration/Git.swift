@@ -312,7 +312,7 @@ package enum Git {
                 }
                 try makeBranch(at: start)
             }
-            try run(["-C", repository, "worktree", "add", "--", location.path, branch])
+            try run(["-C", repository, "worktree", "add", "--lock", "--reason", lockReason, "--", location.path, branch])
             return CreatedWorktree(path: location.path, warning: nil)
         } catch {
             let message = (error as? GitError)?.message ?? error.localizedDescription
@@ -322,7 +322,8 @@ package enum Git {
                 return CreatedWorktree(path: location.path, warning: message)
             }
             var leftovers: [String] = []
-            if madeHere, (try? run(["-C", repository, "worktree", "remove", location.path], cancellable: false)) == nil {
+            if madeHere, (try? run(["-C", repository, "worktree", "unlock", "--", location.path], cancellable: false)) == nil
+                || (try? run(["-C", repository, "worktree", "remove", location.path], cancellable: false)) == nil {
                 leftovers.append(location.path)
             } else if !madeHere, !registeredBefore, exists(location.path) {
                 // rmdir only removes an empty folder: anyone's files in it stay.
@@ -340,6 +341,10 @@ package enum Git {
             throw GitError(message: message + "\n" + L("Left in place: \(leftovers.joined(separator: ", ")).") )
         }
     }
+
+    /// Why the worktrees made here are locked: `git worktree prune` run where their folders
+    /// can't be seen (an agent's sandbox) would otherwise forget them. Removing unlocks first.
+    package static let lockReason = "kept by the board; remove it from the sidebar"
 
     private static let creationLocks = NSLock()
     nonisolated(unsafe) private static var locksByRepository: [String: NSLock] = [:]

@@ -189,7 +189,8 @@ pub fn create_worktree(projects: &Path, repository: &Path, branch: &str) -> Crea
                 make_branch(head, &mut made_branch)?;
             }
         }
-        git(Some(&repository), &["worktree", "add", "--", &location.to_string_lossy(), branch])
+        // Locked as Swift does (`Git.lockReason`): a prune where the folder can't be seen keeps it.
+        git(Some(&repository), &["worktree", "add", "--lock", "--reason", "kept by the board; remove it from the sidebar", "--", &location.to_string_lossy(), branch])
     })();
     // A worktree in place when a later step failed (a post-checkout hook) is usable: kept, as Swift does.
     if result.is_ok() || location.join(".git").exists() {

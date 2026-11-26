@@ -146,6 +146,18 @@ fn a_worktree_takes_the_local_branch_else_origins_else_a_new_one() {
 }
 
 #[test]
+fn a_worktree_is_locked_so_a_prune_that_cant_see_it_keeps_it() {
+    let projects = scratch().join("projects");
+    let repository = create_project(&projects, Some("app"), None).unwrap();
+    let worktree = create_worktree(&projects, &repository, "fix").unwrap();
+    let hidden = worktree.with_extension("hidden");
+    std::fs::rename(&worktree, &hidden).unwrap();
+    git(&repository, &["worktree", "prune"]);
+    std::fs::rename(&hidden, &worktree).unwrap();
+    assert!(git(&repository, &["worktree", "list", "--porcelain"]).contains("locked kept by the board"));
+}
+
+#[test]
 fn bad_branches_and_non_projects_are_refused() {
     let projects = scratch().join("projects");
     let repository = create_project(&projects, Some("app"), None).unwrap();

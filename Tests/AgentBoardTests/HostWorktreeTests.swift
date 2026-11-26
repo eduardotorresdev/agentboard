@@ -79,7 +79,7 @@ private let clone = "/home/dev/agentboard/projects/repo"
         // Where it would start here (main), as origin has it there.
         "git -C \(clone) rev-parse --verify --quiet refs/remotes/origin/main^{commit}",
         "git -C \(clone) update-ref refs/heads/topic abc123 ",
-        "git -C \(clone) worktree add -- \(clone)-worktrees/topic topic",
+        "git -C \(clone) worktree add --lock --reason \(Git.lockReason) -- \(clone)-worktrees/topic topic",
     ])
     // Nothing was made on this Mac.
     #expect(Git.worktrees(at: repo.path)?.count == 1)
@@ -96,7 +96,7 @@ private let clone = "/home/dev/agentboard/projects/repo"
     #expect(!host.commands.contains { $0.hasPrefix("git clone") })
     #expect(host.commands.contains("git -C \(clone) rev-parse --verify refs/remotes/origin/topic^{commit}"))
     #expect(host.commands.contains("git -C \(clone) update-ref refs/heads/topic def456 "))
-    #expect(host.commands.last == "git -C \(clone) worktree add -- \(clone)-worktrees/topic topic")
+    #expect(host.commands.last == "git -C \(clone) worktree add --lock --reason \(Git.lockReason) -- \(clone)-worktrees/topic topic")
 }
 
 @Test func aHostThatCantCloneSaysWhyInGitsWords() throws {
@@ -142,6 +142,7 @@ private let clone = "/home/dev/agentboard/projects/repo"
         "git -C \(clone) worktree list --porcelain",
         "git -C \(clone)-worktrees/topic status --porcelain",
         "git -C \(clone)-worktrees/topic rev-list --count HEAD --not --remotes",
+        "git -C \(clone) worktree unlock -- \(clone)-worktrees/topic",
         "git -C \(clone) worktree remove --force -- \(clone)-worktrees/topic",
     ])
 }
@@ -215,7 +216,7 @@ private let clone = "/home/dev/agentboard/projects/repo"
     draft.onCreated = { created = $0 }
     await draft.submit()
     #expect(created?.path == clone + "-worktrees/fix-login")
-    #expect(host.commands.last == "git -C \(clone) worktree add -- \(clone)-worktrees/fix-login fix-login")
+    #expect(host.commands.last == "git -C \(clone) worktree add --lock --reason \(Git.lockReason) -- \(clone)-worktrees/fix-login fix-login")
     #expect(Git.worktrees(at: repo.path)?.count == 1)
 }
 

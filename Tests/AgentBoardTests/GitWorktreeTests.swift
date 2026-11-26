@@ -64,3 +64,23 @@ private func cleanUp(_ repository: URL) {
     #expect(!Git.isValidBranchName("has space"))
     #expect(!Git.isValidBranchName("ends."))
 }
+
+@Test func aWorktreeOutlivesAPruneThatCantSeeItsFolderAndStillRemoves() throws {
+    let repo = try repository()
+    defer { cleanUp(repo) }
+    let path = try Git.addWorktree(branch: "fix", to: repo.path)
+    let hidden = path + ".hidden"
+
+    // What an agent's sandbox does: the folder looks gone while prune runs.
+    try FileManager.default.moveItem(atPath: path, toPath: hidden)
+    try git("-C", repo.path, "worktree", "prune")
+    try FileManager.default.moveItem(atPath: hidden, toPath: path)
+    #expect(Git.worktrees(at: repo.path)?.map(\.branch) == ["main", "fix"])
+
+    // One that can't be removed stays locked; then it removes.
+    try "work".write(toFile: path + "/new.txt", atomically: true, encoding: .utf8)
+    #expect(throws: GitError.self) { try Git.removeWorktree(at: path, from: repo.path, force: false) }
+    #expect(try Git.run(["-C", repo.path, "worktree", "list", "--porcelain"]).contains("locked \(Git.lockReason)"))
+    try Git.removeWorktree(at: path, from: repo.path, force: true)
+    #expect(Git.worktrees(at: repo.path)?.map(\.branch) == ["main"])
+}
