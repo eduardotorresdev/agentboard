@@ -3,14 +3,18 @@ import AgentRuntime
 import AppKit
 import SwiftUI
 
-/// Projects and their worktrees, in a panel floating over the canvas. The canvas shows through
-/// it blurred, so the board stays in view behind the list.
+/// The organization, its projects and their worktrees, and at the foot the controls, the
+/// computer's stats, the computers and the plan's usage, on a solid panel inset over the
+/// canvas's leading edge.
 struct Sidebar: View {
     let store: ProjectStore
     let hosts: HostStores
     let browsers: BrowserStore
     @Binding var selection: WorktreeSelection?
     @Binding var renaming: Worktree?
+    let board: BoardController
+    /// Opens the Add Project dialog.
+    let onAddProject: () -> Void
     /// Folded projects, kept across launches as comma-separated ids.
     @AppStorage(Sidebar.collapsedKey, store: AppDefaults.shared) private var collapsedIDs = ""
     /// Per data folder, like the other keys, so another instance keeps its own.
@@ -37,7 +41,12 @@ struct Sidebar: View {
     /// How long a press is held before the item lifts.
     static let holdDuration = 0.3
 
+    /// What the sidebar covers of the canvas's leading edge, its inset from the window's edge included.
     static let width: CGFloat = 264
+    /// Its inset from the window's leading and bottom edges, and from the top bar.
+    static let inset: CGFloat = 8
+    /// Space between projects.
+    private static let projectSpacing: CGFloat = 4
     /// Where the dragged item and the pointer are measured.
     fileprivate static let space = "sidebar"
 
@@ -47,36 +56,40 @@ struct Sidebar: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 10) {
+            OrganizationSwitcher(store: store, agents: hosts.local, hosts: hosts)
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 8) {
                     boardRow
+                    projectsHeader
                     let keys = store.projects.map { Self.reorderKey($0) }
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(store.projects) { project in
                             let key = Self.reorderKey(project)
-                            reorderable(key, in: keys, spacing: 22) {
+                            reorderable(key, in: keys, spacing: Self.projectSpacing) {
                                 group(for: project, reorder: reorderGesture(key, in: keys) { order in
                                     store.moveProjects(to: order.compactMap { key in store.projects.first { Self.reorderKey($0) == key }?.id })
                                 })
                             }
                         }
-                        reorderEnd(of: keys, spacing: 22)
+                        reorderEnd(of: keys, spacing: Self.projectSpacing)
                     }
                     // Each item keeps its own space after it, so a dragged one takes it along; not the last.
-                    .padding(.bottom, -22)
+                    .padding(.bottom, -Self.projectSpacing)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 16)
+                .padding(.vertical, 4)
             }
             .scrollIndicators(.never)
             .scrollDisabled(drag != nil)
-            AccountBlock(hosts: hosts)
+            SidebarFooter(hosts: hosts, board: board, host: selection?.worktree.host, organization: store.organizationID)
         }
-        .frame(width: Self.width)
+        .padding(10)
         .frame(maxHeight: .infinity)
         .overlay(alignment: .topLeading) { floating }
         .coordinateSpace(.named(Self.space))
+        .background(Theme.plane, in: .rect(cornerRadius: Theme.Radius.card, style: .continuous))
+        .padding([.leading, .top, .bottom], Self.inset)
+        .frame(width: Self.width)
         .onChange(of: isPressing) { _, pressing in
             guard !pressing else { return }
             // Next turn: a normal release's `onEnded` runs around this reset and starts the drop first.
@@ -96,7 +109,6 @@ struct Sidebar: View {
             }
         }
         .onDisappear { pressureMonitor.map(NSEvent.removeMonitor) }
-        .background { SidebarBackdrop() }
         .confirmationDialog(pendingRemoval.map { L("Remove \(store.displayName(of: $0.worktree))?") } ?? "",
                             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
                             presenting: pendingRemoval) { removal in
@@ -303,6 +315,27 @@ struct Sidebar: View {
             }
     }
 
+    /// "Projects", with adding one; reloading them is in its menu.
+    private var projectsHeader: some View {
+        HStack(spacing: 6) {
+            Text(L("Projects").uppercased())
+                .font(Theme.Font.eyebrow)
+                .tracking(Theme.Font.eyebrowTracking)
+                .foregroundStyle(Theme.inkMuted)
+            Spacer(minLength: 4)
+            SidebarIconButton(symbol: "plus", title: L("Add Project"), help: L("Clone, create, or open a project."), action: onAddProject)
+        }
+        .padding(.leading, 8)
+        .padding(.top, 4)
+        .contextMenu {
+            Button(L("Add Project"), action: onAddProject)
+            Button(L("Refresh")) {
+                store.reload()
+                store.refreshHostWorktrees(probing: true)
+            }
+        }
+    }
+
     /// The user's own board, over the projects: it belongs to none.
     private var boardRow: some View {
         let board = store.board
@@ -458,7 +491,7 @@ private struct ReorderHold: Equatable {
     var isCancelled = false
 }
 
-/// The dragged item lifted: larger, on the sidebar's frosted backdrop, back to its size as it lands.
+/// The dragged item lifted: larger, on a surface a step above the sidebar, back to its size as it lands.
 private struct FloatingItem<Content: View>: View {
     let isDropping: Bool
     /// Where it was when the drag began, in the sidebar's space.
@@ -470,7 +503,7 @@ private struct FloatingItem<Content: View>: View {
     var body: some View {
         content
             .background {
-                SidebarBackdrop(tint: SidebarBackdrop.liftedTint, shade: 0).clipShape(.rect(cornerRadius: Theme.Radius.control))
+                Theme.surface.clipShape(.rect(cornerRadius: Theme.Radius.control, style: .continuous))
                     // Fades in as it lifts and out as it lands, on its own smooth spring (no bounce on opacity).
                     .opacity(isLifted && !isDropping ? 1 : 0)
                     .animation(.smooth(duration: 0.3), value: isLifted && !isDropping)
@@ -489,8 +522,8 @@ private struct ReorderPlaceholder: View {
     let spacing: CGFloat
 
     var body: some View {
-        SidebarBackdrop(tint: SidebarBackdrop.liftedTint, shade: 0)
-            .clipShape(.rect(cornerRadius: Theme.Radius.control))
+        Theme.surface
+            .clipShape(.rect(cornerRadius: Theme.Radius.control, style: .continuous))
             // The origin's slot opens at once at lift (nothing may move), so its fill fades in instead.
             .opacity(height > 0 ? 1 : 0)
             .animation(.smooth(duration: 0.3), value: height > 0)
@@ -537,39 +570,56 @@ private struct ProjectHeader: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 4)
-                    if let count, isCollapsed, !isHovered {
+                    if isHovered {
+                        Image(systemName: "chevron.down")
+                            .font(Theme.Font.caption.weight(.semibold))
+                            .foregroundStyle(Theme.inkMuted)
+                            .rotationEffect(.degrees(isCollapsed ? -90 : 0))
+                    } else if let count {
                         Text(count, format: .number)
                             .font(Theme.Font.caption.monospacedDigit())
                             .foregroundStyle(Theme.inkMuted)
                     }
-                    Image(systemName: "chevron.down")
-                        .font(Theme.Font.caption.weight(.semibold))
-                        .foregroundStyle(Theme.inkMuted)
-                        .rotationEffect(.degrees(isCollapsed ? -90 : 0))
-                        .opacity(isHovered || isCollapsed ? 1 : 0)
                 }
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(name)
             .accessibilityValue(isCollapsed ? L("Collapsed") : L("Expanded"))
-            if let onAddWorktree {
-                Button(action: onAddWorktree) {
-                    Image(systemName: "plus")
-                        .font(Theme.Font.caption.weight(.semibold))
-                        .foregroundStyle(Theme.inkMuted)
-                        .frame(width: 18, height: 18)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help(L("New Worktree…"))
-                .accessibilityLabel(L("New Worktree…"))
+            if let onAddWorktree, isHovered {
+                SidebarIconButton(symbol: "plus", title: L("New Worktree…"), help: L("New Worktree…"), action: onAddWorktree)
+                    .transition(.opacity)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 30)
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .frame(height: 32)
         .onHover { isHovered = $0 }
         .animation(.snappy(duration: 0.2), value: isHovered)
+    }
+}
+
+/// A small icon button of the sidebar, on its own fill.
+private struct SidebarIconButton: View {
+    let symbol: String
+    let title: String
+    let help: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(Theme.Font.caption.weight(.bold))
+                .foregroundStyle(isHovered ? Theme.ink : Theme.inkMuted)
+                .frame(width: 22, height: 22)
+                .background(isHovered ? Theme.surfaceDeep : Theme.surface, in: .rect(cornerRadius: Theme.Radius.thumb, style: .continuous))
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in withAnimation(.snappy(duration: 0.15)) { isHovered = inside } }
+        .help(help)
+        .accessibilityLabel(title)
     }
 }
 
@@ -579,8 +629,10 @@ struct ProjectTile: View {
     let name: String
     static let size: CGFloat = 20
 
-    /// Blue and slate steps that carry white text at AA; never red, which means an error.
-    private static let palette: [Color] = [Theme.accent, Theme.deep, Theme.ink, Theme.inkMuted]
+    /// Blue and graphite fills, each with a text color that passes AA on it; never red, which means an error.
+    private static let palette: [(fill: Color, ink: Color)] = [
+        (Theme.accent, Theme.onAccent), (Theme.deep, Theme.onDeep), (Theme.accentTint, Theme.deep), (Theme.surfaceDeep, Theme.ink),
+    ]
 
     /// Stable across launches, unlike `hashValue`.
     static func colorIndex(for name: String) -> Int {
@@ -588,11 +640,12 @@ struct ProjectTile: View {
     }
 
     var body: some View {
+        let colors = Self.palette[Self.colorIndex(for: name)]
         Text(name.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "•")
             .font(Theme.Font.label)
-            .foregroundStyle(Theme.onAccent)
+            .foregroundStyle(colors.ink)
             .frame(width: Self.size, height: Self.size)
-            .background(Self.palette[Self.colorIndex(for: name)], in: .rect(cornerRadius: Theme.Radius.thumb))
+            .background(colors.fill, in: .rect(cornerRadius: Theme.Radius.thumb / 1.5, style: .continuous))
             .accessibilityHidden(true)
     }
 }
@@ -632,6 +685,16 @@ private struct WorktreeRow: View {
     static let textInset: CGFloat = 8 + ProjectTile.size + 9
 
     private var status: CardStatus? { [contents.agents, contents.runners].compactMap { $0 }.max() }
+
+    /// Running in the accent, waiting for the user in amber, crashed in red, idle faint.
+    static func dotColor(_ status: CardStatus?) -> Color {
+        switch status {
+        case .running: Theme.accentText
+        case .waiting: Theme.you
+        case .crashed: Theme.danger
+        case .stopped, nil: Theme.faint
+        }
+    }
     private var needsUser: Bool { status == .waiting || status == .crashed }
 
     var body: some View {
@@ -639,7 +702,7 @@ private struct WorktreeRow: View {
             if isBoard {
                 Image(systemName: MyBoard.symbol)
                     .font(Theme.Font.caption.weight(.bold))
-                    .foregroundStyle(Theme.onAccent)
+                    .foregroundStyle(Theme.onDeep)
                     .frame(width: ProjectTile.size, height: ProjectTile.size)
                     .background(Theme.deep, in: .rect(cornerRadius: Theme.Radius.thumb))
                     // The title lines up with the projects' names.
@@ -663,12 +726,14 @@ private struct WorktreeRow: View {
                     .font(Theme.Font.caption)
                     .foregroundStyle(isSelected ? Theme.ink : Theme.inkMuted)
             }
-            CardStatusDot(status: status ?? .stopped)
+            Circle()
+                .fill(Self.dotColor(status))
+                .frame(width: 6, height: 6)
                 .help(status?.label ?? "")
         }
         .padding(.leading, 8)
         .padding(.trailing, 12)
-        .frame(height: isBoard ? 40 : 32)
+        .frame(height: isBoard ? 40 : 34)
         .background { background }
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: onStartRename)
@@ -708,41 +773,19 @@ private struct WorktreeRow: View {
     }
 
     @ViewBuilder private var background: some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control)
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
         if isBoard {
-            // Always filled, in the sky's blues: deeper when open.
-            shape.fill(isSelected ? Theme.accentTint : isHovered ? Theme.accentTint.opacity(0.6) : Theme.accentSoft)
+            // Always filled, apart from the projects: blue when open.
+            shape.fill(isSelected ? Theme.accentSoft : isHovered ? Theme.surfaceDeep : Theme.surface)
         } else if isSelected && isFloating {
             // Its own fill: a matched one would be drawn where the row is in the list.
-            shape.fill(Theme.ink.opacity(0.08))
+            shape.fill(Theme.accentSoft)
         } else if isSelected {
-            shape.fill(Theme.ink.opacity(0.08))
+            shape.fill(Theme.accentSoft)
                 .matchedGeometryEffect(id: "selection", in: selectionSpace)
         } else {
-            shape.fill(Theme.ink.opacity(isHovered ? 0.04 : 0))
+            shape.fill(isHovered ? Theme.surface : .clear)
         }
     }
 }
 
-/// A light translucent layer over the canvas: the sky blurred, under a white tint and a faint
-/// slate one, so the sidebar reads as its own layer even over a white cloud. No border, no
-/// shadow. Text stays AA over the darkest sky (see ThemeContrastTests).
-struct SidebarBackdrop: View {
-    /// How much white covers the blurred sky: the least that keeps muted text AA over the sky's
-    /// deepest blue, so the sky still shows through.
-    static let tint = 0.65
-    /// The slate (ink) tint over that, which sets the sidebar apart.
-    static let shade = 0.03
-    /// A dragged sidebar item and its placeholder: whiter than the sidebar, with no slate, to stand out over it.
-    static let liftedTint = 0.85
-    var tint = Self.tint
-    var shade = Self.shade
-
-    var body: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-            .overlay(Theme.surface.opacity(tint))
-            .overlay(Theme.ink.opacity(shade))
-            .ignoresSafeArea()
-    }
-}

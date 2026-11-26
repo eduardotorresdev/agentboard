@@ -691,3 +691,18 @@
 "Disconnects this Mac while agents on your hosts keep running" = "Desconecta este Mac e os agentes nos seus hosts seguem rodando";
 "Sign out on every computer" = "Sair da conta em todos os computadores";
 "Disconnects them all while your hosts keep running their agents" = "Desconecta todos e os seus hosts seguem rodando os agentes";
+
+/* Sidebar */
+"Organization" = "Organização";
+"Projects" = "Projetos";
+"Caffeinated" = "Onda do Pilão";
+"Relaxed" = "Relaxado";
+"Zen" = "Zen";
+"Mem" = "Mem";
+"of %@" = "de %@";
+"%@ of %@" = "%1$@ de %2$@";
+"Of every processor together." = "De todos os processadores juntos.";
+"Memory in use, of what the computer has." = "Memória em uso, do total do computador.";
+"Session" = "Sessão";
+"Used of the current 5-hour session." = "O que já foi usado da sessão de 5 horas.";
+"Used of this week's limit across every model." = "O que já foi usado do limite da semana, somando todos os modelos.";

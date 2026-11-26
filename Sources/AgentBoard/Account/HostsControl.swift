@@ -2,39 +2,49 @@ import AgentRuntime
 import AppKit
 import SwiftUI
 
-/// The computers in the top bar, beside the project actions: "Compute" and how many there are,
-/// this Mac included. Opens the list of them, each with its stats, its health, its sync and its dialog.
+/// The computers at the foot of the sidebar: "Compute" and how many there are, this Mac included.
+/// Opens the list of them beside the sidebar, each with its stats, its health, its sync and its dialog.
 struct HostsControl: View {
     let hosts: HostStores
-    @State private var menu = OrganizationMenuPanel(leading: true)
+    @State private var menu = OrganizationMenuPanel(beside: true)
+    @State private var isHovered = false
 
     var body: some View {
         let count = hosts.account.hosts.count + 1
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
         Button(action: toggle) {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: "desktopcomputer").font(Theme.Font.label).foregroundStyle(Theme.ink)
                 Text(L("Compute")).font(Theme.Font.label).foregroundStyle(Theme.ink)
+                Spacer(minLength: 4)
                 Text(verbatim: "\(count)")
-                    .font(Theme.Font.caption.weight(.semibold))
+                    .font(Theme.Font.caption.weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(Theme.deep)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Theme.accentTint, in: .capsule)
+                    .foregroundStyle(Theme.accentText)
+                    .frame(minWidth: 20, minHeight: 20)
+                    .background(Theme.window, in: .circle)
                     .contentTransition(.numericText())
+                    // A computer is asking to use one of the hosts: waiting for you.
+                    .overlay(alignment: .topTrailing) {
+                        if hosts.boards.values.contains(where: { !$0.pending.isEmpty }) {
+                            Circle().fill(Theme.you).frame(width: 7, height: 7).offset(x: 2, y: -2)
+                        }
+                    }
+                Image(systemName: "chevron.down")
+                    .font(Theme.Font.caption.weight(.bold))
+                    .foregroundStyle(Theme.inkMuted)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
-            .contentShape(.capsule)
-            .modifier(HostsCapsule())
-            // A computer is asking to use one of the hosts: waiting for you.
-            .overlay(alignment: .topTrailing) {
-                if hosts.boards.values.contains(where: { !$0.pending.isEmpty }) {
-                    Circle().fill(Theme.deep).frame(width: 8, height: 8).offset(x: 2, y: 2)
-                }
-            }
+            .background(isHovered || menu.isOpen ? Theme.surfaceDeep : Theme.surface, in: shape)
+            // Open: the accent ring of a focused control.
+            .overlay { shape.strokeBorder(Theme.accent, lineWidth: 2).opacity(menu.isOpen ? 1 : 0) }
+            .contentShape(shape)
+            .animation(.snappy(duration: 0.2), value: menu.isOpen)
         }
         .buttonStyle(.plain)
+        .onHover { inside in withAnimation(.snappy(duration: 0.15)) { isHovered = inside } }
         .background(OrganizationMenuAnchor(panel: menu))
         .help(L("Compute: each computer's stats, health and sync, and its options"))
         .accessibilityLabel(L("Compute"))
@@ -47,17 +57,6 @@ struct HostsControl: View {
 
     private func toggle() {
         menu.toggle { state, close in HostsMenu(hosts: hosts, state: state, close: close) }
-    }
-}
-
-/// The button's own glass: the bar's shared one would join it to the project actions.
-private struct HostsCapsule: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content.glassEffect(.regular.interactive(), in: .capsule)
-        } else {
-            content
-        }
     }
 }
 
@@ -178,7 +177,7 @@ struct HostsMenu: View {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
-        .modifier(MenuChrome(state: state, width: 360, anchor: .topLeading))
+        .modifier(MenuChrome(state: state, width: 440, anchor: .bottomLeading))
     }
 
     /// `id` nil is this Mac.
@@ -286,21 +285,27 @@ private struct HostHealth: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            item(L("CPU"), stats.cpu.formatted(.percent.precision(.fractionLength(0))), isHigh: stats.cpu > 0.9)
-            item(L("Memory"), Self.used(stats.memoryUsed, of: stats.memoryTotal), isHigh: stats.memoryUsed > stats.memoryTotal / 10 * 9)
-            item(L("Storage"), Self.used(stats.diskUsed, of: stats.diskTotal), isHigh: stats.diskUsed > stats.diskTotal / 10 * 9)
+        let fraction = { (used: UInt64, total: UInt64) in total > 0 ? Double(used) / Double(total) : 0 }
+        HStack(spacing: 14) {
+            item(L("CPU"), stats.cpu.formatted(.percent.precision(.fractionLength(0))), fraction: stats.cpu)
+            item(L("Memory"), Self.used(stats.memoryUsed, of: stats.memoryTotal), fraction: fraction(stats.memoryUsed, stats.memoryTotal))
+            item(L("Storage"), Self.used(stats.diskUsed, of: stats.diskTotal), fraction: fraction(stats.diskUsed, stats.diskTotal))
         }
         .font(Theme.Font.caption)
         .animation(.snappy(duration: 0.3), value: stats)
     }
 
-    private func item(_ title: String, _ value: String, isHigh: Bool) -> some View {
-        HStack(spacing: 4) {
-            Text(title).foregroundStyle(Theme.inkMuted)
-            Text(value).monospacedDigit().foregroundStyle(isHigh ? Theme.danger : Theme.ink).contentTransition(.numericText())
+    private func item(_ title: String, _ value: String, fraction: Double) -> some View {
+        let isHigh = fraction > 0.9
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 4) {
+                Text(title).foregroundStyle(Theme.inkMuted)
+                Text(value).fontWeight(.semibold).monospacedDigit().foregroundStyle(isHigh ? Theme.danger : Theme.ink).contentTransition(.numericText())
+            }
+            .lineLimit(1)
+            UsageBar(fraction: fraction, color: isHigh ? Theme.danger : Theme.accent)
         }
-        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 

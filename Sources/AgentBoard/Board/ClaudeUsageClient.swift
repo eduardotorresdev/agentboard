@@ -15,6 +15,8 @@ struct ClaudeUsage: Equatable {
     /// Nil when no session is open: the next message starts one with the whole window.
     var session: Window?
     var week: Window?
+    /// The subscription, as Claude Code stores it ("max", "pro"); nil when unknown.
+    var plan: String? = nil
 }
 
 enum ClaudeUsageClient {
@@ -22,22 +24,22 @@ enum ClaudeUsageClient {
     static func fetch(organization: UUID) async throws -> ClaudeUsage {
         // For screenshots of a build under test (see docs/core.md).
         if ProcessInfo.processInfo.environment["AGENTBOARD_USAGE_SAMPLE"] == "1" {
-            return ClaudeUsage(session: .init(used: 37, resetsAt: Date().addingTimeInterval(2 * 3600)), week: .init(used: 62, resetsAt: Date().addingTimeInterval(3 * 86400)))
+            return ClaudeUsage(session: .init(used: 37, resetsAt: Date().addingTimeInterval(2 * 3600)), week: .init(used: 62, resetsAt: Date().addingTimeInterval(3 * 86400)), plan: "max")
         }
         // An isolated instance (tests, harnesses) never reads the user's keychain, not even to look.
         guard !DataFolder.isIsolated(), ProcessInfo.processInfo.environment["AGENTBOARD_TEST"] != "1" else {
             throw URLError(.userAuthenticationRequired)
         }
         let service = OrganizationHome.keychainService(organization: organization)
-        guard let token = token(service: service) else { throw URLError(.userAuthenticationRequired) }
+        guard let credential = credential(service: service) else { throw URLError(.userAuthenticationRequired) }
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(credential.token)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.timeoutInterval = 15
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let body = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        return ClaudeUsage(session: window(body["five_hour"]), week: window(body["seven_day"]))
+        return ClaudeUsage(session: window(body["five_hour"]), week: window(body["seven_day"]), plan: credential.plan)
     }
 
     private static func window(_ value: Any?) -> ClaudeUsage.Window? {
@@ -53,13 +55,12 @@ enum ClaudeUsageClient {
 
     /// The freshest unexpired token stored under the organization's keychain service. Other
     /// services belong to other organizations' config folders and must not be mixed in.
-    private static func token(service: String) -> String? {
+    private static func credential(service: String) -> (token: String, expiresAt: Double, plan: String?)? {
         let now = Date().timeIntervalSince1970 * 1000
         return entries(service: service)
             .compactMap(credentials)
             .filter { $0.expiresAt > now }
-            .max { $0.expiresAt < $1.expiresAt }?
-            .token
+            .max { $0.expiresAt < $1.expiresAt }
     }
 
     /// The keychain entries Claude Code wrote, by service and account: one service can hold
@@ -81,7 +82,7 @@ enum ClaudeUsageClient {
     }
 
     /// Read through `security`, the tool Claude Code stores them with, so the keychain doesn't ask.
-    private static func credentials(_ entry: (service: String, account: String?)) -> (token: String, expiresAt: Double)? {
+    private static func credentials(_ entry: (service: String, account: String?)) -> (token: String, expiresAt: Double, plan: String?)? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = ["find-generic-password", "-s", entry.service] + (entry.account.map { ["-a", $0] } ?? []) + ["-w"]
@@ -94,6 +95,6 @@ enum ClaudeUsageClient {
         guard process.terminationStatus == 0,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = json["claudeAiOauth"] as? [String: Any], let token = oauth["accessToken"] as? String else { return nil }
-        return (token, oauth["expiresAt"] as? Double ?? .greatestFiniteMagnitude)
+        return (token, oauth["expiresAt"] as? Double ?? .greatestFiniteMagnitude, oauth["subscriptionType"] as? String)
     }
 }
