@@ -68,7 +68,7 @@ struct BrowserImportDialog: View {
                         if let result {
                             Text(result)
                                 .font(Theme.Font.body)
-                                .foregroundStyle(isError ? Theme.danger : Theme.accent)
+                                .foregroundStyle(isError ? Theme.danger : Theme.accentText)
                                 .padding(.top, 6)
                         }
                     }
@@ -169,7 +169,7 @@ private struct SourceRow: View {
                 if busy {
                     ProgressView().controlSize(.small)
                 } else {
-                    Text(L("Import")).font(Theme.Font.body).foregroundStyle(Theme.accent).opacity(isHovered ? 1 : 0.0)
+                    Text(L("Import")).font(Theme.Font.body).foregroundStyle(Theme.accentText).opacity(isHovered ? 1 : 0.0)
                 }
             }
             .padding(.horizontal, 8)

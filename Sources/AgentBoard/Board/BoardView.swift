@@ -51,9 +51,9 @@ enum BoardPalette {
     static let ink: UInt32 = Theme.Hex.ink
     static let accent: UInt32 = Theme.Hex.accent
     static let deep: UInt32 = Theme.Hex.deep
-    static let card = rgb(Theme.Hex.white)
-    /// A post-it's paper: a baby-blue wash (Radix Blue 3).
-    static let postIt: UInt32 = Theme.Hex.accentSoft
+    static let card = rgb(Theme.Hex.paper)
+    /// A post-it's paper: the same surface as every card, ink text on it.
+    static let postIt: UInt32 = Theme.Hex.paper
 }
 
 /// Lets SwiftUI chrome (the canvas toolbar) talk to the board.
@@ -199,7 +199,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var glyphs: GlyphCache?
     /// Cell size in pixels at zoom 1, which sets every terminal's columns and rows.
     private var baseCell: (width: Int, height: Int)?
-    private let theme = TerminalTheme.light
+    private let theme = TerminalTheme.dark
     private static let fontSize: CGFloat = 12
     static let zoomRange: ClosedRange<CGFloat> = 0.25...2
     /// Stops the toolbar's zoom buttons go through.
@@ -752,8 +752,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             let status = store.cardStatus(record)
             let kind = record.runner != nil ? L("Runner") : record.provider?.title ?? record.providerID
             // The kind is left out when the name already says it ("Claude 2").
-            let detail = status == .waiting || status == .crashed ? status.label
-                : record.isOrchestrator ? L("\(kind) · Orchestrator") : record.name.hasPrefix(kind) ? nil : kind
+            // The state shows as the header's pill; the detail names the kind.
+            let detail = record.isOrchestrator ? L("\(kind) · Orchestrator") : record.name.hasPrefix(kind) ? nil : kind
             let icon: CardIcon = record.runner != nil ? .symbol("play.rectangle", color: Theme.Hex.inkMuted) : CardFrame.agentIcon(provider: record.providerID)
             card.update(frame: record.frame, title: record.name, detail: detail, icon: icon, status: status, kind: record.runner != nil ? .runner : .agent, state: state, focused: highlighted(record.id),
                         closeHovered: record.id == hoveredClose, starting: record.runner == nil ? L("Starting \(record.name)…") : "",
@@ -3140,7 +3140,7 @@ private final class CardLayer: CALayer {
         super.init()
         cursor.backgroundColor = BoardPalette.rgb(BoardPalette.accent, 0.35)
         cursor.isHidden = true
-        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.white, 0.75)
+        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.paper, 0.8)
         status.fontSize = Theme.Font.labelSize
         status.truncationMode = .end
         status.alignmentMode = .center
@@ -3325,14 +3325,11 @@ private final class LinkLayer: CALayer {
         line.fillColor = nil
         line.lineCap = .round
         line.lineJoin = .round
-        ends.fillColor = BoardPalette.rgb(BoardPalette.accent)
+        ends.fillColor = BoardPalette.rgb(Theme.Hex.faint)
+        line.lineDashPattern = [4, 5]
         knob.bounds = CGRect(x: 0, y: 0, width: Self.knobSize, height: Self.knobSize)
         knob.cornerRadius = Self.knobSize / 2
-        knob.backgroundColor = BoardPalette.card
-        knob.shadowColor = BoardPalette.rgb(BoardPalette.ink)
-        knob.shadowOpacity = Theme.Shadow.opacity
-        knob.shadowRadius = Theme.Shadow.radius
-        knob.shadowOffset = CGSize(width: 0, height: Theme.Shadow.y)
+        knob.backgroundColor = BoardPalette.rgb(Theme.Hex.paperDeep)
         knob.isHidden = true
         knobGlyph.string = "✕"
         knobGlyph.font = NSFont.systemFont(ofSize: Theme.Font.captionSize, weight: .semibold)
@@ -3360,8 +3357,8 @@ private final class LinkLayer: CALayer {
             self.ends.path = ends
             knob.position = route.point(at: 0.5)
         }
-        line.strokeColor = BoardPalette.rgb(BoardPalette.accent, hovered ? 0.95 : 0.55)
-        line.lineWidth = hovered ? 2.5 : 2
+        line.strokeColor = BoardPalette.rgb(hovered ? Theme.Hex.inkMuted : Theme.Hex.faint)
+        line.lineWidth = hovered ? 2 : 1.5
         if knob.isHidden == hovered {
             knob.isHidden = !hovered
             if hovered { knob.add(CardLayer.spring("transform.scale", from: 0.6, to: 1, stiffness: 420, damping: 24), forKey: "appear") }

@@ -122,7 +122,7 @@ private struct FileRow: View {
                 .frame(width: 10)
             Image(systemName: entry.isFolder ? "folder.fill" : Self.symbol(for: entry.name))
                 .font(.system(size: 12))
-                .foregroundStyle(entry.isFolder ? Theme.accent.opacity(0.75) : Color.secondary)
+                .foregroundStyle(entry.isFolder ? Theme.accentText.opacity(0.85) : Color.secondary)
                 .frame(width: 16)
             Text(label)
                 .lineLimit(1)
@@ -139,7 +139,7 @@ private struct FileRow: View {
         .padding(.leading, 8 + CGFloat(depth) * 14)
         .padding(.trailing, 10)
         .frame(height: 24)
-        .background(selected ? Theme.accent.opacity(0.14) : isHovered ? Theme.line.opacity(0.06) : .clear,
+        .background(selected ? Theme.accentSoft : isHovered ? Theme.line.opacity(0.06) : .clear,
                     in: .rect(cornerRadius: Theme.Radius.control))
         .padding(.horizontal, 6)
         .contentShape(.rect)
@@ -153,8 +153,8 @@ private struct FileRow: View {
 
     static func color(_ status: Character) -> Color {
         switch status {
-        case "U", "A": Theme.accent
-        case "D": .red
+        case "U", "A": Theme.accentText
+        case "D": Theme.danger
         default: Theme.inkMuted
         }
     }
@@ -228,7 +228,7 @@ private struct FileContentView: View {
 
     private func notice(_ symbol: String, _ text: String) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 24)).foregroundStyle(Theme.accent.opacity(0.6))
+            Image(systemName: symbol).font(.system(size: 24)).foregroundStyle(Theme.accentText.opacity(0.8))
             Text(text).font(.callout).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -270,7 +270,7 @@ private struct FileContentView: View {
             HStack(spacing: 4) {
                 Capsule().fill(Theme.accent).frame(width: 3, height: 14).opacity(noted ? 1 : 0)
                 Text("\(number)")
-                    .foregroundStyle(selected ? Theme.accent : Color.secondary.opacity(0.7))
+                    .foregroundStyle(selected ? Theme.accentText : Color.secondary.opacity(0.7))
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .frame(width: gutter)
@@ -282,7 +282,7 @@ private struct FileContentView: View {
         .font(Self.font)
         .frame(height: Self.lineHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? Theme.accent.opacity(0.14) : noted ? Theme.accent.opacity(0.05) : .clear)
+        .background(selected ? Theme.accentSoft : noted ? Theme.accent.opacity(0.05) : .clear)
         .contentShape(.rect)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(Self.space)).minY } action: { lineTops[number] = $0 }
         .gesture(
@@ -355,7 +355,7 @@ private struct FileContentView: View {
         .padding(12)
         .frame(width: 440, alignment: .leading)
         .background(Theme.canvas, in: .rect(cornerRadius: Theme.Radius.dialog))
-        .shadow(color: Theme.line.opacity(Double(Theme.Shadow.opacity)), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
+        .shadow(color: Theme.window.opacity(Double(Theme.Shadow.opacity)), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
         .padding(.vertical, 6)
         .onAppear { isWriting = true }
         .onExitCommand { withAnimation(.snappy(duration: 0.2)) { selection = [] } }
@@ -384,7 +384,7 @@ private struct NoteView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "text.bubble.fill").foregroundStyle(Theme.accent)
+            Image(systemName: "text.bubble.fill").foregroundStyle(Theme.accentText)
             Text(note.comment).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Button(action: onRemove) { Image(systemName: "trash") }
@@ -412,7 +412,7 @@ struct SendAnnotationsBar: View {
             Button { store.sendAnnotations(of: id) } label: {
                 Label(count == 1 ? L("Send 1 note") : L("Send \(count) notes"), systemImage: "paperplane.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Theme.onAccent)
                     .padding(.horizontal, 16)
                     .frame(height: 34)
                     .background(Theme.accent.opacity(agents.isEmpty ? 0.4 : 1), in: .rect(cornerRadius: Theme.Radius.control))
@@ -429,8 +429,7 @@ struct SendAnnotationsBar: View {
             .help(L("Discards the notes."))
         }
         .padding(4)
-        .background(.regularMaterial, in: .rect(cornerRadius: Theme.Radius.control))
-        .shadow(color: Theme.line.opacity(Double(Theme.Shadow.opacity)), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
+        .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.control))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

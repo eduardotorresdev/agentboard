@@ -180,7 +180,7 @@ private struct ScriptRow: View {
             HStack(spacing: 12) {
                 Text(script.name)
                     .font(Theme.Font.label)
-                    .foregroundStyle(picked ? Theme.accent : Theme.ink)
+                    .foregroundStyle(picked ? Theme.accentText : Theme.ink)
                 Spacer(minLength: 0)
                 Text(script.body)
                     .font(Theme.Font.caption.monospaced())
@@ -200,7 +200,7 @@ private struct ScriptRow: View {
     }
 
     private var fill: Color {
-        if picked { return Theme.accent.opacity(0.1) }
+        if picked { return Theme.accentSoft }
         return isHovered ? Theme.surfaceDeep : .clear
     }
 }

@@ -110,10 +110,10 @@ struct QuestionForm: View {
                     Text(header.uppercased())
                         .font(.system(size: 10, weight: .bold))
                         .kerning(0.4)
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.accentText)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Theme.accent.opacity(0.1), in: .rect(cornerRadius: Theme.Radius.control))
+                        .background(Theme.accentSoft, in: .rect(cornerRadius: Theme.Radius.control))
                 }
                 Text(question.question)
                     .font(.system(size: 14, weight: .semibold))
@@ -230,7 +230,7 @@ private struct OptionRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(isOn ? Theme.accent.opacity(0.09) : Theme.line.opacity(isHovered ? 0.04 : 0), in: .rect(cornerRadius: Theme.Radius.card))
+            .background(isOn ? Theme.accentSoft : Theme.line.opacity(isHovered ? 0.04 : 0), in: .rect(cornerRadius: Theme.Radius.card))
             .contentShape(.rect(cornerRadius: Theme.Radius.card))
         }
         .buttonStyle(.plain)
@@ -254,7 +254,7 @@ private struct OptionMark: View {
                 if multiple {
                     Image(systemName: "checkmark")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Theme.onAccent)
                 } else {
                     Circle().fill(Theme.accent).frame(width: 8, height: 8)
                 }

@@ -130,7 +130,7 @@ final class ImageMarks {
             let size = label.size()
             // The tab hangs below the area, or sits inside it at the picture's bottom edge.
             let tab = CGRect(x: area.minX, y: max(0, area.minY - size.height - unit * 0.4), width: size.width + unit, height: size.height + unit * 0.4)
-            context.setFillColor(BoardPalette.rgb(BoardPalette.deep))
+            context.setFillColor(BoardPalette.rgb(BoardPalette.accent))
             context.fill(tab)
             label.draw(at: CGPoint(x: tab.minX + unit / 2, y: tab.minY + unit * 0.2))
         }
@@ -344,7 +344,7 @@ struct ImageMarksView: View {
             .overlay(alignment: .bottomTrailing) {
                 Text(verbatim: "\(Int(area.width)) x \(Int(area.height)) px")
                     .font(Theme.Font.caption.monospacedDigit())
-                    .foregroundStyle(Theme.onAccent)
+                    .foregroundStyle(Theme.onDeep)
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(Theme.deep, in: RoundedRectangle(cornerRadius: Theme.Radius.thumb))
                     .fixedSize()
@@ -366,7 +366,7 @@ struct ImageMarksView: View {
             .offset(x: rect.minX, y: rect.minY)
         Text(verbatim: "\(number)")
             .font(Theme.Font.label.monospacedDigit())
-            .foregroundStyle(Theme.onAccent)
+            .foregroundStyle(selected ? Theme.onDeep : Theme.onAccent)
             .frame(width: ImageMarksLayout.tab.width, height: ImageMarksLayout.tab.height)
             .background(selected ? Theme.deep : Theme.accent,
                         in: UnevenRoundedRectangle(bottomLeadingRadius: Theme.Radius.thumb, bottomTrailingRadius: Theme.Radius.thumb))
@@ -493,7 +493,7 @@ private struct MarkBalloon: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(L("Annotation \(number)"))
                 .font(Theme.Font.eyebrow)
-                .foregroundStyle(Theme.onAccent)
+                .foregroundStyle(Theme.onDeep)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
                 .background(Theme.deep)
@@ -528,7 +528,7 @@ private struct MarkBalloon: View {
         }
         .background(Theme.surface)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
-        .shadow(color: Theme.line.opacity(Double(Theme.Shadow.opacity)), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
+        .shadow(color: Theme.window.opacity(Double(Theme.Shadow.opacity)), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
         .onAppear {
             text = mark.text
             typing = true

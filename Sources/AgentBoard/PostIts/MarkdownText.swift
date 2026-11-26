@@ -172,7 +172,7 @@ enum MarkdownText {
                         text.removeFirst(prefix.count)
                     }
                     var markerAttributes = attributes
-                    markerAttributes[.foregroundColor] = color(BoardPalette.accent)
+                    markerAttributes[.foregroundColor] = color(Theme.Hex.accentText)
                     markerAttributes[.font] = font(size: baseSize, bold: false)
                     markerAttributes.removeValue(forKey: .postItLink)
                     markerAttributes[.postItMarker] = String(repeating: "    ", count: listDepth(components) - 1) + source
@@ -274,7 +274,7 @@ enum MarkdownText {
         attributes[.font] = font(size: size, bold: bold, monospaced: monospaced)
         if let link = run.link {
             attributes[.postItLink] = link
-            attributes[.foregroundColor] = color(BoardPalette.accent)
+            attributes[.foregroundColor] = color(Theme.Hex.accentText)
             attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
         }
         return attributes

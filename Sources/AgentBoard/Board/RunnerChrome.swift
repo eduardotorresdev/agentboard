@@ -157,12 +157,11 @@ final class RunnerChromeLayer: CALayer {
         for (chip, item) in zip(chips, layout.chips) {
             let lit = hovered == .link(item.link.url)
             chip.background.frame = item.rect
-            // Localhost is the main address (sky blue); the network one deep blue.
-            let tint = item.link.network ? BoardPalette.deep : BoardPalette.accent
-            chip.background.backgroundColor = BoardPalette.rgb(tint, lit ? 0.45 : 0.22)
+            // Localhost is the main address, in blue; the network one a quiet gray chip.
+            let fill = item.link.network ? (lit ? Theme.Hex.accentSoft : Theme.Hex.paperDeep) : (lit ? Theme.Hex.accentTint : Theme.Hex.accentSoft)
+            chip.background.backgroundColor = BoardPalette.rgb(fill)
             chip.label.string = item.link.label + " ↗"
-            // Yellow text doesn't read on paper: the network chip writes in ink.
-            chip.label.foregroundColor = BoardPalette.rgb(item.link.network ? BoardPalette.ink : tint)
+            chip.label.foregroundColor = BoardPalette.rgb(item.link.network ? BoardPalette.ink : lit ? BoardPalette.deep : Theme.Hex.accentText)
             chip.label.frame = CGRect(x: 0, y: (item.rect.height - line) / 2, width: item.rect.width, height: line)
         }
 

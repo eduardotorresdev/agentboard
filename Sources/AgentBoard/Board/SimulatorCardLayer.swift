@@ -72,10 +72,10 @@ final class SimulatorCardLayer: CALayer {
         status.fontSize = Theme.Font.labelSize
         status.alignmentMode = .center
         status.isWrapped = true
-        screenLayer.backgroundColor = BoardPalette.rgb(BoardPalette.ink)
+        screenLayer.backgroundColor = BoardPalette.rgb(Theme.Hex.window)
         screenLayer.masksToBounds = true
         screenLayer.cornerRadius = Theme.Radius.control
-        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.white, 0.8)
+        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.paper, 0.8)
         [bar, hover, chip, homeGlyph, closeGlyph, screenLayer, dim, status].forEach(addSublayer)
         CardFrame.reveal([closeGlyph, homeGlyph], visible: false)
         for handle in handles {
@@ -106,9 +106,9 @@ final class SimulatorCardLayer: CALayer {
                    focused: focused, reserve: bounds.width - layout.title.maxX - 10, scale: scale)
         chip.frame = layout.device
         chip.cornerRadius = Theme.Radius.control
-        chip.backgroundColor = BoardPalette.rgb(BoardPalette.accent, control == .device ? 1 : 0.14)
+        chip.backgroundColor = BoardPalette.rgb(control == .device ? BoardPalette.accent : Theme.Hex.accentSoft)
         chipText.string = SimulatorCardLayout.chipLabel(record)
-        chipText.foregroundColor = control == .device ? BoardPalette.rgb(Theme.Hex.white) : BoardPalette.rgb(BoardPalette.accent)
+        chipText.foregroundColor = BoardPalette.rgb(control == .device ? Theme.Hex.white : Theme.Hex.accentText)
         let chipLine = ceil(SimulatorCardLayout.chipFont.ascender - SimulatorCardLayout.chipFont.descender) + 1
         chipText.frame = CGRect(x: 6, y: (layout.device.height - chipLine) / 2, width: layout.device.width - 12, height: chipLine)
         let glyphHeight = ceil(homeGlyph.fontSize * 1.3)

@@ -84,8 +84,8 @@ final class VideoPlayback {
         layer.masksToBounds = true
         layer.cornerRadius = CardMetrics.radius
         layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-        layer.backgroundColor = BoardPalette.rgb(BoardPalette.ink)
-        strip.backgroundColor = BoardPalette.rgb(BoardPalette.ink, 0.72)
+        layer.backgroundColor = BoardPalette.rgb(Theme.Hex.window)
+        strip.backgroundColor = BoardPalette.rgb(Theme.Hex.window, 0.72)
         strip.cornerRadius = CardMetrics.radius
         strip.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         track.backgroundColor = BoardPalette.rgb(Theme.Hex.white, 0.3)
@@ -93,7 +93,7 @@ final class VideoPlayback {
         progress.backgroundColor = BoardPalette.rgb(BoardPalette.accent)
         progress.cornerRadius = Theme.Radius.thumb
         progress.anchorPoint = .zero
-        loopFill.backgroundColor = BoardPalette.rgb(BoardPalette.deep)
+        loopFill.backgroundColor = BoardPalette.rgb(BoardPalette.accent)
         loopFill.cornerRadius = Theme.Radius.control
         time.font = CardFrame.controlFont
         time.fontSize = CardFrame.controlFont.pointSize

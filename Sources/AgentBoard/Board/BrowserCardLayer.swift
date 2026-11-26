@@ -97,7 +97,7 @@ final class BrowserCardLayer: CALayer {
         page.backgroundColor = BoardPalette.card
         page.masksToBounds = true
         page.cornerRadius = Theme.Radius.control
-        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.white, 0.8)
+        dim.backgroundColor = BoardPalette.rgb(Theme.Hex.paper, 0.8)
         ([bar, addressField, hover, chip, address, closeGlyph, page, dim, status] + glyphs).forEach(addSublayer)
         CardFrame.reveal([closeGlyph] + glyphs, visible: false)
         for handle in handles {
@@ -130,9 +130,9 @@ final class BrowserCardLayer: CALayer {
                    reserve: bounds.width - layout.title.maxX - 10, scale: scale)
         chip.frame = layout.device
         chip.cornerRadius = Theme.Radius.control
-        chip.backgroundColor = BoardPalette.rgb(BoardPalette.accent, control == .device ? 1 : 0.14)
+        chip.backgroundColor = BoardPalette.rgb(control == .device ? BoardPalette.accent : Theme.Hex.accentSoft)
         chipText.string = BrowserCardLayout.chipLabel(record.device)
-        chipText.foregroundColor = control == .device ? BoardPalette.rgb(Theme.Hex.white) : BoardPalette.rgb(BoardPalette.accent)
+        chipText.foregroundColor = BoardPalette.rgb(control == .device ? Theme.Hex.white : Theme.Hex.accentText)
         let chipLine = ceil(BrowserCardLayout.chipFont.ascender - BrowserCardLayout.chipFont.descender) + 1
         chipText.frame = CGRect(x: 6, y: (layout.device.height - chipLine) / 2, width: layout.device.width - 12, height: chipLine)
         for (glyph, rect) in zip(glyphs, [layout.back, layout.forward, layout.reload]) {

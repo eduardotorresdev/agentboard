@@ -72,11 +72,11 @@ struct WelcomeView: View {
 
     private var options: [StartOption] {
         [
-            StartOption(symbol: "sparkles", tint: Theme.accent, title: L("Start from scratch"),
+            StartOption(symbol: "sparkles", tint: Theme.accentText, title: L("Start from scratch"),
                         detail: L("An empty repository with a first commit on main."), action: onCreate),
-            StartOption(symbol: "arrow.down.circle", tint: Theme.accent, bounce: .bounce.down, title: L("Clone a repository"),
+            StartOption(symbol: "arrow.down.circle", tint: Theme.accentText, bounce: .bounce.down, title: L("Clone a repository"),
                         detail: L("Copy a repository from GitHub, GitLab, or any remote."), action: onClone),
-            StartOption(symbol: "folder", tint: Theme.accent, title: L("Open a folder"),
+            StartOption(symbol: "folder", tint: Theme.accentText, title: L("Open a folder"),
                         detail: L("Add a project that already exists on this Mac."), action: onOpen),
         ]
     }
@@ -118,7 +118,7 @@ private struct StartCard: View {
                     .foregroundStyle(option.tint)
                     .symbolEffect(option.bounce, options: .speed(0.8), value: pulse)
                     .frame(width: 44, height: 44)
-                    .background(Theme.surfaceDeep, in: .rect(cornerRadius: Theme.Radius.control))
+                    .background(Theme.accentSoft, in: .rect(cornerRadius: Theme.Radius.control))
                     .scaleEffect(isHovered ? 1.08 : 1)
                     .rotationEffect(.degrees(isHovered ? -4 : 0))
                 .padding(.bottom, 16)
@@ -133,8 +133,8 @@ private struct StartCard: View {
             }
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            // The controls' translucent material, a touch more opaque while hovered; no shadow.
-            .background(isHovered ? AnyShapeStyle(.thickMaterial) : AnyShapeStyle(.regularMaterial),
+            // A surface, a step lighter while hovered; no shadow.
+            .background(isHovered ? Theme.surfaceDeep : Theme.surface,
                         in: .rect(cornerRadius: Theme.Radius.card))
             .offset(y: isHovered ? -3 : 0)
             .contentShape(.rect)

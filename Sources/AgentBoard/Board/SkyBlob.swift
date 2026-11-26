@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The empty canvas: the blob hopping on the sky, with what to do next.
+/// The empty canvas: the blob hopping on it, with what to do next.
 struct SkyBlobEmptyState: View {
     var title = L("Our sky is still empty")
     var message = L("Add your first agent or card from the bar below.")
@@ -46,7 +46,7 @@ struct OwnGraph<Content: View>: NSViewRepresentable {
     }
 }
 
-/// One appearance of the blob. The essence never changes (a round deep-blue body, the same eyes,
+/// One appearance of the blob. The essence never changes (a round blue body, the same eyes,
 /// the same hop); the outfit does. Adding an accessory, shape or silhouette is one more case.
 struct BlobStyle: Equatable {
     /// Features on top of the seed's own blob outline.
@@ -187,10 +187,10 @@ struct SkyBlob: View {
     /// The outline breathes slowly between two shapes on a spring; still under Reduce Motion.
     @ViewBuilder private func blobBody(_ pose: Pose) -> some View {
         if reduceMotion {
-            BlobBody(seed: style.shape, breath: 0.5, wobble: 0, tuft: style.silhouette == .tuft).fill(Theme.deep)
+            BlobBody(seed: style.shape, breath: 0.5, wobble: 0, tuft: style.silhouette == .tuft).fill(Theme.accent)
         } else {
             PhaseAnimator([0.0, 1.0]) { breath in
-                BlobBody(seed: style.shape, breath: breath, wobble: pose.wobble, tuft: style.silhouette == .tuft).fill(Theme.deep)
+                BlobBody(seed: style.shape, breath: breath, wobble: pose.wobble, tuft: style.silhouette == .tuft).fill(Theme.accent)
             } animation: { _ in .spring(duration: 1.9, bounce: 0) }
         }
     }
@@ -200,7 +200,7 @@ struct SkyBlob: View {
         VStack(spacing: 5) {
             HStack(spacing: 10) {
                 ForEach(0 ..< 2, id: \.self) { _ in
-                    Capsule().fill(.white).frame(width: 12, height: 19).scaleEffect(y: max(pose.eyes, 2.5 / 19))
+                    Capsule().fill(Theme.onAccent).frame(width: 12, height: 19).scaleEffect(y: max(pose.eyes, 2.5 / 19))
                 }
             }
             .offset(x: pose.look * 8)
@@ -211,7 +211,7 @@ struct SkyBlob: View {
     private func arms(_ pose: Pose, _ size: CGSize) -> some View {
         HStack(spacing: size.width - 16) {
             ForEach([-1.0, 1.0], id: \.self) { side in
-                Capsule().fill(Theme.deep).frame(width: 12, height: 24)
+                Capsule().fill(Theme.accent).frame(width: 12, height: 24)
                     .rotationEffect(.degrees(side * (-50 - Double(pose.trail) * 4)), anchor: .top)
             }
         }
@@ -226,12 +226,12 @@ struct SkyBlob: View {
         case .headphones:
             ZStack {
                 Circle().trim(from: 0.55, to: 0.95)
-                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .stroke(Theme.deep, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                     .frame(width: size.width * 0.95, height: size.width * 0.95)
                     .offset(y: 8)
                 HStack(spacing: size.width - 10) {
                     ForEach(0 ..< 2, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 5).fill(Theme.accent).frame(width: 12, height: 22)
+                        RoundedRectangle(cornerRadius: 5).fill(Theme.deep).frame(width: 12, height: 22)
                     }
                 }
                 .offset(y: -4)
@@ -239,31 +239,31 @@ struct SkyBlob: View {
             .offset(y: pose.trail * 0.4)
         case .scarf:
             ZStack {
-                Capsule().fill(Theme.accent).frame(width: size.width * 0.86, height: 10)
-                Capsule().fill(Theme.accent).frame(width: 10, height: 24)
+                Capsule().fill(Theme.deep).frame(width: size.width * 0.86, height: 10)
+                Capsule().fill(Theme.deep).frame(width: 10, height: 24)
                     .rotationEffect(.degrees(-20 - Double(pose.trail) * 5), anchor: .top)
                     .offset(x: size.width * 0.24, y: 12)
             }
             .offset(y: size.height * 0.2)
         case .cap:
             ZStack(alignment: .bottom) {
-                Capsule().fill(Theme.accent).frame(width: 46, height: 8).offset(x: 10)
-                Circle().trim(from: 0.5, to: 1).fill(Theme.accent).frame(width: 40, height: 40).offset(y: 20)
+                Capsule().fill(Theme.deep).frame(width: 46, height: 8).offset(x: 10)
+                Circle().trim(from: 0.5, to: 1).fill(Theme.deep).frame(width: 40, height: 40).offset(y: 20)
             }
             .frame(height: 30)
             .offset(y: top - 6 - pose.trail * 0.8)
             .rotationEffect(.degrees(-6))
         case .antenna:
             VStack(spacing: 0) {
-                Circle().fill(Theme.accent).frame(width: 12, height: 12)
-                Capsule().fill(Theme.deep).frame(width: 4, height: 16)
+                Circle().fill(Theme.deep).frame(width: 12, height: 12)
+                Capsule().fill(Theme.accent).frame(width: 4, height: 16)
             }
             .rotationEffect(.degrees(Double(pose.trail) * 2 + Double(pose.look) * 8), anchor: .bottom)
             .offset(y: top - 12)
         case .glasses:
             HStack(spacing: 4) {
                 ForEach(0 ..< 2, id: \.self) { _ in
-                    Circle().stroke(Theme.accentSoft, lineWidth: 3).frame(width: 24, height: 24)
+                    Circle().stroke(Theme.deep, lineWidth: 3).frame(width: 24, height: 24)
                 }
             }
             .offset(x: pose.look * 8, y: 8)
@@ -280,8 +280,8 @@ struct SkyBlob: View {
                     switch style.surrounding {
                     case .none: EmptyView()
                     case .clouds: CloudPuff().fill(Theme.color(Theme.Hex.blueLight)).frame(width: 34, height: 18)
-                    case .sparkles: SparkleShape().fill(Theme.accent).frame(width: 14, height: 14)
-                    case .squares: Rectangle().fill(Theme.accent).frame(width: 8, height: 8).rotationEffect(.degrees(18))
+                    case .sparkles: SparkleShape().fill(Theme.accentText).frame(width: 14, height: 14)
+                    case .squares: Rectangle().fill(Theme.accentText).frame(width: 8, height: 8).rotationEffect(.degrees(18))
                     }
                 }
                 .scaleEffect(scale)

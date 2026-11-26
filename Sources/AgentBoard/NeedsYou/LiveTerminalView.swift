@@ -36,7 +36,7 @@ struct LiveTerminal: NSViewRepresentable {
 final class LiveTerminalView: NSView, NSTextInputClient {
     private let store: AgentStore
     private let presenter: TerminalPresenter?
-    private let theme = TerminalTheme.light
+    private let theme = TerminalTheme.dark
     private let metal = CAMetalLayer()
     private let cursor = CALayer()
     private var glyphs: GlyphCache?

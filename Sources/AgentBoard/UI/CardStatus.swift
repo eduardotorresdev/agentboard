@@ -57,8 +57,8 @@ enum CardStatus: Int, Comparable, Equatable {
 
     var color: Color {
         switch self {
-        case .running: Theme.accent
-        case .waiting: Theme.deep
+        case .running: Theme.accentText
+        case .waiting: Theme.you
         case .crashed: Theme.danger
         case .stopped: Theme.inkMuted.opacity(0.45)
         }
@@ -75,7 +75,7 @@ enum CardStatus: Int, Comparable, Equatable {
 }
 
 /// A small dot that speaks only when there is something to say: running breathes in the
-/// accent, waiting (deep blue) and crashed (red) hold still, stopped shows nothing.
+/// accent, waiting (amber) and crashed (red) hold still, stopped shows nothing.
 struct CardStatusDot: View {
     let status: CardStatus
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

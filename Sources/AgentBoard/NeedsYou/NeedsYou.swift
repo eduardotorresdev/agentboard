@@ -105,9 +105,9 @@ struct NeedsYouButton: View {
             .padding(.leading, 12)
             .padding(.trailing, 5)
             .frame(height: 32)
-            .foregroundStyle(count > 0 ? Theme.onAccent : Theme.inkMuted)
-            // Deep blue: the "waiting for you" color.
-            .background(count > 0 ? Theme.deep.opacity(isHovered ? 0.88 : 1) : Theme.line.opacity(isHovered ? 0.07 : 0.04),
+            .foregroundStyle(count > 0 ? Theme.onYou : Theme.inkMuted)
+            // Amber: the "waiting for you" color.
+            .background(count > 0 ? Theme.you.opacity(isHovered ? 0.88 : 1) : Theme.line.opacity(isHovered ? 0.07 : 0.04),
                         in: .rect(cornerRadius: Theme.Radius.control))
             .contentShape(.rect(cornerRadius: Theme.Radius.control))
             .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -138,7 +138,7 @@ struct NeedsYouButton: View {
         .accessibilityLabel("\(meaning): \(value)")
     }
 
-    /// A white block on the button's fill.
+    /// A dark block on the button's amber fill.
     private struct Tally: ViewModifier {
         let isLit: Bool
 
@@ -146,8 +146,8 @@ struct NeedsYouButton: View {
             content
                 .padding(.horizontal, 7)
                 .frame(minWidth: 22, minHeight: 22)
-                .foregroundStyle(isLit ? Theme.deep : Theme.inkMuted)
-                .background(isLit ? Theme.surface : Theme.line.opacity(0.08), in: .rect(cornerRadius: Theme.Radius.thumb))
+                .foregroundStyle(isLit ? Theme.you : Theme.inkMuted)
+                .background(isLit ? Theme.onYou : Theme.line.opacity(0.08), in: .rect(cornerRadius: Theme.Radius.thumb))
         }
     }
 }
@@ -481,7 +481,7 @@ private struct NeedsYouCard: View {
                     if isLive {
                         LiveTerminal(store: agents, record: record, onEscape: onEscape, takesFocus: takesFocus)
                     } else {
-                        Color.white
+                        Theme.surface
                     }
                 }
                 .frame(height: terminalHeight)
@@ -496,7 +496,7 @@ private struct NeedsYouCard: View {
             // Says what letting go does, once the drag is most of the way there.
             Label(L("Done"), systemImage: "checkmark")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(Theme.onAccent)
                 .padding(.horizontal, 12)
                 .frame(height: 28)
                 .background(Theme.accent, in: .rect(cornerRadius: Theme.Radius.control))
@@ -505,7 +505,7 @@ private struct NeedsYouCard: View {
                 .scaleEffect(progress >= 1 ? 1.06 : 1)
                 .animation(.snappy(duration: 0.2), value: progress >= 1)
         }
-        .shadow(color: Theme.line.opacity(isLive ? 0.14 : 0.08), radius: isLive ? 30 : 16, y: isLive ? 14 : 8)
+        .shadow(color: Theme.window.opacity(Double(Theme.Shadow.opacity) * 3), radius: Theme.Shadow.radius, y: Theme.Shadow.y)
     }
 
     /// Where the agent works leads: the project, then the worktree. The agent's name and its
@@ -522,7 +522,7 @@ private struct NeedsYouCard: View {
                     .padding(.top, 3)
                 Text(message)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
                     .padding(.top, 6)
                 if let orchestrators = request.orchestrators {
                     // Its orchestrator can't give this one: it waits on the developer directly.

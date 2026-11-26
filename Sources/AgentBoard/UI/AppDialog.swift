@@ -52,7 +52,7 @@ struct ChoiceTile: View {
             VStack(alignment: .leading, spacing: 0) {
                 Image(systemName: symbol)
                     .font(Theme.Font.title)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Theme.accentText)
                     .frame(height: 24)
                     .padding(.bottom, 14)
                 Text(title)
