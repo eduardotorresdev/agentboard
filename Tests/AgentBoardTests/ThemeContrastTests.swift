@@ -7,23 +7,25 @@ final class ThemeContrastTests: XCTestCase {
     func testKeyPairsPassWCAGAA() {
         let pairs: [(String, UInt32, UInt32)] = [
             ("white on accent", H.white, H.accent),
-            ("white on deep", H.white, H.deep),
+            ("window on deep", H.window, H.deep),
             ("deep on accentTint", H.deep, H.accentTint),
             ("ink on accentSoft", H.ink, H.accentSoft),
-            ("ink on sky", H.ink, H.sky),
-            ("ink on surface", H.ink, H.paper),
-            ("inkMuted on surface", H.inkMuted, H.paper),
-            ("inkMuted on surfaceDeep", H.inkMuted, H.paperDeep),
-            ("inkMuted on sky", H.inkMuted, H.sky),
-            ("accent on surface", H.accent, H.paper),
-            ("white on danger", H.white, H.danger),
-            ("inkMuted on surfaceDeep (organization menu row hover)", H.inkMuted, H.paperDeep),
-            ("white on deep (project tile)", H.white, H.deep),
-            ("white on ink (project tile)", H.white, H.ink),
-            ("white on inkMuted (project tile)", H.white, H.inkMuted),
+            ("onYou on you", H.onYou, H.you),
+            ("window on danger", H.window, H.danger),
+            ("onCaffeinate on caffeinate", H.onCaffeinate, H.caffeinate),
         ]
         for (name, fg, bg) in pairs {
             XCTAssertGreaterThanOrEqual(Theme.contrast(fg, bg), 4.5, name)
+        }
+        // Every text tone on every plane it sits on.
+        for plane in [H.window, H.plane, H.canvas, H.paper, H.paperDeep] {
+            for (name, fg) in [("ink", H.ink), ("inkMuted", H.inkMuted), ("accentText", H.accentText), ("deep", H.deep),
+                               ("you", H.you), ("danger", H.danger)] as [(String, UInt32)] {
+                XCTAssertGreaterThanOrEqual(Theme.contrast(fg, plane), 4.5, "\(name) on \(String(plane, radix: 16))")
+            }
+            // Status dots and the running accent are graphics: 3:1. On controls the dots use accentText.
+            if plane != H.paperDeep { XCTAssertGreaterThanOrEqual(Theme.contrast(H.accent, plane), 3, "accent mark on \(String(plane, radix: 16))") }
+            XCTAssertGreaterThanOrEqual(Theme.contrast(H.faint, plane), 3, "faint mark on \(String(plane, radix: 16))")
         }
     }
 
@@ -56,18 +58,11 @@ final class ThemeContrastTests: XCTestCase {
         XCTAssertEqual(Theme.contrast(0x000000, 0xFFFFFF), 21, accuracy: 0.01)
     }
 
-    /// The mascot (a graphic) needs 3:1 against the lightest and the bluest sky tones.
-    func testDeepBlueStandsOutOnTheSky() {
-        for sky in [H.sky, H.accentSoft, H.white] {
-            XCTAssertGreaterThanOrEqual(Theme.contrast(H.deep, sky), 3)
-        }
-    }
-
     /// The accent must read as blue, not drift toward teal.
     func testAccentHueStaysBlue() {
         let c = NSColor(srgbRed: CGFloat(H.accent >> 16 & 0xFF) / 255, green: CGFloat(H.accent >> 8 & 0xFF) / 255,
                         blue: CGFloat(H.accent & 0xFF) / 255, alpha: 1)
-        XCTAssert((200.0 ... 220.0).contains(c.hueComponent * 360))
+        XCTAssert((218.0 ... 232.0).contains(c.hueComponent * 360))
     }
 
     /// Card headers are translucent over the sky: their text passes AA, their icons 3:1, over

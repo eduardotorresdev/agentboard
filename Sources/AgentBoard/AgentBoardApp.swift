@@ -82,8 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        // Light mode only: pin the appearance so sheets, panels, and menus match.
-        NSApp.appearance = NSAppearance(named: .aqua)
+        // Dark mode only: pin the appearance so sheets, panels, and menus match.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
         // A board under test (`AGENTBOARD_BACKGROUND=1`) stays behind: keys typed elsewhere
         // must not reach its agents.
         if ProcessInfo.processInfo.environment["AGENTBOARD_BACKGROUND"] != "1" { NSApp.activate(ignoringOtherApps: true) }

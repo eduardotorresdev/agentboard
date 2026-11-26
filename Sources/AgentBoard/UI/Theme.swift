@@ -1,37 +1,52 @@
 import AppKit
 import SwiftUI
 
-/// AgentBoard's visual identity. The app is light mode only.
-/// White, light grays, baby blue, a stronger blue and near-black, from Radix Colors (Slate and
-/// Blue, light scales, radix-ui.com/colors), whose steps are contrast-tested. Red is reserved for
-/// errors. No yellow, green or teal; the blue stays at hue ~205–210°.
+/// AgentBoard's visual identity: Grafite. The app is dark mode only.
+/// Near-black planes stacked by lightness (window < plane < canvas < surface < chip), light ink,
+/// one strong blue for action and running, and amber only for "waiting for you". Red is
+/// reserved for errors. No green or teal; the blue stays at hue ~220–228°.
 enum Theme {
     // MARK: Hex values (shared with BoardPalette and the contrast test)
 
     enum Hex {
-        /// Blue 11: the solid accent. White text on it passes AA.
-        static let accent: UInt32 = 0x0D74CE
-        /// Blue 3: selected rows, quiet accent fills.
-        static let accentSoft: UInt32 = 0xE6F4FE
-        /// Blue 2: near-white baby blue, the sky's tone.
-        static let sky: UInt32 = 0xF4FAFF
-        /// Blue 5: a light blue tint for selected thumbs; deep text on it.
-        static let accentTint: UInt32 = 0xC2E5FF
-        /// Blue 6: decorative light blue (the blob's little clouds).
-        static let blueLight: UInt32 = 0xACD8FC
-        /// Blue 12: deep blue for strong emphasis, "waiting for you", the mascot.
-        static let deep: UInt32 = 0x113264
-        /// Slate 12.
-        static let ink: UInt32 = 0x1C2024
-        /// Slate 11.
-        static let inkMuted: UInt32 = 0x60646C
-        static let paper: UInt32 = 0xFFFFFF
-        /// Slate 3: control fills, wells.
-        static let paperDeep: UInt32 = 0xF0F0F3
-        /// Slate 2: behind content that isn't the sky.
-        static let canvas: UInt32 = 0xF9F9FB
-        static let danger: UInt32 = 0xC0322B
+        /// The solid accent: fills with white text, running dots, selection rings.
+        static let accent: UInt32 = 0x1F5BFF
+        /// The accent as text or a small mark on the dark planes (the solid one is too dark there).
+        static let accentText: UInt32 = 0x6B97FF
+        /// Selected rows, quiet accent fills; ink text on it.
+        static let accentSoft: UInt32 = 0x102A6B
+        /// A stronger blue wash for selected thumbs; deep text on it.
+        static let accentTint: UInt32 = 0x163A94
+        /// The canvas behind the cards (the old sky's role).
+        static let sky: UInt32 = 0x0F1013
+        /// Decorative blue (blob details, chart lines).
+        static let blueLight: UInt32 = 0x3B6FFF
+        /// Pale blue for strong emphasis on dark: questions, decision headings. `onDeep` text on it.
+        static let deep: UInt32 = 0xB5CCFF
+        /// Primary text.
+        static let ink: UInt32 = 0xF1F2F4
+        /// Secondary text.
+        static let inkMuted: UInt32 = 0xA3A6AE
+        /// Tertiary marks: counts, hints, placeholders (large or non-text only).
+        static let faint: UInt32 = 0x757880
+        /// Cards, panels, dialogs, popovers.
+        static let paper: UInt32 = 0x1B1C21
+        /// Controls, card headers, wells: one step lighter than a surface.
+        static let paperDeep: UInt32 = 0x25272D
+        /// The window itself and the top bar.
+        static let window: UInt32 = 0x0A0B0D
+        /// The sidebar's plane, between the window and the canvas.
+        static let plane: UInt32 = 0x131418
+        /// Behind content that isn't a card.
+        static let canvas: UInt32 = 0x0F1013
+        /// "Waiting for you": the queue, a card that needs an answer.
+        static let you: UInt32 = 0xFFB86B
+        static let onYou: UInt32 = 0x1A0F02
+        static let danger: UInt32 = 0xFF6369
         static let white: UInt32 = 0xFFFFFF
+        /// Caffeinate's on state, the coffee pack's maroon, with its cream text.
+        static let caffeinate: UInt32 = 0x4E0C10
+        static let onCaffeinate: UInt32 = 0xFFF4E0
     }
 
     static func color(_ hex: UInt32) -> Color {
@@ -43,43 +58,59 @@ enum Theme {
 
     /// Solid blue accent: primary actions, focus, selection, running. White text on it.
     static let accent = color(Hex.accent)
-    /// Baby-blue wash for selected rows and quiet accent fills; ink text on it.
+    /// The accent for text and small marks on dark planes.
+    static let accentText = color(Hex.accentText)
+    /// Dark blue wash for selected rows and quiet accent fills; ink text on it.
     static let accentSoft = color(Hex.accentSoft)
-    /// Light blue tint (Blue 5) for selected thumbs and chips; `deep` text on it.
+    /// A stronger blue wash for selected thumbs and chips; `deep` text on it.
     static let accentTint = color(Hex.accentTint)
-    /// Near-white baby blue.
+    /// The canvas behind the cards.
     static let sky = color(Hex.sky)
-    /// Deep blue: strong emphasis and "waiting for you".
+    /// Pale blue: strong emphasis. As a fill, `onDeep` text on it.
     static let deep = color(Hex.deep)
-    /// Text and icons on an accent or deep fill.
+    static let onDeep = color(Hex.window)
+    /// Text and icons on an accent fill.
     static let onAccent = Color.white
     /// Primary text.
     static let ink = color(Hex.ink)
     /// Secondary text.
     static let inkMuted = color(Hex.inkMuted)
-    /// Behind content that isn't the sky.
+    /// Tertiary marks: counts, hints, placeholders.
+    static let faint = color(Hex.faint)
+    /// Behind content that isn't a card.
     static let canvas = color(Hex.canvas)
-    /// UI surfaces (cards, panels, dialogs, top bar): white.
+    /// The window and its top bar.
+    static let window = color(Hex.window)
+    /// The sidebar's plane.
+    static let plane = color(Hex.plane)
+    /// UI surfaces: cards, panels, dialogs, popovers.
     static let surface = color(Hex.paper)
-    /// A light gray fill: control backgrounds, accordion headers, wells.
+    /// One step lighter: control backgrounds, card headers, accordion headers, wells.
     static let surfaceDeep = color(Hex.paperDeep)
     /// Hairlines, tinted by ink. Use with opacity, and only where a stroke is required.
     static let line = color(Hex.ink)
-    /// Errors and destructive actions: the one off-palette tone.
+    /// "Waiting for you", with its text color.
+    static let you = color(Hex.you)
+    static let onYou = color(Hex.onYou)
+    /// Errors and destructive actions. As a fill, `onDanger` text on it.
     static let danger = color(Hex.danger)
+    static let onDanger = color(Hex.window)
+    /// Caffeinate's on state.
+    static let caffeinate = color(Hex.caffeinate)
+    static let onCaffeinate = color(Hex.onCaffeinate)
 
     // MARK: Shape
 
-    /// Moderate, firm corners: structured, never pills.
+    /// Soft continuous (squircle) corners: always `style: .continuous`, never pills.
     enum Radius {
         /// A selection thumb inside a segmented track (the track adds 2).
-        static let thumb: CGFloat = 5
+        static let thumb: CGFloat = 8
         /// Buttons, fields, chips, rows.
-        static let control: CGFloat = 6
+        static let control: CGFloat = 10
         /// Cards, panels, popovers.
-        static let card: CGFloat = 8
+        static let card: CGFloat = 14
         /// Dialogs and sheets.
-        static let dialog: CGFloat = 10
+        static let dialog: CGFloat = 18
     }
 
     /// Board elements separate from the sky by fill and contrast, not shadow. Where an element
