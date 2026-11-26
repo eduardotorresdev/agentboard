@@ -398,41 +398,6 @@ struct ToolbarButtonStyle: ButtonStyle {
     }
 }
 
-/// What the board itself uses, the app and its core together (not the agents they run),
-/// sampled every two seconds.
-struct AppUsage: View {
-    @State private var stats: RunnerStats?
-
-    var body: some View {
-        // Always laid out, dashes until the first sample: an empty toolbar item is dropped, and its task never runs.
-        HStack(spacing: 10) {
-            Label(stats?.cpu.map { String(format: "%.0f%%", $0) } ?? "–", systemImage: "cpu")
-            Label(stats.map { ByteCountFormatter.string(fromByteCount: Int64($0.memory), countStyle: .memory) } ?? "–", systemImage: "memorychip")
-        }
-        // A toolbar shows labels as icons only by default.
-        .labelStyle(.titleAndIcon)
-        .font(Theme.Font.caption.monospacedDigit())
-        .foregroundStyle(Theme.inkMuted)
-        .padding(.horizontal, 10)
-        .frame(height: 24)
-        .modifier(CanvasPill())
-        .help(L("CPU and memory the board uses, without its agents."))
-        .task {
-            var previous: ProcessInspector.Sample?
-            let core = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("AgentBoardCore")
-            while !Task.isCancelled {
-                let sample = await Task.detached {
-                    let pids = [getpid()] + (core.map(ProcessInspector.processes(running:)) ?? [])
-                    return ProcessInspector.sample(processes: pids, previous: previous)
-                }.value
-                previous = sample
-                withAnimation(.smooth(duration: 0.3)) { stats = sample.stats }
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
-    }
-}
-
 /// What the worktree's host is using (CPU, memory, disk), beside the branch badge and as tall
 /// as it, as its core reports it every couple of seconds.
 private struct HostUsage: View {
