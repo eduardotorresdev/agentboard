@@ -57,7 +57,7 @@ struct AgentBoardApp: App {
     var body: some Scene {
         WindowGroup("AgentBoard") {
             ContentView(store: store, hosts: hosts, browsers: browsers, simulators: simulators, fileTrees: fileTrees)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
     }
