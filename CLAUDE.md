@@ -20,7 +20,7 @@ All animations must be spring-based (e.g. `.spring`, `.snappy`, `.smooth`, `.bou
 - No gradients: not on text, fills, or borders. Use solid colors from `Theme`.
 - Ambient effects (smoke, glow, blooms) must always be animated, drifting slowly like moving smoke. Never leave one static.
 - All colors, radii and type sizes come from `Theme`; no hardcoded hex values in views. Exception: brand icons keep their brand colors (Claude orange, Codex), as logos, and so do syntax-highlighting colors and the terminal ANSI palette.
-- Never show the app name inside the app (headlines, eyebrows, labels). The window title and the top bar breadcrumb are the only exceptions.
+- Never show the app name inside the app (headlines, eyebrows, labels). The window title is the only exception.
 
 ## UI copy
 
