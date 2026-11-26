@@ -4,13 +4,13 @@ import SwiftUI
 /// It reads a line at a time, carrying block comments over from the lines before.
 enum SyntaxHighlighter {
     private enum Palette {
-        static let keyword = Theme.accent
-        static let string = Color(red: 0xC2 / 255, green: 0x55 / 255, blue: 0x0A / 255)
-        static let number = Color(red: 0x2B / 255, green: 0x5C / 255, blue: 0xD6 / 255)
-        static let comment = Color(red: 0x8A / 255, green: 0x86 / 255, blue: 0x99 / 255)
-        static let tag = Theme.accent
-        static let attribute = Color(red: 0xB0 / 255, green: 0x36 / 255, blue: 0x8C / 255)
-        static let plain = Color(red: 0x24 / 255, green: 0x20 / 255, blue: 0x33 / 255)
+        static let keyword = Theme.accentText
+        static let string = Color(red: 0xF0 / 255, green: 0xA3 / 255, blue: 0x5E / 255)
+        static let number = Color(red: 0x9B / 255, green: 0xB8 / 255, blue: 0xFF / 255)
+        static let comment = Color(red: 0x8A / 255, green: 0x8E / 255, blue: 0x99 / 255)
+        static let tag = Theme.accentText
+        static let attribute = Color(red: 0xE3 / 255, green: 0x8F / 255, blue: 0xC8 / 255)
+        static let plain = Theme.ink
     }
 
     private struct Language {

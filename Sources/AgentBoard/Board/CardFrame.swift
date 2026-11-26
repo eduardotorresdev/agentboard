@@ -1,10 +1,9 @@
 import AgentRuntime
 import AppKit
-import MetalPerformanceShaders
 import QuartzCore
 
-/// The one frame every card wears: firm corners, no shadow, and a translucent title bar with
-/// the card's icon, its name, its state and a quieter detail. Each card layer adds its own
+/// The one frame every card wears: soft corners, no shadow, and a solid title bar with the
+/// card's icon, its name, a quieter detail and its state. Each card layer adds its own
 /// controls on top.
 enum CardFrame {
     static let titleFont = NSFont.systemFont(ofSize: Theme.Font.bodySize, weight: .semibold)
@@ -22,14 +21,14 @@ enum CardFrame {
     }
 
     /// Corners and the highlighted look (focus, and selection through the same flag): a ring that
-    /// is always there, clear until the card is highlighted, then a soft gray. No blurred glow. The card has no background of its own: its title bar draws header and body.
+    /// is always there, clear until the card is highlighted, then the accent. No blurred glow. The card has no background of its own: its title bar draws header and body.
     static func style(_ card: CALayer, focused highlighted: Bool) {
         card.backgroundColor = nil
         card.cornerRadius = CardMetrics.radius
-        // No shadow: the card's contrast against the sky separates it.
+        // No shadow: the card's contrast against the canvas separates it.
         card.shadowOpacity = 0
         card.borderWidth = 2
-        card.borderColor = highlighted ? BoardPalette.rgb(BoardPalette.ink, 0.18) : CGColor(gray: 0, alpha: 0)
+        card.borderColor = highlighted ? BoardPalette.rgb(BoardPalette.accent) : CGColor(gray: 0, alpha: 0)
     }
 
     /// A close control: a crisp square that fills while hovered, its cross centered.
@@ -71,22 +70,19 @@ enum CardFrame {
         return .symbol("chevron.left.forwardslash.chevron.right", color: brand ?? BoardPalette.ink)
     }
 
-    /// The header's translucent gray: white over the sky, a breath of ink, so it reads as glass.
-    static let headerWhite: CGFloat = 0.85
-    static let headerInk: CGFloat = 0.04
     static let glyphSize: CGFloat = 14
-
-    /// The header's solid color over a sky color: what its text and icons must contrast with.
-    static func header(over sky: UInt32) -> UInt32 {
-        func mix(_ a: UInt32, _ b: UInt32, _ t: CGFloat) -> UInt32 {
-            (0..<3).reduce(0) { result, i in
-                let shift = UInt32(16 - i * 8)
-                let x = CGFloat(a >> shift & 0xFF), y = CGFloat(b >> shift & 0xFF)
-                return result | UInt32((x * (1 - t) + y * t).rounded()) << shift
-            }
+    /// The header's solid fill, one step lighter than the card's body: what its text and icons must contrast with.
+    static let header: UInt32 = Theme.Hex.paperDeep
+    /// The status pill on the header's right: its fill and the color of its dot and words.
+    static func pill(_ status: CardStatus) -> (fill: UInt32, ink: UInt32)? {
+        switch status {
+        case .running: (Theme.Hex.accentSoft, Theme.Hex.accentText)
+        case .waiting: (Theme.Hex.you, Theme.Hex.onYou)
+        case .crashed: (Theme.Hex.danger, Theme.Hex.window)
+        case .stopped: nil
         }
-        return mix(mix(sky, Theme.Hex.white, headerWhite), BoardPalette.ink, headerInk)
     }
+    static let pillFont = NSFont.systemFont(ofSize: Theme.Font.captionSize, weight: .semibold)
 }
 
 /// What a card's title bar shows as its icon.
@@ -134,16 +130,17 @@ enum CardIcon: Hashable {
     private static let claudeMark = Bundle.module.url(forResource: "ClaudeSymbol", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
 }
 
-/// A card's title bar: translucent gray over the sky, the card's icon, its name, its state as a
-/// small mark (in `CardStatus`'s vocabulary) and a quieter detail. Below it the card's body.
+/// A card's title bar: a solid header one step lighter than the body, the card's icon, its name,
+/// a quieter detail and, on the right, its state as a pill (in `CardStatus`'s vocabulary).
+/// Below it the card's body.
 final class CardTitleBar: CALayer {
-    private let backdrop = CALayer()
     private let tint = CALayer()
     private let body = CALayer()
     private let glyph = CALayer()
     private let title = CATextLayer()
+    private let pill = CALayer()
     private let mark = CALayer()
-    private let markGlyph = CALayer()
+    private let pillText = CATextLayer()
     private let detail = CATextLayer()
     private var status: CardStatus?
 
@@ -151,20 +148,18 @@ final class CardTitleBar: CALayer {
         super.init()
         maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
         tint.maskedCorners = maskedCorners
-        backdrop.maskedCorners = maskedCorners
-        backdrop.masksToBounds = true
-        let ink = CALayer()
-        ink.backgroundColor = BoardPalette.rgb(BoardPalette.ink, CardFrame.headerInk)
-        tint.addSublayer(ink)
         body.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
-        mark.cornerRadius = Theme.Radius.thumb
+        pill.cornerRadius = Theme.Radius.thumb
+        pill.cornerCurve = .continuous
         title.font = CardFrame.titleFont
         title.fontSize = CardFrame.titleFont.pointSize
         detail.font = CardFrame.detailFont
         detail.fontSize = CardFrame.detailFont.pointSize
-        for text in [title, detail] { text.truncationMode = .end }
-        [body, backdrop, tint, glyph, title, mark, detail].forEach(addSublayer)
-        mark.addSublayer(markGlyph)
+        pillText.font = CardFrame.pillFont
+        pillText.fontSize = CardFrame.pillFont.pointSize
+        for text in [title, detail, pillText] { text.truncationMode = .end }
+        [body, tint, glyph, title, pill, detail].forEach(addSublayer)
+        [mark, pillText].forEach(pill.addSublayer)
     }
 
     override init(layer: Any) { super.init(layer: layer) }
@@ -183,18 +178,12 @@ final class CardTitleBar: CALayer {
         backgroundColor = nil
         tint.frame = bounds
         tint.cornerRadius = CardMetrics.radius
-        backdrop.frame = bounds
-        backdrop.cornerRadius = CardMetrics.radius
-        // Over the frosted sky: mostly white with a breath of ink, a translucent light gray.
-        // Reduce Transparency makes it solid; Increase Contrast darkens the quieter text.
-        let solid = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-        let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
-        backdrop.isHidden = solid
-        tint.backgroundColor = BoardPalette.rgb(Theme.Hex.white, solid ? 1 : CardFrame.headerWhite)
-        tint.sublayers?.first?.frame = tint.bounds
+        tint.backgroundColor = BoardPalette.rgb(CardFrame.header)
         body.frame = CGRect(x: 0, y: height, width: width, height: max(0, size.height - height))
         body.cornerRadius = CardMetrics.radius
         body.backgroundColor = fill
+        // Increase Contrast brings the quieter detail up to full ink.
+        let contrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
 
         let g = CardFrame.glyphSize
         glyph.frame = CGRect(x: CardMetrics.inset, y: (height - g) / 2, width: g, height: g)
@@ -202,66 +191,50 @@ final class CardTitleBar: CALayer {
         glyph.contentsScale = scale
 
         let ink = BoardPalette.ink
-        let available = max(0, width - CardFrame.titleX - reserve - 8)
+        // The pill sits at the right, before the card's controls.
+        let colors = status.flatMap(CardFrame.pill)
+        pill.isHidden = colors == nil
+        var pillX = width - reserve
+        if let colors, let status {
+            let dot: CGFloat = 6, pad: CGFloat = 8, pillHeight: CGFloat = 20
+            let textWidth = CardFrame.width(of: status.label, font: CardFrame.pillFont) + 2
+            let pillWidth = pad + dot + 5 + textWidth + pad
+            pillX -= pillWidth
+            pill.frame = CGRect(x: pillX, y: (height - pillHeight) / 2, width: pillWidth, height: pillHeight)
+            pill.backgroundColor = BoardPalette.rgb(colors.fill)
+            mark.frame = CGRect(x: pad, y: (pillHeight - dot) / 2, width: dot, height: dot)
+            mark.cornerRadius = dot / 2
+            mark.backgroundColor = BoardPalette.rgb(colors.ink)
+            let line = CardFrame.lineHeight(CardFrame.pillFont)
+            pillText.string = status.label
+            pillText.contentsScale = scale
+            pillText.foregroundColor = BoardPalette.rgb(colors.ink)
+            pillText.frame = CGRect(x: pad + dot + 5, y: (pillHeight - line) / 2, width: textWidth, height: line)
+        }
+
+        let available = max(0, pillX - CardFrame.titleX - 8)
         let titleLine = CardFrame.lineHeight(CardFrame.titleFont)
-        let shown = status.flatMap { $0 == .stopped ? nil : $0 }
-        let markSize: CGFloat = shown == nil ? 0 : 14
         let titleFont = status == .waiting ? CardFrame.waitingFont : CardFrame.titleFont
-        // A state that needs the user (waiting, crashed) keeps its words; the name gives way.
-        let urgent = status == .waiting || status == .crashed
-        let keep = urgent && info != nil ? CardFrame.width(of: info!, font: CardFrame.detailFont) + 8 : 0
-        let nameRoom = max(0, available - (markSize == 0 ? 0 : markSize + 6) - keep)
-        let titleWidth = min(nameRoom, CardFrame.width(of: text, font: titleFont) + 2)
         title.string = text
         title.font = titleFont
         title.contentsScale = scale
         title.foregroundColor = BoardPalette.rgb(ink)
-        title.frame = CGRect(x: CardFrame.titleX, y: (height - titleLine) / 2, width: titleWidth, height: titleLine)
+        title.frame = CGRect(x: CardFrame.titleX, y: (height - titleLine) / 2,
+                             width: min(available, CardFrame.width(of: text, font: titleFont) + 2), height: titleLine)
 
-        // The state sits next to the name, apart from the icon, as the same dot the sidebar
-        // shows: running accent, waiting deep blue (and a bolder name), crashed red; stopped nothing.
-        mark.isHidden = shown == nil
-        mark.backgroundColor = nil
-        if let shown {
-            let dot: CGFloat = 8
-            let color = shown == .crashed ? Theme.Hex.danger : shown == .waiting || contrast ? Theme.Hex.deep : BoardPalette.accent
-            mark.frame = CGRect(x: title.frame.maxX + 6, y: (height - markSize) / 2, width: markSize, height: markSize)
-            markGlyph.contents = nil
-            markGlyph.backgroundColor = BoardPalette.rgb(color)
-            markGlyph.cornerRadius = dot / 2
-            markGlyph.frame = CGRect(x: (markSize - dot) / 2, y: (markSize - dot) / 2, width: dot, height: dot)
-        }
         let detailLine = CardFrame.lineHeight(CardFrame.detailFont)
-        let detailX = (mark.isHidden ? title.frame.maxX : mark.frame.maxX) + 8
+        let detailX = title.frame.maxX + 6
         detail.string = info
         detail.isHidden = info == nil || detailX + 24 > CardFrame.titleX + available
         detail.contentsScale = scale
-        detail.foregroundColor = BoardPalette.rgb(status == .crashed ? Theme.Hex.danger : status == .waiting || contrast ? ink : Theme.Hex.inkMuted)
+        detail.foregroundColor = BoardPalette.rgb(contrast ? ink : Theme.Hex.inkMuted)
         detail.frame = CGRect(x: detailX, y: (height - detailLine) / 2 + 1, width: max(0, CardFrame.titleX + available - detailX), height: detailLine)
         CATransaction.commit()
         animate(status)
-        SkyBlur.shared.register(self)
-        refreshBackdrop()
     }
 
-    /// Shows the blurred sky's patch that lies behind this header, wherever the camera put it.
-    func refreshBackdrop() {
-        // The blur is of the sky layer, which may be shorter than the window (under the top bar).
-        guard let surface = SkyBlur.shared.current, let root = SkyBlur.shared.sky, superlayer != nil,
-              root.bounds.width > 0, root.bounds.height > 0 else { return }
-        let rect = convert(bounds, to: root)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        backdrop.contents = surface
-        // Unit coordinates of the sky image, whose first row is the top of the canvas.
-        let y = root.isGeometryFlipped || root.contentsAreFlipped() ? rect.minY : root.bounds.height - rect.maxY
-        backdrop.contentsRect = CGRect(x: rect.minX / root.bounds.width, y: y / root.bounds.height,
-                                       width: rect.width / root.bounds.width, height: rect.height / root.bounds.height)
-        CATransaction.commit()
-    }
-
-    /// Running breathes by size at full color (as in the sidebar, so it keeps its contrast);
-    /// waiting nudges; crashed and stopped hold still.
+    /// Running breathes its dot by size at full color (as in the sidebar, so it keeps its
+    /// contrast); waiting nudges; crashed and stopped hold still.
     private func animate(_ new: CardStatus?) {
         guard new != status else { return }
         status = new
@@ -276,66 +249,6 @@ final class CardTitleBar: CALayer {
         spring.autoreverses = true
         spring.repeatCount = .infinity
         mark.add(spring, forKey: "status")
-    }
-}
-
-/// The sky behind the cards, blurred once per sky frame into a shared low-resolution surface
-/// that every card header shows its own patch of: frosted glass without a live blur per card.
-// Only used on the main thread: the sky draws there and the completion hops back to it.
-final class SkyBlur: @unchecked Sendable {
-    static let shared = SkyBlur()
-
-    /// Two surfaces taking turns, so each frame is a new `contents` the headers pick up.
-    private var surfaces: [(surface: IOSurface, texture: MTLTexture)] = []
-    private var next = 0
-    private var blur: MPSImageGaussianBlur?
-    /// The surface with the latest blurred frame.
-    private(set) var current: IOSurface?
-    private let headers = NSHashTable<CardTitleBar>.weakObjects()
-
-    /// The sky layer the blurred frames are of; headers place their patch relative to it.
-    weak var sky: CALayer?
-
-    func register(_ header: CardTitleBar) { headers.add(header) }
-
-    func setCurrentForTesting(_ surface: IOSurface) { current = surface }
-
-    /// Whether any header is on screen over the sky, so the sky can skip the blur otherwise.
-    var isNeeded: Bool {
-        guard let sky else { return false }
-        return headers.allObjects.contains { header in
-            header.superlayer != nil && !header.isHidden && header.convert(header.bounds, to: sky).intersects(sky.bounds)
-        }
-    }
-
-    /// Encodes the blur of a sky frame into the sky's own command buffer (`SkyView.onSkyFrame`).
-    func encode(_ texture: MTLTexture, _ commands: MTLCommandBuffer) {
-        let device = texture.device
-        if surfaces.first.map({ $0.texture.width != texture.width || $0.texture.height != texture.height }) ?? true {
-            surfaces = (0..<2).compactMap { _ in
-                guard let surface = IOSurface(properties: [.width: texture.width, .height: texture.height, .bytesPerElement: 4,
-                                                           .pixelFormat: kCVPixelFormatType_32BGRA]) else { return nil }
-                let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: texture.width,
-                                                                          height: texture.height, mipmapped: false)
-                descriptor.usage = [.shaderWrite, .shaderRead]
-                guard let target = device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0) else { return nil }
-                return (surface, target)
-            }
-            // Sigma in sky pixels (four points each), over a sky that is already frosted.
-            blur = MPSImageGaussianBlur(device: device, sigma: 3)
-            blur?.edgeMode = .clamp
-        }
-        guard surfaces.count == 2, let blur else { return }
-        let target = surfaces[next]
-        next = 1 - next
-        blur.encode(commandBuffer: commands, sourceTexture: texture, destinationTexture: target.texture)
-        commands.addCompletedHandler { _ in
-            let surface = target.surface
-            DispatchQueue.main.async {
-                self.current = surface
-                for header in self.headers.allObjects { header.refreshBackdrop() }
-            }
-        }
     }
 }
 

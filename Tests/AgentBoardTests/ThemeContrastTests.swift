@@ -65,22 +65,22 @@ final class ThemeContrastTests: XCTestCase {
         XCTAssert((218.0 ... 232.0).contains(c.hueComponent * 360))
     }
 
-    /// Card headers are translucent over the sky: their text passes AA, their icons 3:1, over
-    /// the darkest sky blue and the lightest cloud.
-    func testCardHeaderPairsPassAA() {
-        // The sky's deepest blue (its base color) and a white cloud.
-        for sky: UInt32 in [0x458CD1, 0xFFFFFF] {
-            let header = CardFrame.header(over: sky)
-            for (name, fg) in [("title ink", H.ink), ("detail inkMuted", H.inkMuted)] {
-                XCTAssertGreaterThanOrEqual(Theme.contrast(fg, header), 4.5, "\(name) over \(String(sky, radix: 16))")
-            }
-            // Brand marks (Claude's orange) keep their color: logos are exempt from WCAG 1.4.11.
-            // The state dots, at full color all the way through running's breath.
-            for (name, fg) in [("running accent", H.accent), ("waiting deep", H.deep), ("crashed danger", H.danger),
-                               ("icon inkMuted", H.inkMuted)] as [(String, UInt32)] {
-                XCTAssertGreaterThanOrEqual(Theme.contrast(fg, header), 3, "\(name) over \(String(sky, radix: 16))")
-            }
+    /// Card headers are a solid step above the card body: their text passes AA, their icons
+    /// 3:1, and each status pill's words pass AA on its own fill.
+    func testCardHeaderPairsPassAA() throws {
+        let header = CardFrame.header
+        for (name, fg) in [("title ink", H.ink), ("detail inkMuted", H.inkMuted)] {
+            XCTAssertGreaterThanOrEqual(Theme.contrast(fg, header), 4.5, name)
         }
+        // Brand marks (Claude's orange) keep their color: logos are exempt from WCAG 1.4.11.
+        XCTAssertGreaterThanOrEqual(Theme.contrast(H.inkMuted, header), 3, "icon inkMuted")
+        for status in [CardStatus.running, .waiting, .crashed] {
+            let pill = try XCTUnwrap(CardFrame.pill(status))
+            XCTAssertGreaterThanOrEqual(Theme.contrast(pill.ink, pill.fill), 4.5, status.label)
+            // The pill itself stands out from the header it sits on.
+            XCTAssertNotEqual(pill.fill, header, status.label)
+        }
+        XCTAssertNil(CardFrame.pill(.stopped))
     }
 
     @MainActor
@@ -103,33 +103,5 @@ final class ThemeContrastTests: XCTestCase {
         XCTAssertEqual(far.width, 80)
         XCTAssertEqual(far.midX, close.midX)
         XCTAssertEqual(far.midY, close.midY)
-    }
-
-    @MainActor
-    func testHeaderBackdropCropsTheSkyLayerNotTheWindow() throws {
-        // A window taller than the sky (a top bar above it): the crop is relative to the sky.
-        let window = CALayer()
-        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 852)
-        let sky = CALayer()
-        sky.frame = CGRect(x: 0, y: 52, width: 1000, height: 800)
-        sky.isGeometryFlipped = true
-        window.addSublayer(sky)
-        let header = CardTitleBar()
-        sky.addSublayer(header)
-        SkyBlur.shared.sky = sky
-        let surface = try XCTUnwrap(IOSurface(properties: [.width: 4, .height: 4, .bytesPerElement: 4, .pixelFormat: kCVPixelFormatType_32BGRA]))
-        SkyBlur.shared.setCurrentForTesting(surface)
-        header.update(size: CGSize(width: 200, height: 100), icon: .claude, status: nil, title: "A", detail: nil,
-                      focused: false, reserve: 0, scale: 1)
-        header.position = CGPoint(x: 100 + 100, y: 0 + CardMetrics.titleHeight / 2)
-        header.refreshBackdrop()
-        let crop = try XCTUnwrap(header.sublayers?.compactMap { $0.contents == nil ? nil : $0.contentsRect }.first)
-        XCTAssertEqual(crop.minX, 0.1, accuracy: 0.001)
-        XCTAssertEqual(crop.minY, 0, accuracy: 0.001)
-        XCTAssertEqual(crop.width, 0.2, accuracy: 0.001)
-        XCTAssertEqual(crop.height, CardMetrics.titleHeight / 800, accuracy: 0.001)
-        XCTAssertTrue(SkyBlur.shared.isNeeded)
-        header.removeFromSuperlayer()
-        XCTAssertFalse(SkyBlur.shared.isNeeded)
     }
 }

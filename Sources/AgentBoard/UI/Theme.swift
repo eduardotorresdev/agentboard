@@ -39,6 +39,8 @@ enum Theme {
         static let plane: UInt32 = 0x131418
         /// Behind content that isn't a card.
         static let canvas: UInt32 = 0x0F1013
+        /// The canvas's faint dot grid.
+        static let dot: UInt32 = 0x24262C
         /// "Waiting for you": the queue, a card that needs an answer.
         static let you: UInt32 = 0xFFB86B
         static let onYou: UInt32 = 0x1A0F02

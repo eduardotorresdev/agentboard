@@ -82,7 +82,7 @@ struct DecisionBalloon: View {
             .background(Theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.dialog))
             if model.pointsAtCard {
-                Wedge().fill(Theme.deep)
+                Wedge().fill(Theme.accentSoft)
                     .frame(width: DecisionMetrics.wedge.width, height: DecisionMetrics.wedge.height)
                     .padding(.top, DecisionMetrics.wedgeTop)
             }
@@ -120,17 +120,17 @@ struct DecisionBalloon: View {
                 .background(Theme.accentTint, in: RoundedRectangle(cornerRadius: Theme.Radius.thumb))
             PlaceTitle(place: model.place)
                 .font(Theme.Font.label)
-                .foregroundStyle(Theme.onAccent)
+                .foregroundStyle(Theme.deep)
                 .layoutPriority(1)
             Text(model.agentName)
                 .font(Theme.Font.label.weight(.regular))
-                .foregroundStyle(Theme.accentTint)
+                .foregroundStyle(Theme.ink)
                 .lineLimit(1)
             Spacer()
             if model.total > 1 {
                 Text(L("\(model.position) of \(model.total)"))
                     .font(Theme.Font.label)
-                    .foregroundStyle(Theme.onAccent)
+                    .foregroundStyle(Theme.ink)
                     .monospacedDigit()
                     .contentTransition(.numericText(value: Double(model.position)))
                     .animation(.snappy, value: model.position)
@@ -139,7 +139,7 @@ struct DecisionBalloon: View {
         }
         .padding(.horizontal, 16)
         .frame(height: DecisionMetrics.band)
-        .background(Theme.deep)
+        .background(Theme.accentSoft)
     }
 
     private var head: some View {
@@ -523,7 +523,7 @@ private struct PinMark: View {
     var body: some View {
         Text("\(number)")
             .font(Theme.Font.caption.weight(.bold))
-            .foregroundStyle(Theme.onAccent)
+            .foregroundStyle(Theme.onDeep)
             .frame(width: 20, height: 20)
             .background(Theme.deep, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
     }

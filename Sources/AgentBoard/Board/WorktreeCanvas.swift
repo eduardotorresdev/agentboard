@@ -44,12 +44,9 @@ struct WorktreeCanvas: View {
             }
             // One row, so the side groups give way to the centered tools instead of overlapping them.
             HStack(alignment: .bottom, spacing: 12) {
-                // Narrow windows drop the usage first, then scroll the tools: nothing overlaps.
-                ViewThatFits(in: .horizontal) {
-                    if !board.isZen { ClaudeUsageToolbar(organization: agents.organizationID).transition(.opacity) }
-                    Color.clear.frame(width: 0, height: 0)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear.frame(width: 0, height: 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Narrow windows scroll the tools: nothing overlaps.
                 ViewThatFits(in: .horizontal) {
                     CanvasToolbar(board: board, hasFiles: title == nil, onHost: worktree.host != nil)
                     ScrollView(.horizontal, showsIndicators: false) { CanvasToolbar(board: board, hasFiles: title == nil, onHost: worktree.host != nil) }
@@ -182,7 +179,7 @@ private struct CanvasToolbar: View {
         }
         .font(.system(size: 18, weight: .medium))
         .padding(5)
-        .modifier(GlassCapsule())
+        .modifier(CanvasPill())
     }
 
     /// An iOS Simulator or an Android emulator; a host's worktree only runs Android.
@@ -272,44 +269,25 @@ private struct CanvasToolbar: View {
     }
 }
 
-/// The view toolbar: zoom, fit, organize, zen and caffeinate, floating at the bottom-right corner.
+/// The view toolbar: zoom, fit and organize, floating at the bottom-right corner. Zen is
+/// entered from the sidebar, which zen hides: while it is on, the way out is here.
 private struct ViewToolbar: View {
     let board: BoardController
-    private let caffeinate = Caffeinate.shared
 
     var body: some View {
         HStack(spacing: 2) {
-            if !board.isZen { zoomControls }
-            Button { board.isZen.toggle() } label: {
-                Image(systemName: board.isZen ? "figure.walk" : "figure.mind.and.body")
-                    .foregroundStyle(board.isZen ? Theme.deep : Theme.accent)
-                    .contentTransition(.symbolEffect(.replace))
+            if board.isZen {
+                Button { board.isZen = false } label: { Image(systemName: "figure.walk") }
+                    .buttonStyle(ToolbarButtonStyle(compact: true))
+                    .help(L("Leave zen mode: bring back the sidebar and the bars."))
+                    .accessibilityLabel(L("Leave zen mode"))
+            } else {
+                zoomControls
             }
-            .buttonStyle(ToolbarButtonStyle(compact: true))
-            .help(board.isZen ? L("Leave zen mode: bring back the sidebar and the bars.") : L("Zen mode: hides everything but the canvas, its tools, and Needs you."))
-            .accessibilityLabel(board.isZen ? L("Leave zen mode") : L("Zen mode"))
-
-            Button { caffeinate.isOn.toggle() } label: {
-                Image(systemName: caffeinate.isOn ? "cup.and.saucer.fill" : "cup.and.saucer")
-                    .foregroundStyle(caffeinate.isOn ? Theme.deep : Theme.accent)
-                    .contentTransition(.symbolEffect(.replace))
-                    .overlay(alignment: .top) {
-                        if caffeinate.isOn {
-                            CaffeinateSteam(color: Theme.deep)
-                                .offset(y: -12)
-                                .transition(.opacity)
-                        }
-                    }
-                    .animation(.smooth, value: caffeinate.isOn)
-            }
-            .buttonStyle(ToolbarButtonStyle(compact: true))
-            .help(caffeinate.isOn ? L("Caffeinate on: the Mac and its display stay awake. Click to let them sleep.") : L("Caffeinate: keeps the Mac and its display awake while agents work."))
-            .accessibilityLabel(L("Caffeinate"))
-            .accessibilityValue(caffeinate.isOn ? L("On") : L("Off"))
         }
         .font(Theme.Font.label)
         .padding(4)
-        .modifier(GlassCapsule())
+        .modifier(CanvasPill())
     }
 
     @ViewBuilder private var zoomControls: some View {
@@ -374,7 +352,7 @@ private struct PostItFormatToolbar: View {
         }
         .font(.system(size: 16, weight: .medium))
         .padding(5)
-        .modifier(GlassCapsule())
+        .modifier(CanvasPill())
     }
 
     /// One paragraph size, shown as a letter in the note's handwriting at that size.
@@ -388,21 +366,18 @@ private struct PostItFormatToolbar: View {
     }
 }
 
-/// Liquid Glass where the system has it, a translucent material before that.
-struct GlassCapsule: ViewModifier {
+/// The canvas toolbars' dark plate: a surface over the canvas, no glass, no shadow.
+struct CanvasPill: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content.glassEffect(.regular, in: .capsule)
-        } else {
-            content.background(.regularMaterial, in: .capsule)
-        }
+        content.background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }
 
-/// Black controls on glass; hover and press show as a faint black fill.
+/// Ink controls on the dark plate; hover shows a lighter fill, and a control that is on fills
+/// with the accent.
 struct ToolbarButtonStyle: ButtonStyle {
     var compact = false
-    /// A lone symbol in a round button.
+    /// A lone symbol in a square button.
     var icon = false
     /// On, for a control that toggles.
     var active = false
@@ -410,13 +385,14 @@ struct ToolbarButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(.black.opacity(isEnabled ? 0.85 : 0.3))
+        let shape = RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+        return configuration.label
+            .foregroundStyle(active ? Theme.onAccent : Theme.ink.opacity(isEnabled ? 0.9 : 0.35))
             .padding(.horizontal, icon ? 0 : compact ? 8 : 12)
             .padding(.vertical, icon ? 0 : 6)
-            .frame(width: icon ? 40 : nil, height: icon ? 40 : nil)
-            .background(.black.opacity(configuration.isPressed || active ? 0.12 : isHovered && isEnabled ? 0.06 : 0), in: .capsule)
-            .contentShape(.capsule)
+            .frame(width: icon ? 36 : nil, height: icon ? 36 : nil)
+            .background(active ? Theme.accent : Theme.surfaceDeep.opacity(configuration.isPressed ? 1 : isHovered && isEnabled ? 0.7 : 0), in: shape)
+            .contentShape(shape)
             .onHover { isHovered = $0 }
             .animation(.snappy(duration: 0.2), value: isHovered)
     }
@@ -436,11 +412,10 @@ struct AppUsage: View {
         // A toolbar shows labels as icons only by default.
         .labelStyle(.titleAndIcon)
         .font(Theme.Font.caption.monospacedDigit())
-        // On the white top bar, not the sky: muted ink keeps it readable.
         .foregroundStyle(Theme.inkMuted)
         .padding(.horizontal, 10)
         .frame(height: 24)
-        .modifier(GlassCapsule())
+        .modifier(CanvasPill())
         .help(L("CPU and memory the board uses, without its agents."))
         .task {
             var previous: ProcessInspector.Sample?
@@ -482,7 +457,7 @@ private struct HostUsage: View {
         .font(Theme.Font.caption)
         // The branch badge's padding, so both sit at one height.
         .padding(.vertical, 4)
-        .modifier(GlassCapsule())
+        .modifier(CanvasPill())
         .fixedSize()
         .accessibilityElement(children: .combine)
     }
@@ -506,76 +481,3 @@ private struct HostUsage: View {
         return "\(gigabytes(used, 1)) / \(gigabytes(total, 0)) GB"
     }
 }
-
-/// What is left of the Claude plan's 5-hour session and week, and when each resets, floating
-/// at the bottom-left corner. Refreshed every minute.
-private struct ClaudeUsageToolbar: View {
-    let organization: UUID
-    @State private var usage: ClaudeUsage?
-    /// Claude's official symbol.
-    private static let symbol = Bundle.module.url(forResource: "ClaudeSymbol", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
-
-    var body: some View {
-        ZStack {
-            if let usage {
-                HStack(spacing: 2) {
-                    Self.symbol.map { Image(nsImage: $0).resizable().scaledToFit() }
-                        .frame(width: 16, height: 16)
-                        .padding(.leading, 8)
-                        .accessibilityLabel(L("Agent usage"))
-                    // Plans without a 5-hour limit get no session from the API: only the week shows.
-                    if let session = usage.session {
-                        item(L("5h"), session, help: L("Left of the current 5-hour session."), relative: true)
-                    }
-                    item(L("Week"), usage.week, help: L("Left of this week's limit across every model."), relative: false)
-                }
-                .font(Theme.Font.label)
-                .padding(4)
-                .modifier(GlassCapsule())
-                .transition(.opacity)
-            }
-        }
-        // Each organization is signed in to its own account: switching restarts the polling.
-        .task(id: organization) {
-            withAnimation(.smooth(duration: 0.3)) { usage = nil }
-            while !Task.isCancelled {
-                do {
-                    let fresh = try await ClaudeUsageClient.fetch(organization: organization)
-                    withAnimation(.smooth(duration: 0.3)) { usage = fresh }
-                } catch {
-                    NSLog("Claude usage unavailable: %@", String(describing: error))
-                }
-                try? await Task.sleep(for: .seconds(60))
-            }
-        }
-    }
-
-    private func item(_ title: String, _ window: ClaudeUsage.Window?, help: String, relative: Bool) -> some View {
-        let remaining = window?.remaining ?? 100
-        return HStack(spacing: 6) {
-            Text(title).foregroundStyle(Theme.inkMuted)
-            Text(remaining / 100, format: .percent.precision(.fractionLength(0)))
-                .monospacedDigit()
-                .foregroundStyle(remaining < 20 ? Theme.danger : Theme.ink)
-                .contentTransition(.numericText())
-            if let reset = window?.resetsAt {
-                Text(resetText(reset, relative: relative))
-                    .monospacedDigit()
-                    .foregroundStyle(Theme.inkMuted)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .help(help)
-    }
-
-    /// The session counts down; the week names the day and time.
-    private func resetText(_ date: Date, relative: Bool) -> String {
-        if relative {
-            let minutes = max(0, Int(date.timeIntervalSinceNow / 60))
-            return minutes >= 60 ? L("resets in \(minutes / 60)h \(minutes % 60)m") : L("resets in \(minutes)m")
-        }
-        return L("resets \(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))")
-    }
-}
-

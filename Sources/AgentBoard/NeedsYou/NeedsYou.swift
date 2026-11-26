@@ -481,7 +481,7 @@ private struct NeedsYouCard: View {
                     if isLive {
                         LiveTerminal(store: agents, record: record, onEscape: onEscape, takesFocus: takesFocus)
                     } else {
-                        Theme.canvas
+                        Theme.surface
                     }
                 }
                 .frame(height: terminalHeight)

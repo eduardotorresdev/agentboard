@@ -304,7 +304,7 @@ struct AgentComposer: View {
             Button { ComposerDrafts.views[id]?.submit() } label: {
                 Image(systemName: "arrow.up").font(Theme.Font.label).foregroundStyle(off ? Theme.inkMuted : Theme.onAccent)
                     .frame(width: 24, height: 24)
-                    .background(off ? Theme.surfaceDeep : Theme.accent, in: Circle())
+                    .background(off ? Theme.surface : Theme.accent, in: RoundedRectangle(cornerRadius: Theme.Radius.thumb, style: .continuous))
             }
             .buttonStyle(.plain)
             .disabled(off)
@@ -319,7 +319,7 @@ struct AgentComposer: View {
         .padding(.leading, 14)
         .padding(.trailing, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        .modifier(ComposerGlass())
+        .modifier(ComposerField())
     }
 }
 
@@ -348,20 +348,10 @@ private struct UploadRow: View {
     }
 }
 
-/// Liquid Glass where the system has it, solid paper before that; a capsule on one line that
-/// keeps its round ends as it grows. The paper wash under the text keeps ink at AA over the
-/// deepest sky blue (8.2:1 at 60%) and over cloud (14.5:1).
-private struct ComposerGlass: ViewModifier {
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 18, style: .continuous) }
-
+/// The composer's well: a solid field one step lighter than the card it sits in.
+private struct ComposerField: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content
-                .background(Theme.surface.opacity(0.6), in: shape)
-                .glassEffect(.regular, in: shape)
-        } else {
-            content.background(Theme.surface, in: shape)
-        }
+        content.background(Theme.surfaceDeep, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
     }
 }
 

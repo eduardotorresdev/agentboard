@@ -121,7 +121,7 @@ struct ComposerZoomTests {
         for (zoom, ratio) in ratios { #expect(abs(ratio / base - 1) < 0.08, "zoom \(zoom): field/status \(ratio), \(base) at zoom 1") }
     }
 
-    /// Widths of the dark stretches left to right, split where a gap is wider than 2% of the
+    /// Widths of the light (ink) stretches left to right, split where a gap is wider than 2% of the
     /// image: the field's text, then the status line (word gaps are narrower).
     static func inkRuns(_ image: NSBitmapImageRep) -> [Int] {
         let width = image.pixelsWide, height = image.pixelsHigh
@@ -129,7 +129,7 @@ struct ComposerZoomTests {
         for x in 0..<width {
             let ink = (0..<height).contains { y in
                 guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB), color.alphaComponent > 0.5 else { return false }
-                return (color.redComponent + color.greenComponent + color.blueComponent) / 3 < 0.55
+                return (color.redComponent + color.greenComponent + color.blueComponent) / 3 > 0.55
             }
             if ink {
                 if start == nil { start = x }

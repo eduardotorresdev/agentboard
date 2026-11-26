@@ -30,7 +30,7 @@ struct TemplatesMenu: View {
                 .buttonStyle(ToolbarButtonStyle(compact: true))
                 .font(Theme.Font.label)
                 .padding(4)
-                .modifier(GlassCapsule())
+                .modifier(CanvasPill())
                 .help(L("Canvases memorized for this project: lay one out here, or memorize this one."))
                 .popover(isPresented: $isOpen, arrowEdge: .top) { list }
                 .transition(.opacity)
@@ -58,7 +58,7 @@ struct TemplatesMenu: View {
             if !isEmpty, let current = board.template(), !current.cards.isEmpty {
                 Button { naming = current } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "plus").font(Theme.Font.label).foregroundStyle(Theme.accent)
+                        Image(systemName: "plus").font(Theme.Font.label).foregroundStyle(Theme.accentText)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(L("Create new")).font(Theme.Font.label).foregroundStyle(Theme.ink)
                             // Counts beside each kind's symbol: all five kinds fit the row, where words were cut short.
@@ -197,7 +197,7 @@ private struct TemplateRow: View {
                     Image(systemName: "trash")
                     Text(L("Remove")).font(Theme.Font.caption)
                 }
-                .foregroundStyle(Theme.onAccent)
+                .foregroundStyle(Theme.onDanger)
                 .frame(width: Self.reveal - 8)
                 .frame(maxHeight: .infinity)
                 .background(Theme.danger, in: .rect(cornerRadius: Theme.Radius.card))
