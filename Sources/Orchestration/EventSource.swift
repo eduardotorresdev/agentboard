@@ -3,8 +3,9 @@ import CryptoKit
 import Foundation
 
 /// An event source: a local webhook (Standard Webhooks, on 127.0.0.1) that other programs on
-/// this Mac post events to. Each event names a channel; a line from a channel to an agent wakes
-/// that agent with the event, under the line's rule. A channel with no line only keeps history.
+/// this Mac post events to. Each event names a channel; a line from the source to an agent wakes
+/// that agent with every channel's events, a line from one channel only with that channel's,
+/// each under the line's rule. A channel no line reaches only keeps history.
 public struct EventSourceRecord: Identifiable, Hashable, Codable, Sendable {
     public let id: UUID
     public let worktree: String
@@ -16,6 +17,9 @@ public struct EventSourceRecord: Identifiable, Hashable, Codable, Sendable {
     /// Where events are posted, filled in by the core each time it sends the record.
     public var url: String?
     public var channels: [EventChannel]
+    /// The rule of each line from the source itself, by the agent at its other end: such a line
+    /// takes every channel to that agent (a channel's own line to it wins).
+    public var rules: [UUID: EventRule]?
     /// The last events, newest first.
     public var history: [EventLogEntry]
     /// Events received on `countDay` (`yyyy-MM-dd`, local).

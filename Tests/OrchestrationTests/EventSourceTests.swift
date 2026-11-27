@@ -157,4 +157,34 @@ struct EventSourceTests {
         #expect(core.orchestrator.eventTraffic.held.isEmpty)
         client.disconnect()
     }
+
+    /// A line from the source itself takes every channel to the agent, under the source's rule.
+    @MainActor @Test func aLineFromTheSourceTakesEveryChannel() async throws {
+        let core = try Core()
+        defer { core.stop() }
+        let ada = agent("Ada", in: core.folder)
+        core.orchestrator.insert(ada)
+        let client = try await board(core)
+        client.send(.open(id: ada.id, cols: 200, rows: 40, start: true))
+        let sourceID = UUID()
+        core.orchestrator.addEventSource(EventSourceRecord(id: sourceID, worktree: core.folder.path, name: "Mail", frame: .zero))
+        let secret = try #require(core.orchestrator.eventSource(sourceID)?.secret)
+        try await waitUntil { core.screen(ada.id).contains("ready") }
+        #expect(core.orchestrator.bus.add(Connection(a: sourceID, b: ada.id)))
+        core.orchestrator.setEventRule(source: sourceID, channel: sourceID, agent: ada.id, rule: EventRule(instruction: "Triage"), from: nil)
+        #expect(core.orchestrator.eventSource(sourceID)?.rules?[ada.id]?.instruction == "Triage")
+        for (key, text) in [("inbox", "invoice due"), ("spam", "you won")] {
+            let body = Data(#"{"channel":{"key":"\#(key)"},"items":[{"text":"\#(text)"}]}"#.utf8)
+            let id = UUID().uuidString, timestamp = String(Int(Date().timeIntervalSince1970))
+            let reply = core.orchestrator.hook(sourceID.uuidString, headers: [
+                "webhook-id": id, "webhook-timestamp": timestamp,
+                "webhook-signature": StandardWebhook.sign(secret: secret, id: id, timestamp: timestamp, body: body),
+            ], body: body)
+            #expect(reply.status == 202)
+        }
+        try await waitUntil { core.screen(ada.id).contains("invoice due") }
+        #expect(core.screen(ada.id).contains("Rule instruction: Triage"))
+        #expect(core.orchestrator.eventSource(sourceID)?.history.allSatisfy { $0.deliveredTo.first?.hasPrefix("Ada") == true } == true)
+        client.disconnect()
+    }
 }

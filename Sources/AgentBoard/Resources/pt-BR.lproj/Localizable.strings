@@ -770,7 +770,7 @@
 "Event source actions" = "Ações da fonte de eventos";
 "Active · last event %@" = "Ativa · último evento %@";
 "Waiting for the first event" = "Aguardando o primeiro evento";
-"Channels show up with their first event. Draw a line from one to an agent to wake it." = "Os canais aparecem com o primeiro evento. Ligue uma linha de um canal a um agente para acordá-lo.";
+"Channels show up with their first event. Draw a line from the source to an agent to wake it with every channel, or from one channel for only that one." = "Os canais aparecem com o primeiro evento. Ligue a fonte a um agente para acordá-lo com todos os canais, ou um canal só para aquele canal.";
 "%lld more: make the card taller to see them" = "Mais %lld: aumente a altura do card para vê-los";
 "history only" = "só histórico";
 "Regenerate the secret? Programs using the old one get refused until they use the new one." = "Gerar um novo segredo? Programas que usam o antigo serão recusados até usarem o novo.";

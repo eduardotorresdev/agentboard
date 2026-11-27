@@ -43,6 +43,7 @@ extension Orchestrator {
 
     func startEventSources() {
         for source in eventSources where source.deleted != true {
+            bus.register(EventChannelElement(id: source.id, store: self))
             for channel in source.channels { bus.register(EventChannelElement(id: channel.id, store: self)) }
         }
         toolServer.onHook = { [weak self] source, headers, body in
@@ -62,6 +63,7 @@ extension Orchestrator {
         source.countDay = EventSourceRecord.day(Date())
         eventSources.append(source)
         saveEventSource(source)
+        bus.register(EventChannelElement(id: source.id, store: self))
         // The board that added it learns its secret here too.
         broadcast(.eventSourceAdded(withURL(source)))
     }
@@ -76,6 +78,7 @@ extension Orchestrator {
     /// Keeps a tombstone, so its URL answers 410 instead of 404.
     func removeEventSource(_ id: UUID, from sender: CoreBoard? = nil) {
         guard let index = eventSources.firstIndex(where: { $0.id == id && $0.deleted != true }) else { return }
+        bus.remove(element: id)
         for channel in eventSources[index].channels {
             bus.remove(element: channel.id)
             for key in eventTraffic.held.keys where key.hasPrefix(channel.id.uuidString) { eventTraffic.held[key] = nil }
@@ -95,6 +98,8 @@ extension Orchestrator {
             rule.windowEnd = nil
         }
         changeEventSource(source, from: sender) { record in
+            // `channel` is the source itself for a line from the source.
+            if channel == source { return record.rules = (record.rules ?? [:]).merging([agent: rule]) { $1 } }
             guard let index = record.channels.firstIndex(where: { $0.id == channel }) else { return }
             record.channels[index].rules[agent] = rule
         }
@@ -164,8 +169,8 @@ extension Orchestrator {
         source.lastError = nil
         var names: [String] = []
         var errors: [String] = []
-        for agent in agents(on: channel.id) {
-            switch deliver([payload], source: source, channel: channel, to: agent, now: now) {
+        for (agent, rule, line) in recipients(of: channel, in: source) {
+            switch deliver([payload], source: source, channel: channel, to: agent, rule: rule, line: line, now: now) {
             case .delivered: names.append(agent.name)
             case .held: names.append("\(agent.name) (waiting)")
             case .notRunning:
@@ -182,20 +187,32 @@ extension Orchestrator {
         if isNew { bus.register(EventChannelElement(id: channel.id, store: self)) }
     }
 
-    private func agents(on channel: UUID) -> [AgentEndpoint] {
-        bus.peers(of: channel).compactMap { $0 as? AgentEndpoint }
+    private func agents(on element: UUID) -> [AgentEndpoint] {
+        bus.peers(of: element).compactMap { $0 as? AgentEndpoint }
+    }
+
+    /// The agents `channel`'s events reach, each with its line's rule and that line's end (the
+    /// channel or the source): a channel's own line to an agent wins over the source's.
+    func recipients(of channel: EventChannel, in source: EventSourceRecord) -> [(agent: AgentEndpoint, rule: EventRule, line: UUID)] {
+        var seen = Set<UUID>()
+        let own = agents(on: channel.id).filter { seen.insert($0.id).inserted }.map { ($0, channel.rule(for: $0.id), channel.id) }
+        let all = agents(on: source.id).filter { seen.insert($0.id).inserted }.map { ($0, source.rules?[$0.id] ?? EventRule(), source.id) }
+        return own + all
     }
 
     enum EventDelivery { case delivered, held, notRunning }
 
-    /// Hands `events` (with any held on the line) to the agent, joining the prompt still queued
-    /// for it, or holds them while the rule's window is closed or its hourly limit is reached.
+    /// Hands `events` (with any held for the channel) to the agent, joining the prompt still
+    /// queued for it, or holds them while the rule's window is closed or its line's hourly limit
+    /// is reached. `line` is the end of the line they come by: the channel or the whole source.
     @discardableResult
-    func deliver(_ events: [EventPayload], source: EventSourceRecord, channel: EventChannel, to agent: AgentEndpoint, now: Date) -> EventDelivery {
+    func deliver(_ events: [EventPayload], source: EventSourceRecord, channel: EventChannel, to agent: AgentEndpoint, rule: EventRule,
+                 line: UUID, now: Date) -> EventDelivery {
         let key = "\(channel.id) \(agent.id)"
-        let rule = channel.rule(for: agent.id)
-        let triggers = (eventTraffic.triggers[key] ?? []).filter { now.timeIntervalSince($0) < 3600 }
-        eventTraffic.triggers[key] = triggers
+        // The limit counts the line's wakes, all of its channels together.
+        let lineKey = "\(line) \(agent.id)"
+        let triggers = (eventTraffic.triggers[lineKey] ?? []).filter { now.timeIntervalSince($0) < 3600 }
+        eventTraffic.triggers[lineKey] = triggers
         let queued = agent.hasQueuedEvent(key)
         func hold() {
             eventTraffic.held[key] = Array(((eventTraffic.held[key] ?? []) + events).suffix(Self.heldEventLimit))
@@ -213,7 +230,7 @@ extension Orchestrator {
         }
         eventTraffic.held[key] = nil
         eventTraffic.pending[key] = batch
-        if !queued { eventTraffic.triggers[key] = triggers + [now] }
+        if !queued { eventTraffic.triggers[lineKey] = triggers + [now] }
         broadcast(.message(Message(from: channel.id, to: agent.id, text: text, date: now)))
         return .delivered
     }
@@ -224,17 +241,17 @@ extension Orchestrator {
             let parts = key.split(separator: " ")
             guard parts.count == 2, let channelID = UUID(uuidString: String(parts[0])), let agentID = UUID(uuidString: String(parts[1])),
                   let (source, channel) = eventChannel(channelID),
-                  let agent = agents(on: channelID).first(where: { $0.id == agentID }) else {
+                  let recipient = recipients(of: channel, in: source).first(where: { $0.agent.id == agentID }) else {
                 // The line or its ends are gone.
                 eventTraffic.held[key] = nil
                 continue
             }
-            deliver([], source: source, channel: channel, to: agent, now: now)
+            deliver([], source: source, channel: channel, to: recipient.agent, rule: recipient.rule, line: recipient.line, now: now)
         }
     }
 }
 
-/// A source's channel as the bus sees it: lines start from it toward the agents it wakes.
+/// A source, or one of its channels, as the bus sees it: lines start from it toward the agents it wakes.
 @MainActor
 final class EventChannelElement: BoardElement {
     let id: UUID
@@ -245,8 +262,14 @@ final class EventChannelElement: BoardElement {
         self.store = store
     }
 
-    var name: String { store?.eventChannel(id).map { "\($0.source.name) · \($0.channel.title)" } ?? "" }
+    var name: String {
+        if let source = store?.eventSource(id) { return source.name }
+        return store?.eventChannel(id).map { "\($0.source.name) · \($0.channel.title)" } ?? ""
+    }
     var kind: ElementKind { .eventChannel }
-    var detail: String? { "event channel" }
-    var board: String? { store?.eventChannel(id).map { boardKey($0.source.worktree, $0.source.organizationID) } }
+    var detail: String? { store?.eventSource(id) != nil ? "event source" : "event channel" }
+    var board: String? {
+        guard let source = store?.eventSource(id) ?? store?.eventChannel(id)?.source else { return nil }
+        return boardKey(source.worktree, source.organizationID)
+    }
 }

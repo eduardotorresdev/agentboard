@@ -121,7 +121,7 @@ struct EventSourceView: View {
     @ViewBuilder
     private func channels(_ source: EventSourceRecord, fitting count: Int) -> some View {
         if source.channels.isEmpty {
-            Text(L("Channels show up with their first event. Draw a line from one to an agent to wake it."))
+            Text(L("Channels show up with their first event. Draw a line from the source to an agent to wake it with every channel, or from one channel for only that one."))
                 .font(Theme.Font.caption)
                 .foregroundStyle(Theme.faint)
                 .fixedSize(horizontal: false, vertical: true)
@@ -148,9 +148,9 @@ struct EventSourceView: View {
         }
     }
 
-    /// Who a channel's lines reach, or that it only keeps history.
+    /// Who a channel's events reach (by its own lines or the source's), or that it only keeps history.
     private func agentsLabel(_ channel: EventChannel) -> String {
-        let peers = Set(store.connections.compactMap { $0.other(than: channel.id) })
+        let peers = Set(store.connections.compactMap { $0.other(than: channel.id) ?? $0.other(than: id) })
         let names = store.agents.filter { peers.contains($0.id) }.map(\.name)
         return names.isEmpty ? L("history only") : "→ " + names.joined(separator: ", ")
     }

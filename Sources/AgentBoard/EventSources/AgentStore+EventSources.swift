@@ -55,9 +55,13 @@ extension AgentStore {
     }
 
     func setEventRule(_ rule: EventRule, source: UUID, channel: UUID, agent: UUID) {
-        if let index = eventSources.firstIndex(where: { $0.id == source }),
-           let row = eventSources[index].channels.firstIndex(where: { $0.id == channel }) {
-            eventSources[index].channels[row].rules[agent] = rule
+        if let index = eventSources.firstIndex(where: { $0.id == source }) {
+            // `channel` is the source itself for a line from the source.
+            if channel == source {
+                eventSources[index].rules = (eventSources[index].rules ?? [:]).merging([agent: rule]) { $1 }
+            } else if let row = eventSources[index].channels.firstIndex(where: { $0.id == channel }) {
+                eventSources[index].channels[row].rules[agent] = rule
+            }
         }
         send(.setEventRule(source: source, channel: channel, agent: agent, rule: rule))
     }

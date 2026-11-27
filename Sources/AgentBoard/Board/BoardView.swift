@@ -975,7 +975,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private var worktreeConnections: [Connection] {
         store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree, on: store.host?.id).map(\.id))
             .union(localSimulators.map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)).union(relays.map(\.id))
-            .union(eventPorts.keys))
+            .union(eventPorts.keys).union(store.eventSources(in: worktree).map(\.id)))
     }
 
     /// The relays of this worktree: linked agents elsewhere.
@@ -1483,8 +1483,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             return (port.key, Side.right.rawValue)
         }
         let hovered = hoveredCard.flatMap { id in frame(of: id).map { (id: id, frame: $0) } }
-        let candidates = ([hovered].compactMap { $0 } + itemFrames.reversed()).filter { store.eventSource($0.id) == nil }
-        for item in candidates {
+        for item in [hovered].compactMap({ $0 }) + itemFrames.reversed() {
             if let index = CardMetrics.handles(of: item.frame).firstIndex(where: { hypot($0.x - point.x, $0.y - point.y) <= reach }) {
                 return (item.id, index)
             }
@@ -1496,7 +1495,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private func snapHandle(near point: CGPoint, excluding source: UUID) -> (card: UUID, side: Side, point: CGPoint)? {
         let reach = CardMetrics.snapDistance / zoom
         var best: (card: UUID, side: Side, point: CGPoint, distance: CGFloat)?
-        for item in itemFrames where item.id != source && store.eventSource(item.id) == nil {
+        for item in itemFrames where item.id != source {
             for (index, handle) in CardMetrics.handles(of: item.frame).enumerated() {
                 let distance = hypot(handle.x - point.x, handle.y - point.y)
                 if distance <= reach, distance < best?.distance ?? .infinity, let side = Side(rawValue: index) {
@@ -1685,7 +1684,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 drag.point = snap.point
                 drag.target = snap.card
                 drag.targetSide = snap.side
-            } else if let target = item(at: location), target != drag.from, store.eventSource(target) == nil, let frame = frame(of: target) {
+            } else if let target = item(at: location), target != drag.from, let frame = frame(of: target) {
                 // Over a card: the line goes to its handle nearest the pointer, and stays there.
                 let handles = CardMetrics.handles(of: frame)
                 let index = handles.indices.min { hypot(handles[$0].x - location.x, handles[$0].y - location.y)
@@ -1764,8 +1763,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             previewRope = nil
             NSCursor.pop()
             // The new line keeps the rope that was drawn, swing and all.
-            // A channel's lines go to agents, and only from it.
-            let joinable = store.eventChannel(drag.from) == nil || drag.target.map { record($0) != nil } == true
+            // An event source's lines, and its channels', go to agents.
+            let ends = [drag.from, drag.target].compactMap { $0 }
+            let joinable = !ends.contains { store.eventChannel($0) != nil || store.eventSource($0) != nil } || ends.contains { record($0) != nil }
             if joinable, let target = drag.target, let connection = store.connect(drag.from, target, sides: (drag.side, drag.targetSide)) {
                 ropes[connection.id] = drawn
             }
@@ -3867,8 +3867,12 @@ extension BoardView {
             card.zPosition = below + CGFloat(index)
             card.update(frame: record.frame, name: record.name, focused: highlighted(record.id), closeHovered: hoveredClose == record.id,
                         scale: scale, icon: .symbol("bolt.fill", color: Theme.Hex.deep))
-            // Lines start from its channels, not from the card.
-            card.updateHandles(visible: false, hovered: nil, linkTarget: false)
+            let lit: Int? = if let linkDrag {
+                linkDrag.from == record.id ? linkDrag.side.rawValue : linkDrag.target == record.id ? linkDrag.targetSide?.rawValue : nil
+            } else {
+                record.id == hoveredCard ? hoveredHandle : nil
+            }
+            card.updateHandles(visible: linkDrag != nil || record.id == hoveredCard, hovered: lit, linkTarget: linkDrag?.target == record.id)
             for channel in record.channels {
                 guard let frame = ports[channel.id] else { continue }
                 let port = eventPortLayers[channel.id] ?? {
@@ -3919,18 +3923,27 @@ extension BoardView {
         }
     }
 
-    /// Opens the rule of a line from a channel to an agent, at `point` (in view coordinates);
-    /// false for any other line.
+    /// Opens the rule of a line from an event source, or one of its channels, to an agent, at
+    /// `point` (in view coordinates); false for any other line.
     fileprivate func showRule(of connection: Connection, at point: CGPoint) -> Bool {
         let ends = [(connection.a, connection.b), (connection.b, connection.a)]
-        guard let (channelID, agentID) = ends.first(where: { store.eventChannel($0.0) != nil && record($0.1) != nil }),
-              let (source, channel) = store.eventChannel(channelID), let agent = record(agentID) else { return false }
+        guard let (lineID, agentID) = ends.first(where: { (store.eventChannel($0.0) != nil || store.eventSource($0.0) != nil) && record($0.1) != nil }),
+              let agent = record(agentID) else { return false }
+        // A line from the source itself keeps its rule on the source, under the source's id.
+        let initial: EventRule, title: String, sourceID: UUID
+        if let source = store.eventSource(lineID) {
+            (initial, title, sourceID) = (source.rules?[agentID] ?? EventRule(), "\(source.name) → \(agent.name)", source.id)
+        } else if let (source, channel) = store.eventChannel(lineID) {
+            (initial, title, sourceID) = (channel.rule(for: agentID), "\(channel.title) → \(agent.name)", source.id)
+        } else {
+            return false
+        }
         rulePopover?.close()
         let popover = NSPopover()
         popover.behavior = .transient
-        let editor = EventRuleEditor(initial: channel.rule(for: agentID), title: "\(channel.title) → \(agent.name)",
+        let editor = EventRuleEditor(initial: initial, title: title,
                                      onSave: { [weak self, weak popover] rule in
-                                         self?.store.setEventRule(rule, source: source.id, channel: channelID, agent: agentID)
+                                         self?.store.setEventRule(rule, source: sourceID, channel: lineID, agent: agentID)
                                          popover?.close()
                                      },
                                      onCancel: { [weak popover] in popover?.close() })
