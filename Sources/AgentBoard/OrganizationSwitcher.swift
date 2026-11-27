@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The organization at the head of the sidebar: its avatar, its name and "Organization". A dot
+/// The organization at the head of the sidebar: its avatar, its name and the key to the next one. A dot
 /// in the avatar's corner tells another organization has an agent waiting for the user or
 /// crashed. Clicking opens the organization menu, which switches, edits and adds, and holds the
 /// account.
@@ -38,10 +38,9 @@ struct OrganizationSwitcher: View {
                             }
                         }
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(name).font(Theme.Font.title).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
-                    Text(L("Organization")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
-                }
+                Text(name).font(Theme.Font.title).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.tail)
+                // What ContentView's ⇧⌘O does: the next organization, only with another to go to.
+                if store.organizations.count > 1 { KeyChip(text: "⇧⌘O") }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.down")
                     .font(Theme.Font.caption.weight(.bold))
