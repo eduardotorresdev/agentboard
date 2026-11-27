@@ -605,7 +605,7 @@ struct MarkerInk: View {
     /// The stroke, its points a display frame apart, as wide as the nib all along.
     nonisolated static func drawing(_ points: [CGPoint], nib: CGFloat) -> PKDrawing {
         let ink = PKInk(.marker, color: NSColor(srgbRed: CGFloat(Theme.Hex.accent >> 16 & 0xFF) / 255, green: CGFloat(Theme.Hex.accent >> 8 & 0xFF) / 255,
-                                                 blue: CGFloat(Theme.Hex.accent & 0xFF) / 255, alpha: 1))
+                                                 blue: CGFloat(Theme.Hex.accent & 0xFF) / 255, alpha: 0.5))
         let controls = points.enumerated().map { index, point in
             PKStrokePoint(location: point, timeOffset: Double(index) / 60, size: CGSize(width: nib, height: nib),
                           opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
