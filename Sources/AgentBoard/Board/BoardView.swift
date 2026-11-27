@@ -3571,7 +3571,8 @@ extension BoardView {
                     let rect = layout.frame.offsetBy(dx: record.frame.minX, dy: record.frame.minY)
                     host.place(screen(rect), size: rect.size, zoom: zoom)
                 }
-                card.footed = state.footerOpen
+                // The marker's footer is always under the picture.
+                card.footed = true
             }
             // A picture kept on another host is brought here the first time its card shows.
             if visible { store.fetchMedia(record) }

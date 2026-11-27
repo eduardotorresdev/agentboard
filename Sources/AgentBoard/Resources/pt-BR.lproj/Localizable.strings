@@ -657,6 +657,8 @@
 "Remove takes them off the board for good. Keep changes nothing and tells the agent no." = "Remover tira-os do quadro de vez. Manter não muda nada e diz não ao agente.";
 "Mark" = "Marcar";
 "Drag over the picture to mark an area and say what should change there." = "Arraste sobre a imagem para marcar uma área e dizer o que deve mudar ali.";
+"Drag over the picture to mark an area." = "Arraste sobre a imagem para marcar uma área.";
+"Marks areas of the picture for an agent to change." = "Marca áreas da imagem para um agente mudar.";
 "Annotation %lld" = "Anotação %lld";
 "What should change here?" = "O que deve mudar aqui?";
 "Done keeps the remark. Delete removes this mark." = "Concluir guarda a observação. Apagar remove esta marca.";

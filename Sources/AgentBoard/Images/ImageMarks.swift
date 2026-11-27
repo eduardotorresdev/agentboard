@@ -143,10 +143,11 @@ final class ImageMarks {
 /// picture at the origin, the footer under it, room for a balloon to the right and below.
 struct ImageMarksLayout {
     static let footerHeight: CGFloat = 66
+    /// The footer with only the marker, before there is anything to send.
+    static let barHeight: CGFloat = 38
     static let balloon = CGSize(width: 310, height: 146)
     static let gap: CGFloat = 10
     static let tab = CGSize(width: 24, height: 18)
-    static let button = CGSize(width: 92, height: 26)
     static let handle: CGFloat = 10
 
     /// The picture's size on the card.
@@ -165,9 +166,10 @@ struct ImageMarksLayout {
     }
 
     var scale: CGFloat { picture.width / max(pixelSize.width, 1) }
-    var footer: CGRect { CGRect(x: 0, y: picture.height, width: picture.width, height: Self.footerHeight) }
-    /// The Mark button on the picture's bottom edge, while there is no footer.
-    var button: CGRect { CGRect(x: 8, y: picture.height - Self.button.height - 8, width: Self.button.width, height: Self.button.height) }
+    /// Under the picture, in the card's frame: the marker alone, or with the marks and Send when `open`.
+    func footer(open: Bool) -> CGRect {
+        CGRect(x: 0, y: picture.height, width: picture.width, height: open ? Self.footerHeight : Self.barHeight)
+    }
 
     func rect(of mark: ImageMark) -> CGRect {
         CGRect(x: mark.area.minX * scale, y: mark.area.minY * scale, width: mark.area.width * scale, height: mark.area.height * scale)
@@ -200,7 +202,7 @@ struct ImageMarksLayout {
 
     /// Whether the annotation chrome takes a click at `point`; elsewhere it goes to the board.
     @MainActor func catches(_ point: CGPoint, _ state: ImageMarks) -> Bool {
-        if state.footerOpen ? footer.contains(point) : button.contains(point) { return true }
+        if footer(open: state.footerOpen).contains(point) { return true }
         if state.marking, CGRect(origin: .zero, size: picture).contains(point) { return true }
         for mark in state.marks {
             let reach = mark.id == state.selected ? -Self.handle : 0
@@ -267,6 +269,8 @@ struct ImageMarksView: View {
     let addAgent: (any AgentProvider) -> Void
     /// The area being dragged out, in overlay points.
     @State private var drawing: CGRect?
+    /// The id the area being dragged out keeps as a mark, so its strokes don't change when it lands.
+    @State private var drawingID = UUID()
 
     var body: some View {
         if let record = store.image(id) {
@@ -277,16 +281,7 @@ struct ImageMarksView: View {
                     markView(mark, number: index + 1, layout)
                 }
                 if let drawing { drawn(drawing, layout) }
-                if state.footerOpen {
-                    footer(record, layout)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                } else {
-                    Button { toggleMarker() } label: { Label(L("Mark"), systemImage: "highlighter") }
-                        .buttonStyle(MarkButtonStyle(kind: state.marking ? .on : .plain))
-                        .help(L("Drag over the picture to mark an area and say what should change there."))
-                        .frame(width: layout.button.width, height: layout.button.height, alignment: .leading)
-                        .offset(x: layout.button.minX, y: layout.button.minY)
-                }
+                footer(record, layout)
                 if let index = state.marks.firstIndex(where: { $0.id == state.selected }) {
                     let mark = state.marks[index]
                     MarkBalloon(state: state, mark: mark, number: index + 1)
@@ -326,11 +321,11 @@ struct ImageMarksView: View {
                             .intersection(CGRect(origin: .zero, size: layout.picture))
                     }
                     .onEnded { drag in
-                        defer { drawing = nil }
+                        defer { drawing = nil; drawingID = UUID() }
                         guard let drawing else { return state.select(layout.mark(at: drag.startLocation, in: state.marks)?.id) }
                         // A slip of the hand is no area.
                         guard drawing.width >= 8, drawing.height >= 8 else { return }
-                        let mark = ImageMark(area: layout.area(of: drawing))
+                        let mark = ImageMark(id: drawingID, area: layout.area(of: drawing))
                         state.marks.append(mark)
                         state.select(mark.id)
                     })
@@ -339,7 +334,7 @@ struct ImageMarksView: View {
 
     private func drawn(_ rect: CGRect, _ layout: ImageMarksLayout) -> some View {
         let area = layout.area(of: rect)
-        return Rectangle().fill(Theme.accent.opacity(0.36))
+        return HighlighterMark(seed: drawingID.seed, opacity: 0.45)
             .frame(width: rect.width, height: rect.height)
             .overlay(alignment: .bottomTrailing) {
                 Text(verbatim: "\(Int(area.width)) x \(Int(area.height)) px")
@@ -357,7 +352,7 @@ struct ImageMarksView: View {
     @ViewBuilder private func markView(_ mark: ImageMark, number: Int, _ layout: ImageMarksLayout) -> some View {
         let rect = layout.rect(of: mark)
         let selected = mark.id == state.selected
-        Rectangle().fill(Theme.accent.opacity(selected ? 0.36 : 0.22))
+        HighlighterMark(seed: mark.id.seed, opacity: selected ? 0.45 : 0.32)
             .frame(width: rect.width, height: rect.height)
             .contentShape(.rect)
             .onTapGesture { state.select(mark.id) }
@@ -409,6 +404,11 @@ struct ImageMarksView: View {
                     Button { toggleMarker() } label: { Label(L("Mark"), systemImage: "highlighter") }
                         .buttonStyle(MarkButtonStyle(kind: state.marking ? .on : .plain))
                         .help(L("Drag over the picture to mark an area and say what should change there."))
+                    if !state.footerOpen {
+                        Text(state.marking ? L("Drag over the picture to mark an area.") : L("Marks areas of the picture for an agent to change."))
+                            .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                            .truncationMode(.tail)
+                    }
                     ForEach(Array(state.marks.enumerated()), id: \.element.id) { index, mark in
                         if !mark.text.isEmpty {
                             Button { state.select(mark.id) } label: { Text(verbatim: "\(index + 1)").monospacedDigit() }
@@ -417,7 +417,7 @@ struct ImageMarksView: View {
                         }
                     }
                     Spacer(minLength: 6)
-                    if let target {
+                    if state.footerOpen, let target {
                         Menu {
                             ForEach(agents, id: \.id) { agent in
                                 Button { state.agent = agent.id } label: {
@@ -431,32 +431,36 @@ struct ImageMarksView: View {
                         .menuStyle(.button)
                         .buttonStyle(MarkButtonStyle())
                         .fixedSize()
-                    } else {
+                    } else if state.footerOpen {
                         addAgentButton
                     }
-                    Button(L("Send")) {
-                        if let target { Task { await store.sendMarks(of: id, to: target.id) } }
+                    if state.footerOpen {
+                        Button(L("Send")) {
+                            if let target { Task { await store.sendMarks(of: id, to: target.id) } }
+                        }
+                        .buttonStyle(MarkButtonStyle(kind: .prominent))
+                        .disabled(target == nil || state.sending)
                     }
-                    .buttonStyle(MarkButtonStyle(kind: .prominent))
-                    .disabled(target == nil || state.sending)
                 }
-                if let failure = state.failure {
-                    Text(failure).font(Theme.Font.caption).foregroundStyle(Theme.danger)
-                } else if let target {
-                    Text(count == 1 ? L("Send delivers it with the picture to \(target.name), then clears it.")
-                        : L("Send delivers all \(count) with the picture to \(target.name), then clears them."))
-                        .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
-                } else {
-                    Text(L("No agent on this board. Add agent creates one, then Send works.")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                if state.footerOpen {
+                    if let failure = state.failure {
+                        Text(failure).font(Theme.Font.caption).foregroundStyle(Theme.danger)
+                    } else if let target {
+                        Text(count == 1 ? L("Send delivers it with the picture to \(target.name), then clears it.")
+                            : L("Send delivers all \(count) with the picture to \(target.name), then clears them."))
+                            .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                    } else {
+                        Text(L("No agent on this board. Add agent creates one, then Send works.")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
+                    }
                 }
             }
         }
         .lineLimit(1)
         .padding(.horizontal, 10)
-        .frame(width: layout.footer.width, height: layout.footer.height, alignment: .leading)
+        .frame(width: layout.picture.width, height: layout.footer(open: state.footerOpen).height, alignment: .leading)
         .background(Theme.surfaceDeep, in: UnevenRoundedRectangle(bottomLeadingRadius: Theme.Radius.card, bottomTrailingRadius: Theme.Radius.card))
         .clipped()
-        .offset(y: layout.footer.minY)
+        .offset(y: layout.picture.height)
     }
 
     @ViewBuilder private var addAgentButton: some View {
@@ -476,6 +480,78 @@ struct ImageMarksView: View {
             .fixedSize()
         }
     }
+}
+
+/// A mark's rectangle painted the way a text highlighter would: overlapping horizontal swipes
+/// with chiseled ends and slightly uneven edges. Only the look: the
+/// area stays the rectangle.
+struct HighlighterMark: View {
+    let seed: UInt64
+    var opacity: Double
+
+    var body: some View {
+        Canvas { context, size in
+            // One translucent layer: the swipes merge like ink, their uneven edges and ends show the hand.
+            context.opacity = opacity
+            context.drawLayer { layer in
+                for stroke in Self.strokes(in: size, seed: seed) { layer.fill(stroke, with: .color(Theme.accent)) }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// A highlighter's nib, in the overlay's points.
+    static let nib: CGFloat = 18
+
+    /// The swipes covering `size`, top to bottom; the same seed gives the same hand.
+    nonisolated static func strokes(in size: CGSize, seed: UInt64) -> [Path] {
+        let thickness = min(size.height, nib)
+        let rows = size.height > nib ? Int(((size.height - nib) / (nib * 0.75)).rounded(.up)) + 1 : 1
+        return (0..<rows).map { row in
+            // Each swipe its own randomness, so one keeps its shape while the area grows.
+            var random = SplitMix(seed: seed &+ UInt64(row) &* 0x9E37_79B9_7F4A_7C15)
+            let top = rows == 1 ? 0 : (size.height - thickness) * CGFloat(row) / CGFloat(rows - 1)
+            let slant = min(thickness * 0.35, size.width / 4)
+            let start = random.next(upTo: min(4, size.width / 8)), end = size.width - random.next(upTo: min(4, size.width / 8))
+            let wobble = min(0.9, thickness / 10)
+            let steps = max(1, Int((end - start - slant) / 22))
+            var path = Path()
+            path.move(to: CGPoint(x: start + slant, y: top))
+            for step in 1...steps {
+                let x = start + slant + (end - start - slant) * CGFloat(step) / CGFloat(steps)
+                path.addLine(to: CGPoint(x: x, y: top + (step == steps ? 0 : random.next(upTo: wobble))))
+            }
+            path.addLine(to: CGPoint(x: end - slant, y: top + thickness))
+            for step in (0..<steps).reversed() {
+                let x = start + (end - start - slant) * CGFloat(step) / CGFloat(steps)
+                path.addLine(to: CGPoint(x: x, y: top + thickness - (step == 0 ? 0 : random.next(upTo: wobble))))
+            }
+            path.closeSubpath()
+            return path
+        }
+    }
+}
+
+/// A small seeded generator, so a mark is drawn the same way every time.
+struct SplitMix {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+
+    /// Between 0 and `bound`.
+    mutating func next(upTo bound: CGFloat) -> CGFloat { CGFloat(next() >> 11) / CGFloat(1 << 53) * max(0, bound) }
+}
+
+extension UUID {
+    /// Stable across launches, unlike its hash.
+    var seed: UInt64 { withUnsafeBytes(of: uuid) { $0.loadUnaligned(as: UInt64.self) } }
 }
 
 /// The balloon beside a mark: its number and what should change there.

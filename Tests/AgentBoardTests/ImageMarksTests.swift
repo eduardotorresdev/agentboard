@@ -43,8 +43,9 @@ struct ImageMarksTests {
                 last = host.zoom
             }
             host.state.marking = false
-            let button = host.layout.button
-            let point = host.convert(CGPoint(x: button.midX * host.zoom, y: button.midY * host.zoom), to: nil)
+            // The Mark button leads the footer.
+            let footer = host.layout.footer(open: false)
+            let point = host.convert(CGPoint(x: (footer.minX + 40) * host.zoom, y: footer.midY * host.zoom), to: nil)
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 window.sendEvent(try #require(NSEvent.mouseEvent(
                     with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -98,9 +99,9 @@ struct ImageMarksTests {
         #expect(layout.area(of: CGRect(x: 700, y: 440, width: 100, height: 100)) == CGRect(x: 1400, y: 880, width: 40, height: 20))
 
         let state = ImageMarks(file: "a.png")
-        #expect(layout.catches(CGPoint(x: 20, y: 430), state))  // the Mark button
-        #expect(!layout.catches(CGPoint(x: 300, y: 200), state))
-        #expect(!layout.catches(CGPoint(x: 300, y: 470), state))  // no footer yet
+        #expect(layout.catches(CGPoint(x: 20, y: 460), state))  // the Mark button, in the footer
+        #expect(!layout.catches(CGPoint(x: 20, y: 430), state))  // the picture
+        #expect(!layout.catches(CGPoint(x: 300, y: 500), state))  // the footer is short until there is something to send
         state.marks = [mark]
         state.select(mark.id)
         #expect(layout.catches(CGPoint(x: 150, y: 60), state) && layout.catches(CGPoint(x: 320, y: 60), state))  // the mark, its balloon
@@ -109,7 +110,7 @@ struct ImageMarksTests {
         state.marks = [mark]
         state.marks[0].text = "kept"
         state.select(nil)
-        #expect(state.footerOpen && layout.catches(CGPoint(x: 300, y: 470), state) && !layout.catches(CGPoint(x: 320, y: 60), state))
+        #expect(state.footerOpen && layout.catches(CGPoint(x: 300, y: 500), state) && !layout.catches(CGPoint(x: 320, y: 60), state))
         state.marking = true
         #expect(layout.catches(CGPoint(x: 600, y: 300), state))
         #expect(state.escape() && !state.marking && !state.escape())
