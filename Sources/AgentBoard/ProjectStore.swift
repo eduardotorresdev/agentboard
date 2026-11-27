@@ -49,6 +49,8 @@ final class ProjectStore {
     /// What other organizations' projects listed when last shown: switching back shows it at once
     /// while git lists them again.
     @ObservationIgnored private var listedBefore: [Project.ID: [Worktree]] = [:]
+    /// Lists again when git adds or removes a worktree of a shown project.
+    @ObservationIgnored private lazy var watcher = WorktreeWatcher { [weak self] in self?.listLocalWorktrees() }
     /// What other hosts' clones of the projects hold, by host then project path, as last listed
     /// (see `Database.hostWorktrees`): an offline host's worktrees still show.
     private(set) var hostWorktrees: [UUID: [String: [Worktree]]] = [:]
@@ -316,6 +318,7 @@ final class ProjectStore {
             organizations = try database.organizations()
             if !organizations.contains(where: { $0.id == organizationID }) { organizationID = OrganizationHome.defaultID }
             projects = try database.projects(in: organizationID)
+            watcher.watch(projects.map(\.path))
             MyBoard.prepare(in: organizationID)
             // Names of paths missing on disk stay: a volume may be unmounted. Only removing the
             // worktree in the app forgets them.

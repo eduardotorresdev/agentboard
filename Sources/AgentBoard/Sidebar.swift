@@ -81,7 +81,7 @@ struct Sidebar: View {
             }
             .scrollIndicators(.never)
             .scrollDisabled(drag != nil)
-            SidebarFooter(hosts: hosts, board: board, host: selection?.worktree.host, organization: store.organizationID)
+            SidebarFooter(hosts: hosts, board: board, organization: store.organizationID)
         }
         .padding(10)
         .frame(maxHeight: .infinity)

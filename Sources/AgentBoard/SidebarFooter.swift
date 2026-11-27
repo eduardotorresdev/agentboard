@@ -1,15 +1,14 @@
 import AgentRuntime
 import AppKit
 import Charts
+import Orchestration
 import SwiftUI
 
-/// The sidebar's foot: caffeinate and zen, what the worktree's computer is using, the computers,
+/// The sidebar's foot: caffeinate and zen, what the board uses on this Mac, the computers,
 /// and what is left of the agents' plan.
 struct SidebarFooter: View {
     let hosts: HostStores
     let board: BoardController
-    /// The host of the worktree open on the canvas; nil is this Mac.
-    let host: UUID?
     let organization: UUID
 
     var body: some View {
@@ -18,7 +17,7 @@ struct SidebarFooter: View {
                 CaffeinateButton()
                 ZenButton(board: board).frame(width: 86)
             }
-            HostGauges(hosts: hosts, host: host)
+            AppGauges()
             HostsControl(hosts: hosts)
             AgentUsageBlock(organization: organization)
         }
@@ -88,47 +87,37 @@ private struct ZenButton: View {
     }
 }
 
-/// What the worktree's computer is using: its processor and its memory, each with the last minute
-/// of samples under it and its limit dashed at the top.
-private struct HostGauges: View {
-    let hosts: HostStores
-    let host: UUID?
-    @State private var samples: [HostStats] = []
+/// What the board itself uses on this Mac, the app and its core together (not the agents they
+/// run): processor and memory, each over the last minute of samples.
+private struct AppGauges: View {
+    @State private var samples: [RunnerStats] = []
     /// About a minute, at one sample every two seconds.
     static let history = 30
 
     var body: some View {
         let last = samples.last
-        let gigabytes = { (bytes: UInt64, digits: Int) in
-            (Double(bytes) / 1_073_741_824).formatted(.number.precision(.fractionLength(digits))) + " GB"
-        }
         HStack(spacing: 8) {
-            HostGauge(symbol: "cpu", title: L("CPU"),
-                      value: last.map { $0.cpu.formatted(.percent.precision(.fractionLength(0))) },
-                      limit: (1.0).formatted(.percent), points: samples.map(\.cpu))
-                .help(L("Of every processor together."))
-            HostGauge(symbol: "memorychip", title: L("Mem"),
-                      value: last.map { gigabytes($0.memoryUsed, 1) },
-                      limit: last.map { gigabytes($0.memoryTotal, 0) } ?? "",
-                      points: samples.map { $0.memoryTotal > 0 ? Double($0.memoryUsed) / Double($0.memoryTotal) : 0 })
-                .help(L("Memory in use, of what the computer has."))
+            AppGauge(symbol: "cpu", value: last?.cpu.map { ($0 / 100).formatted(.percent.precision(.fractionLength(0))) },
+                     points: samples.map { $0.cpu ?? 0 })
+                .help(L("Processor the board uses, without its agents; 100% is one core."))
+                .accessibilityLabel(L("CPU"))
+            AppGauge(symbol: "memorychip", value: last.map { ByteCountFormatter.string(fromByteCount: Int64($0.memory), countStyle: .memory) },
+                     points: samples.map { Double($0.memory) })
+                .help(L("Memory the board uses, without its agents."))
+                .accessibilityLabel(L("Memory"))
         }
-        // Another computer's are another history: it starts over.
-        .task(id: host) {
-            samples = []
-            var sampler = LocalHostSampler()
-            if host == nil {
-                // The processor's share is of the time between two samples.
-                _ = sampler.sample()
-                try? await Task.sleep(for: .milliseconds(400))
-            }
+        .task {
+            var previous: ProcessInspector.Sample?
+            let core = Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("AgentBoardCore")
             while !Task.isCancelled {
-                // Another computer's core reports its own; this Mac's are sampled here.
-                if let stats = host == nil ? sampler.sample() : hosts[host]?.hostStats {
-                    withAnimation(.smooth(duration: 0.6)) {
-                        samples.append(stats)
-                        if samples.count > Self.history { samples.removeFirst(samples.count - Self.history) }
-                    }
+                let sample = await Task.detached { [previous] in
+                    let pids = [getpid()] + (core.map(ProcessInspector.processes(running:)) ?? [])
+                    return ProcessInspector.sample(processes: pids, previous: previous)
+                }.value
+                previous = sample
+                withAnimation(.smooth(duration: 0.6)) {
+                    samples.append(sample.stats)
+                    if samples.count > Self.history { samples.removeFirst(samples.count - Self.history) }
                 }
                 try? await Task.sleep(for: .seconds(2))
             }
@@ -136,67 +125,55 @@ private struct HostGauges: View {
     }
 }
 
-/// One gauge: its name, the value against its limit, and the recent samples (0 to 1) as an area.
-private struct HostGauge: View {
+/// One compact gauge: its symbol and value on one line, the recent samples drawn behind them,
+/// scaled to their own peak.
+private struct AppGauge: View {
     let symbol: String
-    let title: String
     let value: String?
-    let limit: String
     let points: [Double]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol).accessibilityHidden(true)
-                Text(title)
-            }
-            .font(Theme.Font.caption)
-            .foregroundStyle(Theme.inkMuted)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value ?? "–")
-                    .font(Theme.Font.heading.monospacedDigit())
-                    .foregroundStyle(Theme.ink)
-                    .contentTransition(.numericText())
-                if !limit.isEmpty {
-                    Text(L("of \(limit)")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
-                }
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            chart
+        HStack(spacing: 6) {
+            Image(systemName: symbol).foregroundStyle(Theme.inkMuted).accessibilityHidden(true)
+            Text(value ?? "–")
+                .foregroundStyle(Theme.ink)
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .font(Theme.Font.caption.weight(.semibold).monospacedDigit())
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+        .frame(height: 32)
+        .background(alignment: .bottom) { chart.padding(.top, 10) }
         .background(Theme.surface, in: blockShape)
+        .clipShape(blockShape)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue(value.map { L("\($0) of \(limit)") } ?? "")
+        .accessibilityValue(value ?? "")
     }
 
     /// The newest sample at the right edge; the line fills in from there as samples arrive.
     private var chart: some View {
-        let start = HostGauges.history - points.count
+        let start = AppGauges.history - points.count
+        let peak = max(points.max() ?? 0, 1) * 1.15
         return Chart {
             ForEach(Array(points.enumerated()), id: \.offset) { index, point in
-                AreaMark(x: .value("Sample", start + index), y: .value("Used", min(point, 1)))
+                AreaMark(x: .value("Sample", start + index), y: .value("Used", point))
                     .foregroundStyle(Theme.accent.opacity(0.14))
                     .interpolationMethod(.monotone)
-                LineMark(x: .value("Sample", start + index), y: .value("Used", min(point, 1)))
-                    .foregroundStyle(Theme.accentText)
-                    .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                LineMark(x: .value("Sample", start + index), y: .value("Used", point))
+                    .foregroundStyle(Theme.accentText.opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
                     .interpolationMethod(.monotone)
             }
-            // The limit.
-            RuleMark(y: .value("Limit", 1))
-                .foregroundStyle(Theme.faint)
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
-        .chartXScale(domain: 0 ... HostGauges.history - 1)
-        .chartYScale(domain: 0 ... 1)
+        .chartXScale(domain: 0 ... AppGauges.history - 1)
+        .chartYScale(domain: 0 ... peak)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
-        .frame(height: 30)
+        .accessibilityHidden(true)
     }
 }
 
