@@ -40,6 +40,11 @@ public enum BoardRequest: Codable, Sendable {
     case updateImage(ImageRecord)
     /// Forgets it and deletes its file.
     case removeImage(UUID)
+    /// Makes or changes an organizational group of images and videos: the core lays its members
+    /// out and answers every board with `imageGroups`. Nil `origin` or `extent` are the core's to fill.
+    case setImageGroup(ImageGroup)
+    /// Forgets the group; its pictures stay where they are.
+    case removeImageGroup(UUID)
     case addFileTree(FileTreeRecord)
     /// Its name or frame changed.
     case updateFileTree(FileTreeRecord)
@@ -104,6 +109,8 @@ public enum BoardEvent: Codable, Sendable {
     /// Its name, frame or picture (`file`, `pixelSize`) changed.
     case imageUpdated(ImageRecord)
     case imageRemoved(UUID)
+    /// Every organizational group, after any change.
+    case imageGroups([ImageGroup])
     case fileTreeAdded(FileTreeRecord)
     case fileTreeUpdated(FileTreeRecord)
     case fileTreeRemoved(UUID)
@@ -149,10 +156,13 @@ public struct BoardState: Codable, Sendable {
     public var fileTrees: [FileTreeRecord]?
     /// The event sources; nil from a core that predates them.
     public var eventSources: [EventSourceRecord]?
+    /// The organizational groups; nil when there are none or from a core that predates them.
+    public var imageGroups: [ImageGroup]?
 
     public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = [],
                 attention: [AttentionRequest] = [], images: [ImageRecord] = [], decisions: [Decision] = [],
-                elements: [ElementInfo]? = nil, fileTrees: [FileTreeRecord] = [], eventSources: [EventSourceRecord] = []) {
+                elements: [ElementInfo]? = nil, fileTrees: [FileTreeRecord] = [], eventSources: [EventSourceRecord] = [],
+                imageGroups: [ImageGroup] = []) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
@@ -163,6 +173,7 @@ public struct BoardState: Codable, Sendable {
         self.elements = elements
         self.fileTrees = fileTrees
         self.eventSources = eventSources
+        self.imageGroups = imageGroups.isEmpty ? nil : imageGroups
     }
 }
 

@@ -72,6 +72,9 @@ final class AgentLinks {
         agents.agentLinks = self
         agents.elementSources[Self.family] = { [weak self] in self?.elementInfos(on: host) ?? [] }
         agents.elementRemovers[Self.family] = { [weak self] id in self?.links.first { $0.ends.contains { $0.relay == id } }.map { self?.remove($0) } }
+        agents.elementMovers[Self.family] = { [weak self] id, point in
+            if let frame = self?.relay(id)?.frame { self?.setFrame(CGRect(origin: point, size: frame.size), for: id, persist: true) }
+        }
         agents.onRelayMessage = { [weak self, weak agents] message in
             guard let self, let agents else { return }
             carry(message, heardBy: agents)

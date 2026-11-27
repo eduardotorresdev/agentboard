@@ -127,6 +127,9 @@ final class SimulatorStore {
         agents.simulatorTools = SimulatorTools(store: self, agents: agents)
         agents.elementSources[ElementKind.simulator.rawValue] = { [weak self] in self?.elementInfos(on: host) ?? [] }
         agents.elementRemovers[ElementKind.simulator.rawValue] = { [weak self] in self?.remove($0) }
+        agents.elementMovers[ElementKind.simulator.rawValue] = { [weak self] id, point in
+            if let frame = self?.record(id)?.frame { self?.setFrame(CGRect(origin: point, size: frame.size), for: id, persist: true) }
+        }
         agents.elementsChanged()
     }
 

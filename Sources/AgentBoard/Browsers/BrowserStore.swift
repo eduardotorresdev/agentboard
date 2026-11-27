@@ -304,6 +304,9 @@ final class BrowserStore {
         agents.browserTools = BrowserTools(store: self, agents: agents)
         agents.elementSources[ElementKind.browser.rawValue] = { [weak self] in self?.elementInfos(on: host) ?? [] }
         agents.elementRemovers[ElementKind.browser.rawValue] = { [weak self] id in if self?.record(id) != nil { self?.remove(id) } }
+        agents.elementMovers[ElementKind.browser.rawValue] = { [weak self] id, point in
+            if let frame = self?.record(id)?.frame { self?.setFrame(CGRect(origin: point, size: frame.size), for: id, persist: true) }
+        }
         agents.elementsChanged()
     }
 

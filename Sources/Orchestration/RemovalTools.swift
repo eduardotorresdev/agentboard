@@ -51,19 +51,7 @@ final class RemovalTools: ToolProvider {
 
     private static let end: [String: Any] = ["type": "string", "description": "An element's name or id, as list_peers shows it. Use the id when two share a name."]
 
-    /// The element of the caller's board that `address` names, or why there isn't exactly one.
-    private func find(_ address: Any?, for caller: UUID) -> Result<any BoardElement, DecisionDraft.Refused> {
-        let onBoard = store.bus.elements(onBoardOf: caller)
-        let address = (address as? String ?? "").trimmingCharacters(in: .whitespaces)
-        guard let found = findElement(address, among: onBoard) else {
-            return .failure(.init(reason: "Nothing named “\(address)” is on your board; list_peers shows what is."))
-        }
-        let twins = onBoard.filter { $0.name.caseInsensitiveCompare(found.name) == .orderedSame }
-        if twins.count > 1, !address.contains(found.id.uuidString) {
-            return .failure(.init(reason: "\(twins.count) elements are named “\(found.name)”; give the id of the one you mean."))
-        }
-        return .success(found)
-    }
+    private func find(_ address: Any?, for caller: UUID) -> Result<any BoardElement, DecisionDraft.Refused> { store.element(address, onBoardOf: caller) }
 
     /// The two ends `pair` names.
     private func ends(_ pair: [String: Any], for caller: UUID) -> Result<(any BoardElement, any BoardElement), DecisionDraft.Refused> {
@@ -115,6 +103,20 @@ final class RemovalTools: ToolProvider {
 }
 
 extension Orchestrator {
+    /// The element of the caller's board that `address` names, or why there isn't exactly one.
+    func element(_ address: Any?, onBoardOf caller: UUID) -> Result<any BoardElement, DecisionDraft.Refused> {
+        let onBoard = bus.elements(onBoardOf: caller)
+        let address = (address as? String ?? "").trimmingCharacters(in: .whitespaces)
+        guard let found = findElement(address, among: onBoard) else {
+            return .failure(.init(reason: "Nothing named “\(address)” is on your board; list_peers shows what is."))
+        }
+        let twins = onBoard.filter { $0.name.caseInsensitiveCompare(found.name) == .orderedSame }
+        if twins.count > 1, !address.contains(found.id.uuidString) {
+            return .failure(.init(reason: "\(twins.count) elements are named “\(found.name)”; give the id of the one you mean."))
+        }
+        return .success(found)
+    }
+
     /// Notes that `agent` put `element` on the board, which lets it remove it without asking.
     func made(_ element: UUID, by agent: UUID) {
         bus.makers[element] = agent

@@ -9,6 +9,8 @@ enum Theme {
     // MARK: Hex values (shared with BoardPalette and the contrast test)
 
     enum Hex {
+        /// The light panels of organizational groups, by `ImageGroup.colors` name.
+        static let group: [String: UInt32] = ["blue": 0xB5CCFF, "amber": 0xFFD9A8, "rose": 0xFFC4D2, "violet": 0xD5C7FF, "gray": 0xC9CCD3]
         /// The solid accent: fills with white text, running dots, selection rings.
         static let accent: UInt32 = 0x1F5BFF
         /// The accent as text or a small mark on the dark planes (the solid one is too dark there).

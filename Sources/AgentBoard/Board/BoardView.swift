@@ -274,6 +274,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     fileprivate var postItEditor: PostItEditor?
     fileprivate var editingPostIt: UUID?
     fileprivate var imageCards: [UUID: ImageCardLayer] = [:]
+    /// The panel behind each organizational group of this board.
+    fileprivate var groupPanels: [UUID: CALayer] = [:]
     private var links: [UUID: LinkLayer] = [:]
     /// The lines hang as ropes between the handles they were drawn to; `routes` is where each
     /// one is now, for finding the line under the pointer and sending messages along it.
@@ -2777,6 +2779,7 @@ extension BoardView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let location = world(convert(event.locationInWindow, from: nil))
+        if item(at: location) == image(at: location)?.id, let image = image(at: location) { return groupMenu(for: image) }
         guard let record = card(at: location), record.runner == nil else { return super.menu(for: event) }
         let menu = NSMenu()
         let rename = NSMenuItem(title: L("Rename"), action: #selector(renameFromMenu(_:)), keyEquivalent: "")
@@ -2790,6 +2793,54 @@ extension BoardView {
         orchestrator.toolTip = L("Agents connected to it report their finished turns to it instead of to Needs you.")
         menu.addItem(orchestrator)
         return menu
+    }
+
+    /// What a right click on an image or video offers: grouping it (with the rest of the selection,
+    /// when it is part of one made only of pictures), and its group's direction, color and end.
+    private func groupMenu(for image: ImageRecord) -> NSMenu {
+        let menu = NSMenu()
+        let chosen = selection.contains(image.id) && selection.allSatisfy { store.image($0) != nil } ? Array(selection) : [image.id]
+        let group = chosen.count == 1 ? store.imageGroups.first { $0.members.contains(image.id) } : nil
+        func add(_ title: String, _ tip: String, to menu: NSMenu, on: Bool = false, _ value: Any) {
+            let item = NSMenuItem(title: title, action: #selector(groupFromMenu(_:)), keyEquivalent: "")
+            item.representedObject = value
+            item.target = self
+            item.state = on ? .on : .off
+            item.toolTip = tip
+            menu.addItem(item)
+        }
+        func made(_ direction: ImageGroup.Direction) -> ImageGroup {
+            guard var group else { return ImageGroup(direction: direction, members: chosen) }
+            if group.direction != direction { group.extent = nil }
+            group.direction = direction
+            return group
+        }
+        add(L("Group in a column"), L("Stacks the pictures in one column, all the same width."), to: menu, on: group?.direction == .vertical, made(.vertical))
+        add(L("Group in a row"), L("Lines the pictures up in one row, all the same height."), to: menu, on: group?.direction == .horizontal, made(.horizontal))
+        guard let group else { return menu }
+        let colors = NSMenu()
+        let names = ["blue": L("Blue"), "amber": L("Amber"), "rose": L("Rose"), "violet": L("Violet"), "gray": L("Gray")]
+        for color in ImageGroup.colors {
+            var tinted = group
+            tinted.color = color
+            add(names[color] ?? color, L("Paints the group's panel in this color."), to: colors, on: group.color == color, tinted)
+            let swatch = NSColor(cgColor: BoardPalette.rgb(Theme.Hex.group[color] ?? Theme.Hex.deep)) ?? .white
+            colors.items.last?.image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+                swatch.setFill()
+                NSBezierPath(ovalIn: rect).fill()
+                return true
+            }
+        }
+        let color = NSMenuItem(title: L("Group color"), action: nil, keyEquivalent: "")
+        color.submenu = colors
+        menu.addItem(color)
+        add(L("Ungroup"), L("Dissolves the group; the pictures stay where they are."), to: menu, group.id)
+        return menu
+    }
+
+    @objc fileprivate func groupFromMenu(_ item: NSMenuItem) {
+        if let group = item.representedObject as? ImageGroup { store.send(.setImageGroup(group)) }
+        if let id = item.representedObject as? UUID { store.send(.removeImageGroup(id)) }
     }
 
     @objc fileprivate func renameFromMenu(_ item: NSMenuItem) {
@@ -3592,6 +3643,24 @@ extension BoardView {
             host.removeFromSuperview()
             markHosts[id] = nil
         }
+        var panels: [UUID: CALayer] = [:]
+        for group in store.imageGroups {
+            let area = records.filter { group.members.contains($0.id) }.reduce(CGRect.null) { $0.union($1.frame) }
+            guard !area.isNull else { continue }
+            let panel = groupPanels.removeValue(forKey: group.id) ?? {
+                let panel = CALayer()
+                panel.cornerCurve = .continuous
+                panel.cornerRadius = Theme.Radius.card + ImageGroup.padding / 2
+                panel.zPosition = -1
+                cardsLayer.addSublayer(panel)
+                return panel
+            }()
+            panel.frame = area.insetBy(dx: -ImageGroup.padding, dy: -ImageGroup.padding)
+            panel.backgroundColor = BoardPalette.rgb(Theme.Hex.group[group.color] ?? Theme.Hex.deep)
+            panels[group.id] = panel
+        }
+        groupPanels.values.forEach { $0.removeFromSuperlayer() }
+        groupPanels = panels
         let below = CGFloat(store.agents(in: worktree).count + store.postIts(in: worktree).count)
         for (index, record) in records.enumerated() {
             let card = imageCards[record.id] ?? {

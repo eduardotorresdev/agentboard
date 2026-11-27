@@ -166,6 +166,7 @@ final class ImageTools: ToolProvider {
             case .failure(let refusal): return .error(refusal.text)
             }
             store.updateImage(record.id) { $0.frame.size = ImageRecord.cardSize(width: wide, for: $0.pixelSize) }
+            store.imageFrameChanged(record.id, from: record.frame)
             let size = ImageRecord.cardSize(width: wide, for: record.pixelSize)
             return .text("Resized “\(record.name)” to \(Int(size.width))×\(Int(size.height)) points.")
         case "\(word)_replace":

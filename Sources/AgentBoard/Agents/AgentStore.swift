@@ -21,6 +21,8 @@ final class AgentStore {
     var postIts: [PostItRecord] = []
     /// Images (see AgentStore+Images.swift).
     var images: [ImageRecord] = []
+    /// The organizational groups of images and videos; the core lays their members out.
+    var imageGroups: [ImageGroup] = []
     /// File tree cards (see FileTreeStore); nil while the core hasn't answered or predates them.
     var fileTrees: [FileTreeRecord]?
     /// Event sources (see AgentStore+EventSources.swift).
@@ -119,6 +121,8 @@ final class AgentStore {
     @ObservationIgnored var elementSources: [String: () -> [ElementInfo]] = [:]
     /// Removes one of those elements, by family; each ignores ids that aren't its own.
     @ObservationIgnored var elementRemovers: [String: (UUID) -> Void] = [:]
+    /// Moves a board-kept element (a browser, a simulator) to a new top left corner, per kind.
+    @ObservationIgnored var elementMovers: [String: (UUID, CGPoint) -> Void] = [:]
     /// Removals agents asked for that wait for the user's answer, oldest first (see `RemovalDialog`).
     private(set) var removalRequests: [RemovalRequest] = []
 
@@ -148,6 +152,11 @@ final class AgentStore {
                 elementRemovers.values.forEach { $0(id) }
             }
             return .text("removed")
+        case "board_move":
+            guard let id = (arguments["id"] as? String).flatMap(UUID.init(uuidString:)),
+                  let x = arguments["x"] as? Double, let y = arguments["y"] as? Double else { return .error("Nothing to move.") }
+            elementMovers.values.forEach { $0(id, CGPoint(x: x, y: y)) }
+            return .text("moved")
         default:
             return .error("This board can't run “\(name)”.")
         }
@@ -309,6 +318,7 @@ final class AgentStore {
         agents = state.cards
         postIts = state.postIts ?? []
         images = state.images ?? []
+        imageGroups = state.imageGroups ?? []
         fileTrees = state.fileTrees
         eventSources = state.eventSources ?? []
         attention = state.attention ?? []
@@ -418,6 +428,8 @@ final class AgentStore {
         case .imageUpdated(let record):
             guard let index = images.firstIndex(where: { $0.id == record.id }) else { return }
             images[index] = record
+        case .imageGroups(let groups):
+            imageGroups = groups
         case .imageRemoved(let id):
             forgetHostMedia(of: id)
             imageMarks[id] = nil

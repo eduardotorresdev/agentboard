@@ -24,6 +24,8 @@ public final class Orchestrator: CoreService {
     private(set) var fileTrees: [FileTreeRecord] = []
     /// The event sources, deleted ones kept so their URLs answer 410 (see Orchestrator+EventSources.swift).
     var eventSources: [EventSourceRecord] = []
+    /// The organizational groups of images and videos (see ImageGroup).
+    var imageGroups: [ImageGroup] = []
     var eventTraffic = EventTraffic()
     /// The agents waiting on the developer, oldest first (see Attention.swift).
     var attention: [AttentionRequest] = [] { didSet { releaseHeldMessages() } }
@@ -124,6 +126,7 @@ public final class Orchestrator: CoreService {
         images = savedImages.map { var image = $0; image.name = BoardName.named(image.name, else: "Image"); return image }
         fileTrees = savedFileTrees.map { var tree = $0; tree.name = BoardName.named(tree.name, else: "Files"); return tree }
         eventSources = savedEventSources
+        imageGroups = (try? JSONDecoder().decode([ImageGroup].self, from: Data(contentsOf: Self.imageGroupsFile(in: dataFolder)))) ?? []
         catalog.add(RunnerTools(store: self))
         // Early, so an agent that cuts its instructions short still learns how to ask.
         catalog.add(DecisionTools(store: self))
@@ -141,6 +144,7 @@ public final class Orchestrator: CoreService {
         catalog.add(WorktreeTools(store: self))
         catalog.add(CardTools(store: self))
         catalog.add(RemovalTools(store: self))
+        catalog.add(LayoutTools(store: self))
         bus.onGraphChange = { [weak self] graph in
             if self?.connectionsReadOnly == false { try? self?.database?.saveConnections(graph.connections) }
             self?.broadcast(.connections(graph.connections))
@@ -225,6 +229,9 @@ public final class Orchestrator: CoreService {
     func elementFrames(in worktree: String) -> [(id: UUID, frame: CGRect)] {
         elements.values.filter { $0.worktree == worktree }.map { ($0.id, $0.frame) }
     }
+
+    /// One of the boards' other elements (a browser, a simulator).
+    func elementInfo(_ id: UUID) -> ElementInfo? { elements[id] }
 
     func postIt(_ id: UUID) -> PostItRecord? { postIts.first { $0.id == id } }
 
@@ -328,7 +335,7 @@ public final class Orchestrator: CoreService {
         boards.insert(board)
         return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
                           attention: attention, images: images, decisions: decisions, elements: Array(elements.values),
-                          fileTrees: fileTrees, eventSources: visibleEventSources).encoded
+                          fileTrees: fileTrees, eventSources: visibleEventSources, imageGroups: imageGroups).encoded
     }
 
     public func input(_ bytes: [UInt8], to id: UUID) -> [UInt8] {
@@ -437,12 +444,18 @@ public final class Orchestrator: CoreService {
             record.name = BoardName.clean(record.name) ?? (record.isVideo ? "Video" : "Image")
             insertImage(record, from: board)
         case .updateImage(let record):
+            let before = image(record.id)?.frame
             updateImage(record.id, from: board) {
                 $0.name = BoardName.clean(record.name) ?? $0.name
                 $0.frame = record.frame
             }
+            if let before { imageFrameChanged(record.id, from: before) }
         case .removeImage(let id):
             removeImage(id, from: board)
+        case .setImageGroup(let group):
+            setImageGroup(group)
+        case .removeImageGroup(let id):
+            removeImageGroup(id)
         case .addFileTree(let record):
             guard fileTree(record.id) == nil else { return }
             fileTrees.append(record)
@@ -450,11 +463,10 @@ public final class Orchestrator: CoreService {
             try? database?.saveFileTree(record)
             broadcast(.fileTreeAdded(record), except: board)
         case .updateFileTree(let record):
-            guard let index = fileTrees.firstIndex(where: { $0.id == record.id }) else { return }
-            fileTrees[index].name = BoardName.clean(record.name) ?? fileTrees[index].name
-            fileTrees[index].frame = record.frame
-            try? database?.saveFileTree(fileTrees[index])
-            broadcast(.fileTreeUpdated(fileTrees[index]), except: board)
+            updateFileTree(record.id, from: board) {
+                $0.name = BoardName.clean(record.name) ?? $0.name
+                $0.frame = record.frame
+            }
         case .removeFileTree(let id):
             removeFileTree(id, from: board)
         case .addEventSource(let record):
@@ -503,7 +515,7 @@ public final class Orchestrator: CoreService {
     func relay(_ name: String, arguments: [String: Any], caller: UUID) async -> ToolResult {
         guard let board = boards.first(where: toolBoards.contains) else {
             let place = name.hasPrefix("project_") || name.hasPrefix("worktree_") || name.hasPrefix("host_") ? "Projects live"
-                : name.hasPrefix("simulator_") ? "Simulators run" : name.hasPrefix("board_") ? "The user confirms removals" : "Browsers run"
+                : name.hasPrefix("simulator_") ? "Simulators run" : name == "board_move" ? "Browsers and simulators live" : name.hasPrefix("board_") ? "The user confirms removals" : "Browsers run"
             return .error("\(place) in the board, which isn't open right now. Ask the user to open it, then try again.")
         }
         let data = (try? JSONSerialization.data(withJSONObject: arguments)) ?? Data("{}".utf8)
@@ -590,6 +602,13 @@ public final class Orchestrator: CoreService {
 
     func fileTree(_ id: UUID) -> FileTreeRecord? { fileTrees.first { $0.id == id } }
 
+    func updateFileTree(_ id: UUID, from sender: CoreBoard? = nil, _ change: (inout FileTreeRecord) -> Void) {
+        guard let index = fileTrees.firstIndex(where: { $0.id == id }) else { return }
+        change(&fileTrees[index])
+        try? database?.saveFileTree(fileTrees[index])
+        broadcast(.fileTreeUpdated(fileTrees[index]), except: sender)
+    }
+
     func removeFileTree(_ id: UUID, from sender: CoreBoard? = nil) {
         guard fileTree(id) != nil else { return }
         bus.remove(element: id)
@@ -618,6 +637,8 @@ public final class Orchestrator: CoreService {
         if images[index].file != before.file { ImageFiles.remove(before.file, in: dataFolder) }
         try? database?.saveImage(images[index])
         broadcast(.imageUpdated(images[index]), except: sender)
+        // A replaced picture has another proportion: its group's grid is laid out again.
+        if images[index].pixelSize != before.pixelSize { layoutImageGroups() }
     }
 
     /// Forgets an image, its lines and its file.
@@ -628,6 +649,7 @@ public final class Orchestrator: CoreService {
         try? database?.deleteImage(id: id)
         ImageFiles.remove(record.file, in: dataFolder)
         broadcast(.imageRemoved(id), except: sender)
+        imageLeftBoard(id)
     }
 
     // MARK: Launching

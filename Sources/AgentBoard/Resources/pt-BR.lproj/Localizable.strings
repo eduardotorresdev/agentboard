@@ -798,3 +798,16 @@
 "and" = "e";
 "At most %lld a hour" = "No máximo %lld por hora";
 "Past it, the events wait and go in together as one." = "Passando disso, os eventos esperam e entram juntos, como um só.";
+"Group in a column" = "Agrupar em coluna";
+"Stacks the pictures in one column, all the same width." = "Empilha as imagens em uma coluna, todas com a mesma largura.";
+"Group in a row" = "Agrupar em linha";
+"Lines the pictures up in one row, all the same height." = "Alinha as imagens em uma linha, todas com a mesma altura.";
+"Blue" = "Azul";
+"Amber" = "Âmbar";
+"Rose" = "Rosa";
+"Violet" = "Violeta";
+"Gray" = "Cinza";
+"Paints the group's panel in this color." = "Pinta o painel do grupo com esta cor.";
+"Group color" = "Cor do grupo";
+"Ungroup" = "Desagrupar";
+"Dissolves the group; the pictures stay where they are." = "Desfaz o grupo; as imagens ficam onde estão.";
