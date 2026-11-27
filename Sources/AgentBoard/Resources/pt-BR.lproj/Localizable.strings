@@ -659,6 +659,9 @@
 "Drag over the picture to mark an area and say what should change there." = "Arraste sobre a imagem para marcar uma área e dizer o que deve mudar ali.";
 "Drag over the picture to mark an area." = "Arraste sobre a imagem para marcar uma área.";
 "Marks areas of the picture for an agent to change." = "Marca áreas da imagem para um agente mudar.";
+"Thin marker" = "Marcador fino";
+"Medium marker" = "Marcador médio";
+"Thick marker" = "Marcador grosso";
 "Annotation %lld" = "Anotação %lld";
 "What should change here?" = "O que deve mudar aqui?";
 "Done keeps the remark. Delete removes this mark." = "Concluir guarda a observação. Apagar remove esta marca.";

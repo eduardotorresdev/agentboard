@@ -13,6 +13,8 @@ struct ImageMark: Identifiable, Equatable, Codable {
     /// The marker's path, in the picture's pixels: only how it shows. Nil on marks from before the
     /// pen, which show as a back-and-forth over their area.
     var stroke: [CGPoint]?
+    /// The nib it was painted with, in the picture's pixels; nil for the default one.
+    var nib: CGFloat?
 
     /// The path the marker paints with a nib `nib` pixels wide.
     func path(nib: CGFloat) -> [CGPoint] {
@@ -43,6 +45,9 @@ final class ImageMarks {
     var marking = false
     /// The mark whose balloon is open.
     var selected: UUID?
+    var size = MarkerSize.medium
+    /// The board's zoom, for a cursor as wide as the nib on screen.
+    var zoom: CGFloat = 1
     /// The agent the user picked, over the recommended one.
     var agent: UUID?
     /// What the footer says for a moment after sending.
@@ -153,6 +158,36 @@ final class ImageMarks {
     }
 }
 
+/// The marker's nib, picked in the footer.
+enum MarkerSize: CaseIterable {
+    case thin, medium, thick
+
+    var factor: CGFloat {
+        switch self {
+        case .thin: 0.55
+        case .medium: 1
+        case .thick: 1.8
+        }
+    }
+
+    /// The dot that stands for it in the footer.
+    var dot: CGFloat {
+        switch self {
+        case .thin: 4
+        case .medium: 7
+        case .thick: 11
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .thin: L("Thin marker")
+        case .medium: L("Medium marker")
+        case .thick: L("Thick marker")
+        }
+    }
+}
+
 /// Where the annotation chrome sits over an image card, in the overlay's own points: the
 /// picture at the origin, the footer under it, room for a balloon to the right and below.
 struct ImageMarksLayout {
@@ -183,11 +218,15 @@ struct ImageMarksLayout {
     var nib: CGFloat { max(8, picture.width * 0.025) }
 
     /// The area a marker path in overlay points covers, in picture pixels: the box around it and its nib.
-    func area(ofStroke points: [CGPoint]) -> CGRect {
+    func area(ofStroke points: [CGPoint], nib: CGFloat? = nil) -> CGRect {
         guard let first = points.first else { return .zero }
         let box = points.reduce(CGRect(origin: first, size: .zero)) { $0.union(CGRect(origin: $1, size: .zero)) }
-        return area(of: box.insetBy(dx: -nib / 2, dy: -nib / 2))
+        let half = (nib ?? self.nib) / 2
+        return area(of: box.insetBy(dx: -half, dy: -half))
     }
+
+    /// The nib a mark was painted with, in overlay points.
+    func nib(of mark: ImageMark) -> CGFloat { mark.nib.map { $0 * scale } ?? nib }
     /// Under the picture, in the card's frame: the marker alone, or with the marks and Send when `open`.
     func footer(open: Bool) -> CGRect {
         CGRect(x: 0, y: picture.height, width: picture.width, height: open ? Self.footerHeight : Self.barHeight)
@@ -328,23 +367,31 @@ struct ImageMarksView: View {
                 .contentShape(.rect)
                 .frame(width: layout.picture.width, height: layout.picture.height)
                 .onContinuousHover { phase in
-                    if case .active = phase { NSCursor.crosshair.set() }
+                    if case .active = phase { HighlighterStroke.cursor(nib: layout.nib * state.size.factor * state.zoom).set() }
                 }
                 // From the first point, so a drag may start on a mark and a click without one selects it.
                 .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("marks"))
                     .onChanged { drag in
                         guard drawing != nil || hypot(drag.translation.width, drag.translation.height) >= 3 else { return }
                         if drawing == nil { state.select(nil) }
-                        let point = CGPoint(x: min(max(drag.location.x, 0), layout.picture.width), y: min(max(drag.location.y, 0), layout.picture.height))
+                        let raw = CGPoint(x: min(max(drag.location.x, 0), layout.picture.width), y: min(max(drag.location.y, 0), layout.picture.height))
+                        let last = drawing?.last ?? drag.startLocation
+                        // Streamlined: the ink trails the pointer a little, which steadies a shaky hand.
+                        let point = CGPoint(x: last.x + (raw.x - last.x) * 0.5, y: last.y + (raw.y - last.y) * 0.5)
+                        guard hypot(point.x - last.x, point.y - last.y) >= 1 else { return }
                         drawing = (drawing ?? [drag.startLocation]) + [point]
                     }
                     .onEnded { drag in
                         defer { drawing = nil }
-                        guard let drawing else { return state.select(layout.mark(at: drag.startLocation, in: state.marks)?.id) }
-                        let area = layout.area(ofStroke: drawing)
+                        guard var drawing else { return state.select(layout.mark(at: drag.startLocation, in: state.marks)?.id) }
+                        // The ink catches up with the pointer where it lifts.
+                        drawing.append(CGPoint(x: min(max(drag.location.x, 0), layout.picture.width), y: min(max(drag.location.y, 0), layout.picture.height)))
+                        let nib = layout.nib * state.size.factor
+                        let area = layout.area(ofStroke: drawing, nib: nib)
                         // A slip of the hand is no area.
-                        guard max(area.width, area.height) * layout.scale >= layout.nib + 8 else { return }
-                        let mark = ImageMark(area: area, stroke: drawing.map { CGPoint(x: $0.x / layout.scale, y: $0.y / layout.scale) })
+                        guard max(area.width, area.height) * layout.scale >= nib + 8 else { return }
+                        let mark = ImageMark(area: area, stroke: drawing.map { CGPoint(x: $0.x / layout.scale, y: $0.y / layout.scale) },
+                                             nib: nib / layout.scale)
                         state.marks.append(mark)
                         state.select(mark.id)
                     })
@@ -352,10 +399,11 @@ struct ImageMarksView: View {
     }
 
     private func drawn(_ points: [CGPoint], _ layout: ImageMarksLayout) -> some View {
-        let area = layout.area(ofStroke: points)
+        let nib = layout.nib * state.size.factor
+        let area = layout.area(ofStroke: points, nib: nib)
         let rect = layout.rect(of: ImageMark(area: area))
         return ZStack(alignment: .topLeading) {
-            HighlighterStroke(points: points, nib: layout.nib, opacity: 0.45)
+            HighlighterStroke(points: points, nib: nib, opacity: 0.45)
                 .frame(width: layout.picture.width, height: layout.picture.height)
             Color.clear
                 .frame(width: rect.width, height: rect.height)
@@ -376,8 +424,8 @@ struct ImageMarksView: View {
     @ViewBuilder private func markView(_ mark: ImageMark, number: Int, _ layout: ImageMarksLayout) -> some View {
         let rect = layout.rect(of: mark)
         let selected = mark.id == state.selected
-        HighlighterStroke(points: mark.path(nib: layout.nib / layout.scale).map { CGPoint(x: $0.x * layout.scale, y: $0.y * layout.scale) },
-                          nib: layout.nib, opacity: selected ? 0.45 : 0.32)
+        HighlighterStroke(points: mark.path(nib: layout.nib(of: mark) / layout.scale).map { CGPoint(x: $0.x * layout.scale, y: $0.y * layout.scale) },
+                          nib: layout.nib(of: mark), opacity: selected ? 0.45 : 0.32)
             .frame(width: layout.picture.width, height: layout.picture.height)
         Color.clear
             .frame(width: rect.width, height: rect.height)
@@ -411,9 +459,6 @@ struct ImageMarksView: View {
                 Text(L("The annotations are gone from the picture. The agent has them.")).font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
             } else {
                 HStack(spacing: 6) {
-                    Button { toggleMarker() } label: { Label(L("Mark"), systemImage: "highlighter") }
-                        .buttonStyle(MarkButtonStyle(kind: state.marking ? .on : .plain))
-                        .help(L("Drag over the picture to mark an area and say what should change there."))
                     if !state.footerOpen {
                         Text(state.marking ? L("Drag over the picture to mark an area.") : L("Marks areas of the picture for an agent to change."))
                             .font(Theme.Font.caption).foregroundStyle(Theme.inkMuted)
@@ -427,6 +472,21 @@ struct ImageMarksView: View {
                         }
                     }
                     Spacer(minLength: 6)
+                    if state.marking {
+                        ForEach(MarkerSize.allCases, id: \.self) { size in
+                            Button { state.size = size } label: {
+                                Circle().fill(state.size == size ? Theme.deep : Theme.ink)
+                                    .frame(width: size.dot, height: size.dot)
+                                    .frame(width: 12)
+                            }
+                            .buttonStyle(MarkButtonStyle(kind: state.size == size ? .on : .plain))
+                            .help(size.title)
+                            .accessibilityLabel(size.title)
+                        }
+                    }
+                    Button { toggleMarker() } label: { Label(L("Mark"), systemImage: "highlighter") }
+                        .buttonStyle(MarkButtonStyle(kind: state.marking ? .on : .plain))
+                        .help(L("Drag over the picture to mark an area and say what should change there."))
                     if state.footerOpen, let target {
                         Menu {
                             ForEach(agents, id: \.id) { agent in
@@ -492,25 +552,78 @@ struct ImageMarksView: View {
     }
 }
 
-/// A marker's path painted like a text highlighter: a flat nib, translucent, one layer of ink
-/// so where it crosses itself doesn't go darker.
+/// A marker's path painted like a text highlighter: a chisel nib held at a slant, so a stroke
+/// across is as tall as the nib and one down is thin; translucent, in one layer of ink so it
+/// doesn't go darker where it crosses itself, a little deeper where the nib rested at each end.
 struct HighlighterStroke: View {
     /// In the view's points.
     let points: [CGPoint]
     let nib: CGFloat
     var opacity: Double
 
+    /// Half the chisel's edge, from its middle to its top: leaning right, like a right hand's.
+    static func edge(_ nib: CGFloat) -> CGVector { CGVector(dx: nib / 2 * 0.34, dy: -nib / 2 * 0.94) }
+
+    /// The ink: the chisel swept along each segment, and a thin core so a stroke along the edge
+    /// still shows. Separate pieces, each filled on its own: in one path their windings would cancel.
+    nonisolated static func ink(_ points: [CGPoint], nib: CGFloat) -> [Path] {
+        let e = edge(nib)
+        var core = Path()
+        core.addLines(points)
+        return zip(points, points.dropFirst()).map { a, b in
+            Path { $0.addLines([CGPoint(x: a.x - e.dx, y: a.y - e.dy), CGPoint(x: a.x + e.dx, y: a.y + e.dy),
+                                CGPoint(x: b.x + e.dx, y: b.y + e.dy), CGPoint(x: b.x - e.dx, y: b.y - e.dy)]) }
+        } + [core.strokedPath(StrokeStyle(lineWidth: nib * 0.22, lineCap: .round, lineJoin: .round))]
+    }
+
+    /// Where the nib touched down and lifted: the chisel's own mark.
+    nonisolated static func stamp(at point: CGPoint, nib: CGFloat) -> Path {
+        let e = edge(nib), w = nib * 0.12
+        var path = Path()
+        path.addLines([CGPoint(x: point.x - e.dx - w, y: point.y - e.dy), CGPoint(x: point.x + e.dx - w, y: point.y + e.dy),
+                       CGPoint(x: point.x + e.dx + w, y: point.y + e.dy), CGPoint(x: point.x - e.dx + w, y: point.y - e.dy)])
+        path.closeSubpath()
+        return path
+    }
+
     var body: some View {
         Canvas { context, _ in
-            var path = Path()
-            path.addLines(points)
+            guard let first = points.first, let last = points.last else { return }
             context.opacity = opacity
             context.drawLayer { layer in
-                layer.stroke(path, with: .color(Theme.accent), style: StrokeStyle(lineWidth: nib, lineCap: .butt, lineJoin: .round))
+                for piece in Self.ink(points, nib: nib) { layer.fill(piece, with: .color(Theme.accent)) }
+            }
+            context.opacity = opacity * 0.35
+            context.drawLayer { layer in
+                layer.fill(Self.stamp(at: first, nib: nib), with: .color(Theme.accent))
+                layer.fill(Self.stamp(at: last, nib: nib), with: .color(Theme.accent))
             }
         }
         .allowsHitTesting(false)
     }
+
+    /// The pointer while marking: the chisel's tip, as wide as the nib on screen.
+    @MainActor static func cursor(nib: CGFloat) -> NSCursor {
+        let nib = min(max(nib, 6), 64).rounded()
+        if let cursor = cursors[nib] { return cursor }
+        let side = nib + 4
+        let image = NSImage(size: CGSize(width: side, height: side), flipped: true) { _ in
+            let center = CGPoint(x: side / 2, y: side / 2)
+            let tip = stamp(at: center, nib: nib).cgPath
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.addPath(tip)
+            context.setFillColor(BoardPalette.rgb(BoardPalette.accent, 0.7))
+            context.setStrokeColor(BoardPalette.rgb(BoardPalette.ink))
+            context.setLineWidth(1)
+            context.drawPath(using: .fillStroke)
+            return true
+        }
+        let cursor = NSCursor(image: image, hotSpot: CGPoint(x: side / 2, y: side / 2))
+        cursors[nib] = cursor
+        return cursor
+    }
+
+    @MainActor private static var cursors: [CGFloat: NSCursor] = [:]
 }
 
 /// The balloon beside a mark: its number and what should change there.

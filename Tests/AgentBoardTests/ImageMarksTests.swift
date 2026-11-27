@@ -43,9 +43,9 @@ struct ImageMarksTests {
                 last = host.zoom
             }
             host.state.marking = false
-            // The Mark button leads the footer.
+            // The Mark button ends the footer.
             let footer = host.layout.footer(open: false)
-            let point = host.convert(CGPoint(x: (footer.minX + 40) * host.zoom, y: footer.midY * host.zoom), to: nil)
+            let point = host.convert(CGPoint(x: (footer.maxX - 40) * host.zoom, y: footer.midY * host.zoom), to: nil)
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 window.sendEvent(try #require(NSEvent.mouseEvent(
                     with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -99,7 +99,7 @@ struct ImageMarksTests {
         #expect(layout.area(of: CGRect(x: 700, y: 440, width: 100, height: 100)) == CGRect(x: 1400, y: 880, width: 40, height: 20))
 
         let state = ImageMarks(file: "a.png")
-        #expect(layout.catches(CGPoint(x: 20, y: 460), state))  // the Mark button, in the footer
+        #expect(layout.catches(CGPoint(x: 680, y: 460), state))  // the Mark button, in the footer
         #expect(!layout.catches(CGPoint(x: 20, y: 430), state))  // the picture
         #expect(!layout.catches(CGPoint(x: 300, y: 500), state))  // the footer is short until there is something to send
         state.marks = [mark]
@@ -122,6 +122,11 @@ struct ImageMarksTests {
         #expect(layout.nib == 18)
         #expect(layout.area(ofStroke: [CGPoint(x: 100, y: 50), CGPoint(x: 300, y: 60), CGPoint(x: 200, y: 40)]) == CGRect(x: 182, y: 62, width: 436, height: 76))
         #expect(layout.area(ofStroke: [CGPoint(x: 2, y: 2), CGPoint(x: 50, y: 2)]).origin == .zero)  // kept inside the picture
+
+        // A chisel: across it is as tall as the nib, down it is thin.
+        let across = HighlighterStroke.ink([CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0)], nib: 20).reduce(CGRect.null) { $0.union($1.boundingRect) }
+        let down = HighlighterStroke.ink([CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 100)], nib: 20).reduce(CGRect.null) { $0.union($1.boundingRect) }
+        #expect(abs(across.height - 18.8) < 0.1 && down.width < 8)
 
         let old = ImageMark(area: CGRect(x: 0, y: 0, width: 200, height: 100))
         let path = old.path(nib: 20)

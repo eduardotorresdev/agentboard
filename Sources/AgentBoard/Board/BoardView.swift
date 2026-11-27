@@ -3566,6 +3566,7 @@ extension BoardView {
                     let onScreen = screen(record.frame)
                     let room = (bounds.maxX - onScreen.minX) * record.frame.width / max(onScreen.width, 1)
                     if state.room != room { state.room = room }
+                    if state.zoom != zoom { state.zoom = zoom }
                     // Nothing to mark while the picture is still on its way to the host.
                     host.isHidden = store.sendingMedia.contains(record.file)
                     let rect = layout.frame.offsetBy(dx: record.frame.minX, dy: record.frame.minY)
