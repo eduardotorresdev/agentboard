@@ -233,6 +233,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// When each worktree was last shown or had an agent at work: its hidden views are kept this long after.
     private var worktreeActive: [String: Date] = [:]
     private static let hiddenViewsTTL: TimeInterval = 10 * 60
+    /// Shorter for another organization's: switching organizations frees more at once.
+    private static let otherOrganizationViewsTTL: TimeInterval = 5 * 60
     /// Project and worktree of this board, for the balloons' title.
     var place = ProjectStore.Place(worktree: "")
     /// Decision balloons, by agent: its questions show one after the other in the same balloon.
@@ -721,9 +723,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         }
         for (id, view) in composers where !ids.contains(id) {
             // Off this worktree it stays built, hidden, so switching back doesn't rebuild its SwiftUI.
-            // Only the shown organization's: switching organizations frees the others.
             let record = store.record(id)
-            if let record, record.organizationID == store.organizationID, keepsHiddenViews(of: record.worktree) {
+            if let record, keepsHiddenViews(of: record.worktree, organization: record.organizationID) {
                 view.isHidden = true
                 continue
             }
@@ -805,9 +806,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if !dirty.isEmpty { displayLink?.isPaused = false }
     }
 
-    /// Another worktree's views stay built until it has been idle and away for `hiddenViewsTTL`.
-    private func keepsHiddenViews(of worktree: String) -> Bool {
-        worktreeActive[worktree].map { Date.now.timeIntervalSince($0) < Self.hiddenViewsTTL } ?? false
+    /// Another worktree's views stay built until it has been idle and away for `hiddenViewsTTL`,
+    /// or `otherOrganizationViewsTTL` when it belongs to another organization.
+    private func keepsHiddenViews(of worktree: String, organization: UUID) -> Bool {
+        let ttl = organization == store.organizationID ? Self.hiddenViewsTTL : Self.otherOrganizationViewsTTL
+        return worktreeActive[worktree].map { Date.now.timeIntervalSince($0) < ttl } ?? false
     }
 
     /// The field at the bottom of the agent card, laid out in world points and scaled with the
@@ -3432,7 +3435,7 @@ extension BoardView {
         }
         for (id, views) in fileTreeViews where !ids.contains(id) {
             // Another worktree's tree stays built, hidden, for when the user comes back.
-            if let tree = fileTrees.record(id), tree.organizationID == store.organizationID, keepsHiddenViews(of: tree.worktree) {
+            if let tree = fileTrees.record(id), keepsHiddenViews(of: tree.worktree, organization: tree.organizationID) {
                 views.content.isHidden = true
                 views.bar.isHidden = true
                 continue
