@@ -227,6 +227,7 @@ struct ContentView: View {
                     .accessibilityHidden(true)
             }
         }
+        .background { shortcuts }
         .toolbar {
             // Where the canvas is: the project, then the worktree. No glass behind it.
             if !boardController.isZen {
@@ -248,6 +249,35 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// Keys with no button of their own: the last agent, a post-it, a worktree of the open
+    /// project, a project, and the next organization.
+    private var shortcuts: some View {
+        ZStack {
+            Button(L("Add Last Agent")) { boardController.addLastAgent() }
+                .keyboardShortcut("t", modifiers: .command)
+            Button(L("Add Post-it")) { boardController.addPostIt() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+            Button(L("New Worktree")) {
+                // The open worktree's project; the first one on the user's own board.
+                let path = selection?.worktree.path
+                let id = store.worktrees.first { $0.value.contains { $0.path == path } }?.key
+                addingWorktreeTo = store.projects.first { $0.id == id } ?? store.projects.first
+            }
+            .keyboardShortcut("n", modifiers: .command)
+            Button(L("Add Project"), action: addProject)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button(L("Next Organization")) {
+                let all = store.organizations
+                guard all.count > 1, let index = all.firstIndex(where: { $0.id == store.organizationID }) else { return }
+                withAnimation(.snappy(duration: 0.3)) { store.selectOrganization(all[(index + 1) % all.count].id) }
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     /// The selected worktree's project in bold, then the worktree.

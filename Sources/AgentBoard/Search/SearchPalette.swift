@@ -76,21 +76,25 @@ extension SearchEntry {
             }
         }
 
+        // What ⌘N and ⌘T add, so their rows show the key (see ContentView's shortcuts).
+        let shortcutProject = projects.worktrees.first { $0.value.contains { $0.path == selection?.worktree.path } }?.key ?? projects.projects.first?.id
+        let lastAgent = AppDefaults.shared.string(forKey: BoardController.lastAgentKey) ?? "claude"
         if let selection {
             let name = projects.displayName(of: selection.worktree)
             for provider in AgentCatalog.all {
                 entries.append(SearchEntry(target: .action(.newAgent(provider: provider.id)), group: .actions,
                                            title: L("New \(provider.title) agent in \(name)"), detail: provider.subtitle,
-                                           worktree: selection.worktree.path, symbol: "plus", color: provider.brandColor))
+                                           worktree: selection.worktree.path, symbol: "plus", color: provider.brandColor,
+                                           shortcut: provider.id == lastAgent ? "⌘T" : nil))
             }
         }
         for project in projects.projects {
             entries.append(SearchEntry(target: .action(.newWorktree(project: project.id)), group: .actions,
                                        title: L("New worktree in \(project.name)"), detail: L("A branch of its own, in a folder of its own."),
-                                       symbol: "arrow.triangle.branch"))
+                                       symbol: "arrow.triangle.branch", shortcut: project.id == shortcutProject ? "⌘N" : nil))
         }
         entries.append(SearchEntry(target: .action(.addProject), group: .actions, title: L("Add Project"),
-                                   detail: L("Clone, create, or open a project."), symbol: "folder.badge.plus"))
+                                   detail: L("Clone, create, or open a project."), symbol: "folder.badge.plus", shortcut: "⇧⌘N"))
         entries.append(SearchEntry(target: .action(.reload), group: .actions, title: L("Refresh"),
                                    detail: L("Reloads the projects and their worktrees."), symbol: "arrow.clockwise"))
         entries.append(SearchEntry(target: .action(.sidebar), group: .actions, title: L("Toggle Sidebar"),

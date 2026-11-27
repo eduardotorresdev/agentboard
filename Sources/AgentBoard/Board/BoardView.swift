@@ -65,6 +65,13 @@ final class BoardController {
     fileprivate(set) var zoom: CGFloat = 1
 
     func add(_ provider: any AgentProvider) { view?.addAgent(provider) }
+    /// The provider of the agent last added to a board, which `addLastAgent` adds again.
+    static let lastAgentKey = "lastAgentProvider"
+    /// Adds an agent of the provider last added; Claude before any was.
+    func addLastAgent() {
+        let id = AppDefaults.shared.string(forKey: Self.lastAgentKey) ?? "claude"
+        if let provider = AgentCatalog.provider(id: id) ?? AgentCatalog.provider(id: "claude") { add(provider) }
+    }
     func add(_ device: BrowserDevice) { view?.addBrowser(device) }
     func addSimulator(_ platform: SimulatorPlatform) { view?.addSimulator(platform) }
     func addPostIt() { view?.addPostIt() }
@@ -526,6 +533,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     func addAgent(_ provider: any AgentProvider) {
         let record = store.add(provider, to: worktree, at: newCardOrigin(for: CGSize(width: 640, height: 420)))
+        AppDefaults.shared.set(provider.id, forKey: BoardController.lastAgentKey)
         appearing.insert(record.id)
         bringIntoView(record.frame)
         focusedID = record.id

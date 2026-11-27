@@ -60,6 +60,8 @@ struct AgentBoardApp: App {
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
+        // ⌘N makes a worktree (see ContentView's shortcuts), not a second window.
+        .commands { CommandGroup(replacing: .newItem) {} }
     }
 }
 

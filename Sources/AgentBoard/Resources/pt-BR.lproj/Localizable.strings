@@ -746,3 +746,8 @@
 "Session" = "Sessão";
 "Used of the current 5-hour session." = "O que já foi usado da sessão de 5 horas.";
 "Used of this week's limit across every model." = "O que já foi usado do limite da semana, somando todos os modelos.";
+"Add Last Agent" = "Adicionar o último agente";
+"Add Post-it" = "Adicionar post-it";
+"Next Organization" = "Próxima organização";
+"Processor the board uses, without its agents; 100% is one core." = "Processador que o board usa, sem os agentes; 100% é um núcleo.";
+"Memory the board uses, without its agents." = "Memória que o board usa, sem os agentes.";
