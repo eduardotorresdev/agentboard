@@ -123,10 +123,10 @@ struct ImageMarksTests {
         #expect(layout.area(ofStroke: [CGPoint(x: 100, y: 50), CGPoint(x: 300, y: 60), CGPoint(x: 200, y: 40)]) == CGRect(x: 182, y: 62, width: 436, height: 76))
         #expect(layout.area(ofStroke: [CGPoint(x: 2, y: 2), CGPoint(x: 50, y: 2)]).origin == .zero)  // kept inside the picture
 
-        // A chisel: across it is as tall as the nib, down it is thin.
-        let across = HighlighterStroke.ink([CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0)], nib: 20).reduce(CGRect.null) { $0.union($1.boundingRect) }
-        let down = HighlighterStroke.ink([CGPoint(x: 0, y: 0), CGPoint(x: 0, y: 100)], nib: 20).reduce(CGRect.null) { $0.union($1.boundingRect) }
-        #expect(abs(across.height - 18.8) < 0.1 && down.width < 8)
+        // The marker's ink: one stroke, as wide as the nib, inside the box it is drawn in.
+        let drawing = MarkerInk.drawing([CGPoint(x: 10, y: 10), CGPoint(x: 110, y: 10)], nib: 20)
+        #expect(drawing.strokes.count == 1 && drawing.strokes[0].ink.inkType == .marker)
+        #expect(MarkerInk.bounds([CGPoint(x: 10, y: 10), CGPoint(x: 110, y: 10)], nib: 20).contains(drawing.bounds))
 
         let old = ImageMark(area: CGRect(x: 0, y: 0, width: 200, height: 100))
         let path = old.path(nib: 20)
