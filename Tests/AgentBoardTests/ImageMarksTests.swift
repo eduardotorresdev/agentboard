@@ -116,6 +116,20 @@ struct ImageMarksTests {
         #expect(state.escape() && !state.marking && !state.escape())
     }
 
+    /// The pen's path covers a box (with its nib) that is the area the agent gets; marks from before the pen go back and forth inside theirs.
+    @Test func turnsTheMarkerPathIntoAnArea() throws {
+        let layout = ImageMarksLayout(card: CGSize(width: 720, height: 450 + 32), pixelSize: CGSize(width: 1440, height: 900))
+        #expect(layout.nib == 18)
+        #expect(layout.area(ofStroke: [CGPoint(x: 100, y: 50), CGPoint(x: 300, y: 60), CGPoint(x: 200, y: 40)]) == CGRect(x: 182, y: 62, width: 436, height: 76))
+        #expect(layout.area(ofStroke: [CGPoint(x: 2, y: 2), CGPoint(x: 50, y: 2)]).origin == .zero)  // kept inside the picture
+
+        let old = ImageMark(area: CGRect(x: 0, y: 0, width: 200, height: 100))
+        let path = old.path(nib: 20)
+        #expect(path.count > 4 && path.allSatisfy { CGRect(x: 10, y: 10, width: 180, height: 80).insetBy(dx: -0.01, dy: -0.01).contains($0) })
+        let saved = try JSONDecoder().decode(ImageMark.self, from: Data(#"{"id":"\#(old.id)","area":[[0,0],[200,100]],"text":"x"}"#.utf8))
+        #expect(saved.stroke == nil && saved.text == "x")
+    }
+
     @Test func drawsTheMarksOnThePicture() throws {
         let context = try #require(CGContext(data: nil, width: 200, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
                                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))

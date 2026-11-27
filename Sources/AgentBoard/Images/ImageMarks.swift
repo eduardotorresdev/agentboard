@@ -7,9 +7,23 @@ import SwiftUI
 /// One annotation the user drew on a picture: an area and what should change there.
 struct ImageMark: Identifiable, Equatable, Codable {
     var id = UUID()
-    /// In the picture's own pixels, from its top left corner.
+    /// In the picture's own pixels, from its top left corner: what the agent gets.
     var area: CGRect
     var text = ""
+    /// The marker's path, in the picture's pixels: only how it shows. Nil on marks from before the
+    /// pen, which show as a back-and-forth over their area.
+    var stroke: [CGPoint]?
+
+    /// The path the marker paints with a nib `nib` pixels wide.
+    func path(nib: CGFloat) -> [CGPoint] {
+        if let stroke { return stroke }
+        let inner = area.insetBy(dx: min(nib / 2, area.width / 2), dy: min(nib / 2, area.height / 2))
+        let rows = max(1, Int((inner.height / (nib * 0.75)).rounded(.up)))
+        return (0...rows).flatMap { row -> [CGPoint] in
+            let y = inner.minY + inner.height * CGFloat(row) / CGFloat(rows)
+            return row % 2 == 0 ? [CGPoint(x: inner.minX, y: y), CGPoint(x: inner.maxX, y: y)] : [CGPoint(x: inner.maxX, y: y), CGPoint(x: inner.minX, y: y)]
+        }
+    }
 }
 
 /// The annotations on one image card, until they are sent to an agent.
@@ -148,7 +162,6 @@ struct ImageMarksLayout {
     static let balloon = CGSize(width: 310, height: 146)
     static let gap: CGFloat = 10
     static let tab = CGSize(width: 24, height: 18)
-    static let handle: CGFloat = 10
 
     /// The picture's size on the card.
     let picture: CGSize
@@ -166,6 +179,15 @@ struct ImageMarksLayout {
     }
 
     var scale: CGFloat { picture.width / max(pixelSize.width, 1) }
+    /// The marker's nib, in overlay points: grows with the card, like the picture.
+    var nib: CGFloat { max(8, picture.width * 0.025) }
+
+    /// The area a marker path in overlay points covers, in picture pixels: the box around it and its nib.
+    func area(ofStroke points: [CGPoint]) -> CGRect {
+        guard let first = points.first else { return .zero }
+        let box = points.reduce(CGRect(origin: first, size: .zero)) { $0.union(CGRect(origin: $1, size: .zero)) }
+        return area(of: box.insetBy(dx: -nib / 2, dy: -nib / 2))
+    }
     /// Under the picture, in the card's frame: the marker alone, or with the marks and Send when `open`.
     func footer(open: Bool) -> CGRect {
         CGRect(x: 0, y: picture.height, width: picture.width, height: open ? Self.footerHeight : Self.barHeight)
@@ -205,8 +227,7 @@ struct ImageMarksLayout {
         if footer(open: state.footerOpen).contains(point) { return true }
         if state.marking, CGRect(origin: .zero, size: picture).contains(point) { return true }
         for mark in state.marks {
-            let reach = mark.id == state.selected ? -Self.handle : 0
-            if rect(of: mark).insetBy(dx: reach, dy: reach).contains(point) || tab(of: mark).contains(point) { return true }
+            if rect(of: mark).contains(point) || tab(of: mark).contains(point) { return true }
             if mark.id == state.selected, balloon(of: mark, room: state.room).contains(point) { return true }
         }
         return false
@@ -267,10 +288,8 @@ struct ImageMarksView: View {
     let state: ImageMarks
     let id: UUID
     let addAgent: (any AgentProvider) -> Void
-    /// The area being dragged out, in overlay points.
-    @State private var drawing: CGRect?
-    /// The id the area being dragged out keeps as a mark, so its strokes don't change when it lands.
-    @State private var drawingID = UUID()
+    /// The marker's path while it is being dragged, in overlay points.
+    @State private var drawing: [CGPoint]?
 
     var body: some View {
         if let record = store.image(id) {
@@ -315,44 +334,52 @@ struct ImageMarksView: View {
                 .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("marks"))
                     .onChanged { drag in
                         guard drawing != nil || hypot(drag.translation.width, drag.translation.height) >= 3 else { return }
-                        state.select(nil)
-                        drawing = CGRect(x: min(drag.startLocation.x, drag.location.x), y: min(drag.startLocation.y, drag.location.y),
-                                         width: abs(drag.location.x - drag.startLocation.x), height: abs(drag.location.y - drag.startLocation.y))
-                            .intersection(CGRect(origin: .zero, size: layout.picture))
+                        if drawing == nil { state.select(nil) }
+                        let point = CGPoint(x: min(max(drag.location.x, 0), layout.picture.width), y: min(max(drag.location.y, 0), layout.picture.height))
+                        drawing = (drawing ?? [drag.startLocation]) + [point]
                     }
                     .onEnded { drag in
-                        defer { drawing = nil; drawingID = UUID() }
+                        defer { drawing = nil }
                         guard let drawing else { return state.select(layout.mark(at: drag.startLocation, in: state.marks)?.id) }
+                        let area = layout.area(ofStroke: drawing)
                         // A slip of the hand is no area.
-                        guard drawing.width >= 8, drawing.height >= 8 else { return }
-                        let mark = ImageMark(id: drawingID, area: layout.area(of: drawing))
+                        guard max(area.width, area.height) * layout.scale >= layout.nib + 8 else { return }
+                        let mark = ImageMark(area: area, stroke: drawing.map { CGPoint(x: $0.x / layout.scale, y: $0.y / layout.scale) })
                         state.marks.append(mark)
                         state.select(mark.id)
                     })
         }
     }
 
-    private func drawn(_ rect: CGRect, _ layout: ImageMarksLayout) -> some View {
-        let area = layout.area(of: rect)
-        return HighlighterMark(seed: drawingID.seed, opacity: 0.45)
-            .frame(width: rect.width, height: rect.height)
-            .overlay(alignment: .bottomTrailing) {
-                Text(verbatim: "\(Int(area.width)) x \(Int(area.height)) px")
-                    .font(Theme.Font.caption.monospacedDigit())
-                    .foregroundStyle(Theme.onDeep)
-                    .padding(.horizontal, 5).padding(.vertical, 2)
-                    .background(Theme.deep, in: RoundedRectangle(cornerRadius: Theme.Radius.thumb))
-                    .fixedSize()
-                    .offset(y: 22)
-            }
-            .offset(x: rect.minX, y: rect.minY)
-            .allowsHitTesting(false)
+    private func drawn(_ points: [CGPoint], _ layout: ImageMarksLayout) -> some View {
+        let area = layout.area(ofStroke: points)
+        let rect = layout.rect(of: ImageMark(area: area))
+        return ZStack(alignment: .topLeading) {
+            HighlighterStroke(points: points, nib: layout.nib, opacity: 0.45)
+                .frame(width: layout.picture.width, height: layout.picture.height)
+            Color.clear
+                .frame(width: rect.width, height: rect.height)
+                .overlay(alignment: .bottomTrailing) {
+                    Text(verbatim: "\(Int(area.width)) x \(Int(area.height)) px")
+                        .font(Theme.Font.caption.monospacedDigit())
+                        .foregroundStyle(Theme.onDeep)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Theme.deep, in: RoundedRectangle(cornerRadius: Theme.Radius.thumb))
+                        .fixedSize()
+                        .offset(y: 22)
+                }
+                .offset(x: rect.minX, y: rect.minY)
+        }
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder private func markView(_ mark: ImageMark, number: Int, _ layout: ImageMarksLayout) -> some View {
         let rect = layout.rect(of: mark)
         let selected = mark.id == state.selected
-        HighlighterMark(seed: mark.id.seed, opacity: selected ? 0.45 : 0.32)
+        HighlighterStroke(points: mark.path(nib: layout.nib / layout.scale).map { CGPoint(x: $0.x * layout.scale, y: $0.y * layout.scale) },
+                          nib: layout.nib, opacity: selected ? 0.45 : 0.32)
+            .frame(width: layout.picture.width, height: layout.picture.height)
+        Color.clear
             .frame(width: rect.width, height: rect.height)
             .contentShape(.rect)
             .onTapGesture { state.select(mark.id) }
@@ -368,23 +395,6 @@ struct ImageMarksView: View {
             .onTapGesture { state.select(mark.id) }
             .offset(x: rect.minX, y: rect.maxY)
             .accessibilityLabel(L("Annotation \(number)"))
-        if selected {
-            // Four round handles: each drags its corner, the opposite one stays put.
-            ForEach(0..<4, id: \.self) { corner in
-                let left = corner % 2 == 0, top = corner < 2
-                Circle().fill(Theme.deep)
-                    .frame(width: ImageMarksLayout.handle, height: ImageMarksLayout.handle)
-                    .contentShape(Rectangle().inset(by: -5))
-                    .offset(x: (left ? rect.minX : rect.maxX) - ImageMarksLayout.handle / 2, y: (top ? rect.minY : rect.maxY) - ImageMarksLayout.handle / 2)
-                    .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named("marks")).onChanged { drag in
-                        let anchor = CGPoint(x: left ? rect.maxX : rect.minX, y: top ? rect.maxY : rect.minY)
-                        let pulled = CGRect(x: min(anchor.x, drag.location.x), y: min(anchor.y, drag.location.y),
-                                            width: abs(drag.location.x - anchor.x), height: abs(drag.location.y - anchor.y))
-                        guard pulled.width >= 8, pulled.height >= 8, let index = state.marks.firstIndex(where: { $0.id == mark.id }) else { return }
-                        state.marks[index].area = layout.area(of: pulled)
-                    })
-            }
-        }
     }
 
     // MARK: Footer
@@ -482,76 +492,25 @@ struct ImageMarksView: View {
     }
 }
 
-/// A mark's rectangle painted the way a text highlighter would: overlapping horizontal swipes
-/// with chiseled ends and slightly uneven edges. Only the look: the
-/// area stays the rectangle.
-struct HighlighterMark: View {
-    let seed: UInt64
+/// A marker's path painted like a text highlighter: a flat nib, translucent, one layer of ink
+/// so where it crosses itself doesn't go darker.
+struct HighlighterStroke: View {
+    /// In the view's points.
+    let points: [CGPoint]
+    let nib: CGFloat
     var opacity: Double
 
     var body: some View {
-        Canvas { context, size in
-            // One translucent layer: the swipes merge like ink, their uneven edges and ends show the hand.
+        Canvas { context, _ in
+            var path = Path()
+            path.addLines(points)
             context.opacity = opacity
             context.drawLayer { layer in
-                for stroke in Self.strokes(in: size, seed: seed) { layer.fill(stroke, with: .color(Theme.accent)) }
+                layer.stroke(path, with: .color(Theme.accent), style: StrokeStyle(lineWidth: nib, lineCap: .butt, lineJoin: .round))
             }
         }
         .allowsHitTesting(false)
     }
-
-    /// A highlighter's nib, in the overlay's points.
-    static let nib: CGFloat = 18
-
-    /// The swipes covering `size`, top to bottom; the same seed gives the same hand.
-    nonisolated static func strokes(in size: CGSize, seed: UInt64) -> [Path] {
-        let thickness = min(size.height, nib)
-        let rows = size.height > nib ? Int(((size.height - nib) / (nib * 0.75)).rounded(.up)) + 1 : 1
-        return (0..<rows).map { row in
-            // Each swipe its own randomness, so one keeps its shape while the area grows.
-            var random = SplitMix(seed: seed &+ UInt64(row) &* 0x9E37_79B9_7F4A_7C15)
-            let top = rows == 1 ? 0 : (size.height - thickness) * CGFloat(row) / CGFloat(rows - 1)
-            let slant = min(thickness * 0.35, size.width / 4)
-            let start = random.next(upTo: min(4, size.width / 8)), end = size.width - random.next(upTo: min(4, size.width / 8))
-            let wobble = min(0.9, thickness / 10)
-            let steps = max(1, Int((end - start - slant) / 22))
-            var path = Path()
-            path.move(to: CGPoint(x: start + slant, y: top))
-            for step in 1...steps {
-                let x = start + slant + (end - start - slant) * CGFloat(step) / CGFloat(steps)
-                path.addLine(to: CGPoint(x: x, y: top + (step == steps ? 0 : random.next(upTo: wobble))))
-            }
-            path.addLine(to: CGPoint(x: end - slant, y: top + thickness))
-            for step in (0..<steps).reversed() {
-                let x = start + (end - start - slant) * CGFloat(step) / CGFloat(steps)
-                path.addLine(to: CGPoint(x: x, y: top + thickness - (step == 0 ? 0 : random.next(upTo: wobble))))
-            }
-            path.closeSubpath()
-            return path
-        }
-    }
-}
-
-/// A small seeded generator, so a mark is drawn the same way every time.
-struct SplitMix {
-    private var state: UInt64
-    init(seed: UInt64) { state = seed }
-
-    mutating func next() -> UInt64 {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        return z ^ (z >> 31)
-    }
-
-    /// Between 0 and `bound`.
-    mutating func next(upTo bound: CGFloat) -> CGFloat { CGFloat(next() >> 11) / CGFloat(1 << 53) * max(0, bound) }
-}
-
-extension UUID {
-    /// Stable across launches, unlike its hash.
-    var seed: UInt64 { withUnsafeBytes(of: uuid) { $0.loadUnaligned(as: UInt64.self) } }
 }
 
 /// The balloon beside a mark: its number and what should change there.

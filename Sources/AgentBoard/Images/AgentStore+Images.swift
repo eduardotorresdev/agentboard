@@ -217,7 +217,8 @@ extension AgentStore {
         let state = marks(of: record)
         state.marks = [ImageMark(area: CGRect(x: 48, y: 486, width: 408, height: 132), text: "The button should say “Pay $48.00”, not “Submit”."),
                        ImageMark(area: CGRect(x: 1000, y: 120, width: 380, height: 300), text: "Too much empty space."),
-                       ImageMark(area: CGRect(x: 48, y: 120, width: 520, height: 160))]
+                       ImageMark(area: CGRect(x: 48, y: 120, width: 520, height: 160),
+                                 stroke: (0...40).map { CGPoint(x: 66 + CGFloat($0) * 12, y: 170 + 30 * sin(CGFloat($0) / 5)) })]
         state.marking = true
         state.selected = state.marks[2].id
         onMediaNote?(record.file)
