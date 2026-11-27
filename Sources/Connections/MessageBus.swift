@@ -13,6 +13,8 @@ public struct ElementKind: RawRepresentable, Hashable, Sendable {
     public static let fileTree = ElementKind(rawValue: "filetree")
     public static let image = ElementKind(rawValue: "image")
     public static let video = ElementKind(rawValue: "video")
+    /// One channel of an event source (a local webhook).
+    public static let eventChannel = ElementKind(rawValue: "eventchannel")
 }
 
 /// Anything on the board a line can reach: an agent's terminal, a browser, a post-it and more.

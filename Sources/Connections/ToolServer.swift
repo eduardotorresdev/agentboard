@@ -36,6 +36,13 @@ public final class ToolServer: @unchecked Sendable {
     public var onQuestion: (@Sendable (Data, UUID) async -> Data?)?
     /// Hears an agent's attention hooks (see `attentionPath`). Set before `start`.
     public var onAttention: (@Sendable (Data, UUID) -> Void)?
+    /// Answers a webhook posted to `hooksPrefix` + source id: the status and headers to reply
+    /// with. Requests from browser pages never reach it. Set before `start`.
+    public var onHook: (@Sendable (_ source: String, _ headers: [String: String], _ body: Data) async -> (status: Int, headers: [String: String]))?
+    /// Where event sources' webhooks are posted, before the source id.
+    public static let hooksPrefix = "/hooks/"
+    /// The largest webhook body taken; a larger one gets 413.
+    public static let maximumHookBody = 256 * 1024
     /// A stream with nothing on it this long is sent a comment, or clients time it out.
     private static let keepAliveInterval = 25.0
 
@@ -391,6 +398,9 @@ private final class HTTPExchange: @unchecked Sendable {
             headers[line[..<colon].trimmingCharacters(in: .whitespaces).lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
         let length = Int(headers["content-length"] ?? "0") ?? -1
+        let isHook = requestLine.count >= 2 && requestLine[1].hasPrefix(ToolServer.hooksPrefix)
+        // A body up to `maximumBody` is read before the 413, so the client gets to read it.
+        if isHook, length > Self.maximumBody { return reply(413, "Content Too Large", close: true) }
         guard requestLine.count >= 2, length >= 0, length <= Self.maximumBody else {
             return reply(400, "Bad Request", close: true)
         }
@@ -406,6 +416,7 @@ private final class HTTPExchange: @unchecked Sendable {
 
         let method = String(requestLine[0])
         let path = requestLine[1].split(separator: "?").first.map(String.init) ?? ""
+        if isHook { return hook(method: method, source: String(path.dropFirst(ToolServer.hooksPrefix.count)), headers: headers, body: body, close: close) }
         guard [ToolServer.path, ToolServer.contextPath, ToolServer.questionPath, ToolServer.attentionPath].contains(path) else {
             return reply(404, "Not Found", close: close)
         }
@@ -447,6 +458,29 @@ private final class HTTPExchange: @unchecked Sendable {
             }
         }
     }
+
+    /// An event source's webhook. Never any Access-Control-* header: a browser page can't
+    /// preflight (OPTIONS is refused), and one that posts anyway sends an Origin, refused too.
+    private func hook(method: String, source: String, headers: [String: String], body: Data, close: Bool) {
+        guard method == "POST" else { return reply(405, "Method Not Allowed", headers: ["Allow": "POST"], close: close) }
+        guard body.count <= ToolServer.maximumHookBody else { return reply(413, "Content Too Large", close: close) }
+        guard headers["origin"] == nil else { return reply(403, "Forbidden", close: close) }
+        guard headers["content-type"]?.lowercased().hasPrefix("application/json") == true else {
+            return reply(415, "Unsupported Media Type", close: close)
+        }
+        guard let onHook = server.onHook else { return reply(404, "Not Found", close: close) }
+        isBusy = true
+        Task { [weak self, queue] in
+            let answer = await onHook(source, headers, body)
+            queue.async { [weak self] in
+                guard let self, !self.closed else { return }
+                self.reply(answer.status, Self.reasons[answer.status] ?? "Error", headers: answer.headers, close: close)
+            }
+        }
+    }
+
+    private static let reasons = [200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found",
+                                  410: "Gone", 413: "Content Too Large", 429: "Too Many Requests"]
 
     /// Answers with an event stream that stays open: the head now, events as they come.
     private func openStream(for caller: UUID) {

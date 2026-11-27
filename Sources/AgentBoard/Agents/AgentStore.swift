@@ -23,6 +23,8 @@ final class AgentStore {
     var images: [ImageRecord] = []
     /// File tree cards (see FileTreeStore); nil while the core hasn't answered or predates them.
     var fileTrees: [FileTreeRecord]?
+    /// Event sources (see AgentStore+EventSources.swift).
+    var eventSources: [EventSourceRecord] = []
     /// Where pictures are stored: the folder the core shares. For another host, this Mac's copy
     /// of that host's pictures (see AgentStore+Images.swift).
     @ObservationIgnored var dataFolder = DataFolder.url
@@ -308,6 +310,7 @@ final class AgentStore {
         postIts = state.postIts ?? []
         images = state.images ?? []
         fileTrees = state.fileTrees
+        eventSources = state.eventSources ?? []
         attention = state.attention ?? []
         decisions = state.decisions ?? []
         settleDecisions()
@@ -430,6 +433,14 @@ final class AgentStore {
         case .fileTreeRemoved(let id):
             fileTrees?.removeAll { $0.id == id }
             connections.removeAll { $0.touches(id) }
+        case .eventSourceAdded(let record):
+            guard eventSource(record.id) == nil else { return }
+            eventSources.append(record)
+        case .eventSourceUpdated(let record):
+            guard let index = eventSources.firstIndex(where: { $0.id == record.id }) else { return }
+            eventSources[index] = record
+        case .eventSourceRemoved(let id):
+            forgetEventSource(id)
         case .attention(let list):
             attention = list
         case .decisions(let list):

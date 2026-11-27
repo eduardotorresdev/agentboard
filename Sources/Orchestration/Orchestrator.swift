@@ -12,7 +12,7 @@ import Foundation
 @MainActor
 public final class Orchestrator: CoreService {
     let server: CoreServer
-    private let database: CardDatabase?
+    let database: CardDatabase?
     let providers: [any AgentProvider]
     let dataFolder: URL
     private(set) var cards: [AgentRecord] = []
@@ -22,6 +22,9 @@ public final class Orchestrator: CoreService {
     private(set) var images: [ImageRecord] = []
     /// The file tree cards; the board lists their files on the host.
     private(set) var fileTrees: [FileTreeRecord] = []
+    /// The event sources, deleted ones kept so their URLs answer 410 (see Orchestrator+EventSources.swift).
+    var eventSources: [EventSourceRecord] = []
+    var eventTraffic = EventTraffic()
     /// The agents waiting on the developer, oldest first (see Attention.swift).
     var attention: [AttentionRequest] = [] { didSet { releaseHeldMessages() } }
     /// What agents asked the developer and still wait on (see Decision.swift).
@@ -29,14 +32,14 @@ public final class Orchestrator: CoreService {
     /// Agents whose questions hook waits on the developer's answers (see Attention.swift).
     var pendingQuestions: [UUID: PendingQuestions] = [:] { didSet { releaseHeldMessages() } }
     /// Agent endpoints, so messages held while an agent waits on the developer go out once it's answered.
-    private var agentEndpoints: [UUID: AgentEndpoint] = [:]
+    private(set) var agentEndpoints: [UUID: AgentEndpoint] = [:]
     let bus: MessageBus
     let catalog: ToolCatalog
     let toolServer: ToolServer
     /// The user's real PATH, resolved off the main thread at launch (the login shell can be slow).
     private var searchPath: String?
     /// Where agents reach the tool server; nil if it couldn't start (agents then launch without it).
-    private var toolsURL: URL?
+    private(set) var toolsURL: URL?
     private var toolsResolved = false
     /// Cards whose program waits for the PATH and the tool server.
     var pendingLaunches: [UUID] = []
@@ -101,7 +104,9 @@ public final class Orchestrator: CoreService {
         let savedPostIts = read({ try stored?.postIts() }, [])
         let savedImages = read({ try stored?.images() }, [])
         let savedFileTrees = read({ try stored?.fileTrees() }, [])
+        let savedEventSources = read({ try stored?.eventSources() }, [])
         let ids = Set(saved.map(\.id)).union(savedPostIts.map(\.id)).union(savedImages.map(\.id)).union(savedFileTrees.map(\.id))
+            .union(savedEventSources.filter { $0.deleted != true }.flatMap { $0.channels.map(\.id) })
             .union(read({ try stored?.browserIDs() }, []))
         let lines = read({ try stored?.connections() }, []).filter { ids.contains($0.a) && ids.contains($0.b) }
         connectionsReadOnly = readFailed
@@ -118,6 +123,7 @@ public final class Orchestrator: CoreService {
         postIts = savedPostIts.map { var note = $0; note.name = BoardName.named(note.name, else: "Post-it"); return note }
         images = savedImages.map { var image = $0; image.name = BoardName.named(image.name, else: "Image"); return image }
         fileTrees = savedFileTrees.map { var tree = $0; tree.name = BoardName.named(tree.name, else: "Files"); return tree }
+        eventSources = savedEventSources
         catalog.add(RunnerTools(store: self))
         // Early, so an agent that cuts its instructions short still learns how to ask.
         catalog.add(DecisionTools(store: self))
@@ -144,6 +150,7 @@ public final class Orchestrator: CoreService {
         for record in postIts { bus.register(PostItElement(id: record.id, store: self)) }
         for record in images { bus.register(ImageElement(id: record.id, store: self)) }
         for record in fileTrees { bus.register(FileTreeElement(id: record.id, store: self)) }
+        startEventSources()
         let inherited = inheriting.flatMap { try? JSONDecoder().decode(Inherited.self, from: $0) }
         if let inherited {
             attention = (inherited.attention ?? []).filter { id in cards.contains { $0.id == id.id } }
@@ -165,6 +172,8 @@ public final class Orchestrator: CoreService {
             if let port = url?.port { try? String(port).write(to: portFile, atomically: true, encoding: .utf8) }
             self?.toolsURL = url
             self?.toolsResolved = true
+            // Their URLs carry the port.
+            for source in self?.visibleEventSources ?? [] { self?.broadcast(.eventSourceUpdated(source)) }
             self?.launchPending()
         }
         if let searchPath {
@@ -319,7 +328,7 @@ public final class Orchestrator: CoreService {
         boards.insert(board)
         return BoardState(cards: cards, connections: bus.graph.connections, runners: reportedRunners, postIts: postIts,
                           attention: attention, images: images, decisions: decisions, elements: Array(elements.values),
-                          fileTrees: fileTrees).encoded
+                          fileTrees: fileTrees, eventSources: visibleEventSources).encoded
     }
 
     public func input(_ bytes: [UInt8], to id: UUID) -> [UInt8] {
@@ -363,6 +372,9 @@ public final class Orchestrator: CoreService {
             // Only within one board: a line across organizations would let an agent read the
             // other's post-its.
             guard MessageBus.sameBoard(bus.element(connection.a)?.board, bus.element(connection.b)?.board) else { return }
+            // An event channel's lines go to agents, which its events wake.
+            let kinds = [bus.element(connection.a)?.kind, bus.element(connection.b)?.kind]
+            if kinds.contains(.eventChannel), !kinds.contains(.agent) { return }
             bus.add(connection)
         case .disconnect(let id):
             bus.disconnect(id)
@@ -445,6 +457,19 @@ public final class Orchestrator: CoreService {
             broadcast(.fileTreeUpdated(fileTrees[index]), except: board)
         case .removeFileTree(let id):
             removeFileTree(id, from: board)
+        case .addEventSource(let record):
+            addEventSource(record)
+        case .updateEventSource(let record):
+            changeEventSource(record.id, from: board) {
+                $0.name = BoardName.clean(record.name) ?? $0.name
+                $0.frame = record.frame
+            }
+        case .removeEventSource(let id):
+            removeEventSource(id, from: board)
+        case .regenerateEventSecret(let id):
+            changeEventSource(id) { $0.secret = StandardWebhook.newSecret() }
+        case .setEventRule(let source, let channel, let agent, let rule):
+            setEventRule(source: source, channel: channel, agent: agent, rule: rule, from: board)
         case .dismissAttention(let id):
             dismissAttention(id)
         case .answerQuestions(let id, let answers):
@@ -729,6 +754,8 @@ final class AgentEndpoint: MessageEndpoint {
         var from: String? = nil
         /// The decision whose answer this carries: the store hears when it reaches the terminal.
         var decision: UUID? = nil
+        /// The event line (`<channel> <agent>`) whose events this carries: later ones join it while it waits.
+        var eventKey: String? = nil
 
         /// The prompt for agents' messages delivered together, in the order they came.
         static func prompt(_ messages: [(name: String, text: String)]) -> String {
@@ -835,6 +862,22 @@ final class AgentEndpoint: MessageEndpoint {
         deliverNext()
         return true
     }
+
+    /// Events from a source's channel: replaces the text of the prompt still waiting for `key`,
+    /// which the new text includes, or queues a new one. False when its program can't take it.
+    func event(_ text: String, key: String) -> Bool {
+        guard programReason == nil else { return false }
+        if let index = outbox.firstIndex(where: { $0.eventKey == key }) {
+            outbox[index].text = text
+            return true
+        }
+        guard outbox.count < Self.maxQueued else { return false }
+        outbox.append(Queued(text: text, fromUser: false, sender: nil, eventKey: key))
+        deliverNext()
+        return true
+    }
+
+    func hasQueuedEvent(_ key: String) -> Bool { outbox.contains { $0.eventKey == key } }
 
     private func giveBack(_ text: String, _ reason: String) {
         store?.broadcast(.promptReturned(id: id, text: text, reason: reason))

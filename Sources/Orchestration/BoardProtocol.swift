@@ -44,6 +44,16 @@ public enum BoardRequest: Codable, Sendable {
     /// Its name or frame changed.
     case updateFileTree(FileTreeRecord)
     case removeFileTree(UUID)
+    /// A new event source; the core makes its secret and sends it back with `eventSourceAdded`.
+    case addEventSource(EventSourceRecord)
+    /// Its name or frame changed.
+    case updateEventSource(EventSourceRecord)
+    /// Deletes it: its URL answers 410 from then on.
+    case removeEventSource(UUID)
+    /// A new secret; the old one stops working at once.
+    case regenerateEventSecret(UUID)
+    /// The rule of the line from a source's channel to an agent.
+    case setEventRule(source: UUID, channel: UUID, agent: UUID, rule: EventRule)
     /// The developer dealt with the agent's attention request.
     case dismissAttention(UUID)
     /// The developer answered the questions the agent asked, keyed by question text; nil
@@ -97,6 +107,11 @@ public enum BoardEvent: Codable, Sendable {
     case fileTreeAdded(FileTreeRecord)
     case fileTreeUpdated(FileTreeRecord)
     case fileTreeRemoved(UUID)
+    /// Sent to every board, the one that added it too: only the core knows its secret.
+    case eventSourceAdded(EventSourceRecord)
+    /// Its name, frame, channels, rules, history or secret changed.
+    case eventSourceUpdated(EventSourceRecord)
+    case eventSourceRemoved(UUID)
     /// Every attention request, oldest first, after any change.
     case attention([AttentionRequest])
     /// How many messages wait for the user to finish the line they typed in agent `id`'s terminal.
@@ -132,10 +147,12 @@ public struct BoardState: Codable, Sendable {
     public var elements: [ElementInfo]?
     /// The file tree cards; nil from a core that predates them (the board then keeps its own).
     public var fileTrees: [FileTreeRecord]?
+    /// The event sources; nil from a core that predates them.
+    public var eventSources: [EventSourceRecord]?
 
     public init(cards: [AgentRecord], connections: [Connection], runners: RunnerReport, postIts: [PostItRecord] = [],
                 attention: [AttentionRequest] = [], images: [ImageRecord] = [], decisions: [Decision] = [],
-                elements: [ElementInfo]? = nil, fileTrees: [FileTreeRecord] = []) {
+                elements: [ElementInfo]? = nil, fileTrees: [FileTreeRecord] = [], eventSources: [EventSourceRecord] = []) {
         self.cards = cards
         self.connections = connections
         self.runners = runners
@@ -145,6 +162,7 @@ public struct BoardState: Codable, Sendable {
         self.decisions = decisions.isEmpty ? nil : decisions
         self.elements = elements
         self.fileTrees = fileTrees
+        self.eventSources = eventSources
     }
 }
 
@@ -247,6 +265,12 @@ extension BoardRequest {
         case .updateFileTree(var record):
             record.name = named(record.name, "")
             return .updateFileTree(record)
+        case .addEventSource(var record):
+            record.name = named(record.name, "Events")
+            return .addEventSource(record)
+        case .updateEventSource(var record):
+            record.name = named(record.name, "")
+            return .updateEventSource(record)
         case .elements(let list):
             return .elements(list.map { var info = $0; info.name = named(info.name, info.kind); return info })
         default:

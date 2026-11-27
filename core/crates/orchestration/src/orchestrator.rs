@@ -989,6 +989,7 @@ impl CoreService for Orchestrator {
             decisions: (!store.decisions.is_empty()).then(|| store.decisions.clone()),
             elements: Some(store.elements.values().cloned().collect()),
             file_trees: Some(store.file_trees.clone()),
+            event_sources: None,
         };
         Some(state.encoded())
     }

@@ -188,6 +188,10 @@ pub struct BoardState {
     /// The file tree cards; none from a core that predates them (the board then keeps its own).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_trees: Option<Vec<FileTreeRecord>>,
+    /// The event sources (local webhooks); none from a core that predates them.
+    /// shortcut: kept as raw JSON because this core doesn't run event sources yet; type it when it does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_sources: Option<Vec<serde_json::Value>>,
 }
 
 /// What the running runners serve and cost, and when each started.

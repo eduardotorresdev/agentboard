@@ -109,6 +109,9 @@ struct WorktreeCanvas: View {
                 board.addRunner(command: command, name: name, directory: directory)
             }
         }
+        .sheet(isPresented: Binding(get: { board.addingEventSource }, set: { board.addingEventSource = $0 })) {
+            EventSourceDialog { board.addEventSource(named: $0) }
+        }
         .sheet(item: Binding(get: { board.importRequest }, set: { board.importRequest = $0 })) { request in
             let profile: UUID = if case .browser(let id) = request.target { browsers.record(id)?.profile ?? BrowserProfile.defaultID } else { BrowserProfile.defaultID }
             BrowserImportDialog(browsers: browsers, initialProfile: profile) {}
@@ -169,6 +172,11 @@ private struct CanvasToolbar: View {
                 .fixedSize()
                 .accessibilityLabel(L("Add media"))
                 .help(L("Puts pictures or videos from your files on the board; agents connected to one see it."))
+            Button { board.addingEventSource = true } label: { Image(systemName: "bolt") }
+                .buttonStyle(ToolbarButtonStyle(icon: true))
+                .fixedSize()
+                .accessibilityLabel(L("Add event source"))
+                .help(L("A local webhook: programs on this Mac post events to it, and its channels wake the agents you draw lines to."))
             if hasFiles {
                 Button { board.addFileTree() } label: { Image(systemName: "folder") }
                     .buttonStyle(ToolbarButtonStyle(icon: true))

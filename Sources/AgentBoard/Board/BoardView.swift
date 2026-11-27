@@ -86,6 +86,9 @@ final class BoardController {
     /// The dialog that asks what a new runner runs is open.
     var addingRunner = false
     func addRunner(command: String, name: String?, directory: String?) { view?.addRunner(command: command, name: name, directory: directory) }
+    /// The dialog that names a new event source is open.
+    var addingEventSource = false
+    func addEventSource(named name: String) { view?.addEventSource(named: name) }
     /// A custom device being chosen, for a new browser card or an existing one.
     var deviceRequest: DeviceRequest?
     func editDevice(_ target: DeviceRequest.Target) { deviceRequest = DeviceRequest(target: target) }
@@ -200,6 +203,13 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// The SwiftUI files and file of each file tree card, over its content, and the bar that
     /// sends its notes, below it.
     fileprivate var fileTreeViews: [UUID: (host: FileTreeHost, content: NSView, bar: NSView, barHost: FileTreeHost)] = [:]
+    fileprivate var eventSourceCards: [UUID: FileTreeCardLayer] = [:]
+    /// The SwiftUI content of each event source card.
+    fileprivate var eventSourceViews: [UUID: (host: FileTreeHost, content: NSView)] = [:]
+    /// The dot each channel's lines start from, on its card's right edge.
+    fileprivate var eventPortLayers: [UUID: CALayer] = [:]
+    /// The rule of the line being edited.
+    fileprivate var rulePopover: NSPopover?
     private let presenter: TerminalPresenter?
     private let surface: SharedSurface<UUID>?
     /// Glyphs at the backing scale times `renderZoom`.
@@ -656,6 +666,15 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         alert.beginSheetModal(for: window, completionHandler: nil)
     }
 
+    func addEventSource(named name: String) {
+        let frame = CGRect(origin: newCardOrigin(for: EventSourceRecord.size), size: EventSourceRecord.size)
+        let id = store.addEventSource(named: name, to: worktree, at: frame.origin)
+        appearing.insert(id)
+        bringIntoView(frame)
+        focusedID = id
+        syncLayers()
+    }
+
     func addFileTree() {
         let record = fileTrees.add(to: worktree, on: store.host?.id, at: newCardOrigin(for: FileTreeRecord.size))
         appearing.insert(record.id)
@@ -796,6 +815,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         syncBrowsers(onScreen: onScreen, scale: renderScale)
         syncSimulators(onScreen: onScreen, scale: renderScale)
         syncFileTrees(scale: renderScale)
+        syncEventSources(scale: renderScale)
         syncRelays(scale: renderScale)
         syncLinks(scale: renderScale)
         syncSelection()
@@ -948,12 +968,14 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             + store.images(in: worktree).map { ($0.id, $0.frame) }
             + browsers.browsers(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) } + localSimulators.map { ($0.id, $0.frame) }
             + fileTrees.trees(in: worktree, on: store.host?.id).map { ($0.id, $0.frame) } + relays.map { ($0.id, $0.frame) }
+            + store.eventSources(in: worktree).map { ($0.id, $0.frame) }
     }
 
     /// The lines of this worktree, between any of its cards.
     private var worktreeConnections: [Connection] {
         store.connections(in: worktree, elements: Set(browsers.browsers(in: worktree, on: store.host?.id).map(\.id))
-            .union(localSimulators.map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)).union(relays.map(\.id)))
+            .union(localSimulators.map(\.id)).union(fileTrees.trees(in: worktree, on: store.host?.id).map(\.id)).union(relays.map(\.id))
+            .union(eventPorts.keys))
     }
 
     /// The relays of this worktree: linked agents elsewhere.
@@ -967,6 +989,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         linkScale = scale
         let connections = worktreeConnections
         let frames = Dictionary(itemFrames.map { ($0.id, $0.frame) }, uniquingKeysWith: { first, _ in first })
+            .merging(eventPorts) { first, _ in first }
         let ids = Set(connections.map(\.id))
         for (id, link) in links where !ids.contains(id) {
             link.removeFromSuperlayer()
@@ -1373,46 +1396,50 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
 
     /// The topmost agent card under a world point, unless a browser or post-it covers it.
     private func card(at point: CGPoint) -> AgentRecord? {
-        guard relay(at: point) == nil, browser(at: point) == nil, simulator(at: point) == nil, postIt(at: point) == nil, image(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        guard relay(at: point) == nil, browser(at: point) == nil, simulator(at: point) == nil, postIt(at: point) == nil, image(at: point) == nil, fileTree(at: point) == nil,
+              eventSource(at: point) == nil else { return nil }
         return store.agents(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost browser card under a world point.
     private func browser(at point: CGPoint) -> BrowserRecord? {
-        guard fileTree(at: point) == nil, simulator(at: point) == nil else { return nil }
+        guard fileTree(at: point) == nil, eventSource(at: point) == nil, simulator(at: point) == nil else { return nil }
         return browsers.browsers(in: worktree, on: store.host?.id).last { $0.frame.contains(point) }
     }
 
     /// The topmost file tree card under a world point; their files float above every other card.
     fileprivate func fileTree(at point: CGPoint) -> FileTreeRecord? {
-        fileTrees.trees(in: worktree, on: store.host?.id).last { $0.frame.contains(point) }
+        guard eventSource(at: point) == nil else { return nil }
+        return fileTrees.trees(in: worktree, on: store.host?.id).last { $0.frame.contains(point) }
     }
 
     /// The topmost post-it under a world point, unless a browser card covers it.
     fileprivate func postIt(at point: CGPoint) -> PostItRecord? {
-        guard browser(at: point) == nil, simulator(at: point) == nil, fileTree(at: point) == nil, image(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, simulator(at: point) == nil, fileTree(at: point) == nil, eventSource(at: point) == nil,
+              image(at: point) == nil else { return nil }
         return store.postIts(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost image under a world point; images sit above post-its, below browsers.
     fileprivate func image(at point: CGPoint) -> ImageRecord? {
-        guard browser(at: point) == nil, simulator(at: point) == nil, fileTree(at: point) == nil else { return nil }
+        guard browser(at: point) == nil, simulator(at: point) == nil, fileTree(at: point) == nil, eventSource(at: point) == nil else { return nil }
         return store.images(in: worktree).last { $0.frame.contains(point) }
     }
 
     /// The topmost relay card under a world point.
     fileprivate func relay(at point: CGPoint) -> AgentLinks.Relay? {
-        relays.last { $0.frame.contains(point) }
+        guard eventSource(at: point) == nil else { return nil }
+        return relays.last { $0.frame.contains(point) }
     }
 
     /// The topmost card of any kind under a world point.
     private func item(at point: CGPoint) -> UUID? {
-        fileTree(at: point)?.id ?? relay(at: point)?.id ?? simulator(at: point)?.id ?? browser(at: point)?.id ?? image(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
+        eventSource(at: point)?.id ?? fileTree(at: point)?.id ?? relay(at: point)?.id ?? simulator(at: point)?.id ?? browser(at: point)?.id ?? image(at: point)?.id ?? postIt(at: point)?.id ?? card(at: point)?.id
     }
 
     private func frame(of id: UUID) -> CGRect? {
         record(id)?.frame ?? store.postIt(id)?.frame ?? store.image(id)?.frame ?? browsers.record(id)?.frame ?? simulators.record(id)?.frame ?? fileTrees.record(id)?.frame
-            ?? store.agentLinks?.relay(id)?.frame
+            ?? store.agentLinks?.relay(id)?.frame ?? store.eventSource(id)?.frame ?? eventPorts[id]
     }
 
     private func record(_ id: UUID) -> AgentRecord? {
@@ -1452,8 +1479,11 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     /// The handle under a world point: on the hovered card, or on the one the pointer is over.
     private func handle(at point: CGPoint) -> (card: UUID, index: Int)? {
         let reach = max(CardMetrics.handleReach, 8 / zoom)
+        if let port = eventPorts.first(where: { hypot($0.value.minX - point.x, $0.value.minY - point.y) <= reach }) {
+            return (port.key, Side.right.rawValue)
+        }
         let hovered = hoveredCard.flatMap { id in frame(of: id).map { (id: id, frame: $0) } }
-        let candidates = [hovered].compactMap { $0 } + itemFrames.reversed()
+        let candidates = ([hovered].compactMap { $0 } + itemFrames.reversed()).filter { store.eventSource($0.id) == nil }
         for item in candidates {
             if let index = CardMetrics.handles(of: item.frame).firstIndex(where: { hypot($0.x - point.x, $0.y - point.y) <= reach }) {
                 return (item.id, index)
@@ -1466,7 +1496,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
     private func snapHandle(near point: CGPoint, excluding source: UUID) -> (card: UUID, side: Side, point: CGPoint)? {
         let reach = CardMetrics.snapDistance / zoom
         var best: (card: UUID, side: Side, point: CGPoint, distance: CGFloat)?
-        for item in itemFrames where item.id != source {
+        for item in itemFrames where item.id != source && store.eventSource(item.id) == nil {
             for (index, handle) in CardMetrics.handles(of: item.frame).enumerated() {
                 let distance = hypot(handle.x - point.x, handle.y - point.y)
                 if distance <= reach, distance < best?.distance ?? .infinity, let side = Side(rawValue: index) {
@@ -1512,6 +1542,17 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let id = hoveredLink, let link = links[id], link.knobContains(location, zoom: zoom) {
             store.disconnect(id)
             hoveredLink = nil
+            syncLayers()
+            return
+        }
+        if let id = link(at: location), let connection = worktreeConnections.first(where: { $0.id == id }),
+           showRule(of: connection, at: point) {
+            return
+        }
+        if let source = eventSource(at: location) {
+            endAddressEditing()
+            endPostItEditing()
+            eventSourceMouseDown(source, at: location, point: point)
             syncLayers()
             return
         }
@@ -1644,7 +1685,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 drag.point = snap.point
                 drag.target = snap.card
                 drag.targetSide = snap.side
-            } else if let target = item(at: location), target != drag.from, let frame = frame(of: target) {
+            } else if let target = item(at: location), target != drag.from, store.eventSource(target) == nil, let frame = frame(of: target) {
                 // Over a card: the line goes to its handle nearest the pointer, and stays there.
                 let handles = CardMetrics.handles(of: frame)
                 let index = handles.indices.min { hypot(handles[$0].x - location.x, handles[$0].y - location.y)
@@ -1723,7 +1764,9 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             previewRope = nil
             NSCursor.pop()
             // The new line keeps the rope that was drawn, swing and all.
-            if let target = drag.target, let connection = store.connect(drag.from, target, sides: (drag.side, drag.targetSide)) {
+            // A channel's lines go to agents, and only from it.
+            let joinable = store.eventChannel(drag.from) == nil || drag.target.map { record($0) != nil } == true
+            if joinable, let target = drag.target, let connection = store.connect(drag.from, target, sides: (drag.side, drag.targetSide)) {
                 ropes[connection.id] = drawn
             }
             return syncLayers()
@@ -1783,6 +1826,10 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
         if let tree, CardMetrics.close(of: tree.frame).target(zoom: zoom).contains(point) {
             hovered = tree.id
         }
+        let source = eventSource(at: point)
+        if let source, CardMetrics.close(of: source.frame).target(zoom: zoom).contains(point) {
+            hovered = source.id
+        }
         let relay = tree == nil ? relay(at: point) : nil
         if let relay, CardMetrics.close(of: relay.frame).target(zoom: zoom).contains(point) {
             hovered = relay.id
@@ -1813,7 +1860,7 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
             syncLayers()
         }
         let handle = handle(at: point)
-        let showing = handle?.card ?? tree?.id ?? relay?.id ?? simulator?.id ?? browser?.id ?? image?.id ?? postIt?.id ?? card?.id
+        let showing = handle?.card ?? source?.id ?? tree?.id ?? relay?.id ?? simulator?.id ?? browser?.id ?? image?.id ?? postIt?.id ?? card?.id
         if control?.0 != hoveredControl?.card || control?.1 != hoveredControl?.control {
             hoveredControl = control.map { (card: $0.0, control: $0.1) }
             syncLayers()
@@ -1953,6 +2000,8 @@ final class BoardView: NSView, NSTextInputClient, NSTextFieldDelegate {
                 simulators.remove(id)
             } else if fileTrees.record(id) != nil {
                 fileTrees.remove(id)
+            } else if store.eventSource(id) != nil {
+                store.removeEventSource(id)
             } else if let links = store.agentLinks, let link = links.links.first(where: { $0.ends.contains { $0.relay == id } }) {
                 links.remove(link)
             }
@@ -2309,7 +2358,7 @@ extension BoardView {
 
     /// The topmost simulator card under a world point; they sit above browsers.
     fileprivate func simulator(at point: CGPoint) -> SimulatorRecord? {
-        guard fileTree(at: point) == nil else { return nil }
+        guard fileTree(at: point) == nil, eventSource(at: point) == nil else { return nil }
         return localSimulators.last { $0.frame.contains(point) }
     }
 
@@ -2473,6 +2522,8 @@ extension BoardView {
             store.setImageFrame(frame, for: id, persist: persist)
         } else if fileTrees.record(id) != nil {
             fileTrees.setFrame(frame, for: id, persist: persist)
+        } else if store.eventSource(id) != nil {
+            store.setEventSourceFrame(frame, for: id, persist: persist)
         } else if browsers.record(id) != nil {
             browsers.setFrame(frame, for: id, persist: persist)
         } else if simulators.record(id) != nil {
@@ -3763,5 +3814,129 @@ extension BoardView {
         } else {
             interaction = Interaction(id: relay.id, kind: .move, start: point, frame: relay.frame)
         }
+    }
+}
+
+// MARK: - Event sources
+
+extension BoardView {
+    /// The topmost event source card under a world point; they float above every other card.
+    fileprivate func eventSource(at point: CGPoint) -> EventSourceRecord? {
+        store.eventSources(in: worktree).last { $0.frame.contains(point) }
+    }
+
+    /// Where each shown channel's lines start: a point on its card's right edge, beside its row,
+    /// as an empty rect so every handle of it is that point.
+    fileprivate var eventPorts: [UUID: CGRect] {
+        var ports: [UUID: CGRect] = [:]
+        for source in store.eventSources(in: worktree) {
+            let content = CardMetrics.content(of: source.frame)
+            for (index, channel) in source.channels.prefix(EventSourceLayout.rows(in: content.height)).enumerated() {
+                ports[channel.id] = CGRect(x: source.frame.maxX, y: content.minY + EventSourceLayout.rowMiddle(index), width: 0, height: 0)
+            }
+        }
+        return ports
+    }
+
+    fileprivate func syncEventSources(scale: CGFloat) {
+        let records = store.eventSources(in: worktree)
+        let ids = Set(records.map(\.id))
+        for (id, card) in eventSourceCards where !ids.contains(id) {
+            card.removeFromSuperlayer()
+            eventSourceCards[id] = nil
+        }
+        for (id, views) in eventSourceViews where !ids.contains(id) {
+            views.content.removeFromSuperview()
+            eventSourceViews[id] = nil
+        }
+        let ports = eventPorts
+        for (id, port) in eventPortLayers where ports[id] == nil {
+            port.removeFromSuperlayer()
+            eventPortLayers[id] = nil
+        }
+        // Above the file trees.
+        let below = CGFloat(itemFrames.count)
+        for (index, record) in records.enumerated() {
+            let card = eventSourceCards[record.id] ?? {
+                let card = FileTreeCardLayer()
+                eventSourceCards[record.id] = card
+                cardsLayer.addSublayer(card)
+                if appearing.remove(record.id) != nil { card.animateAppearance() }
+                return card
+            }()
+            card.zPosition = below + CGFloat(index)
+            card.update(frame: record.frame, name: record.name, focused: highlighted(record.id), closeHovered: hoveredClose == record.id,
+                        scale: scale, icon: .symbol("bolt.fill", color: Theme.Hex.deep))
+            // Lines start from its channels, not from the card.
+            card.updateHandles(visible: false, hovered: nil, linkTarget: false)
+            for channel in record.channels {
+                guard let frame = ports[channel.id] else { continue }
+                let port = eventPortLayers[channel.id] ?? {
+                    let port = CALayer()
+                    port.bounds = CGRect(x: 0, y: 0, width: CardMetrics.handleSize, height: CardMetrics.handleSize)
+                    port.cornerRadius = CardMetrics.handleSize / 2
+                    port.backgroundColor = BoardPalette.rgb(BoardPalette.accent)
+                    port.borderColor = BoardPalette.card
+                    port.borderWidth = 2
+                    cardsLayer.addSublayer(port)
+                    eventPortLayers[channel.id] = port
+                    return port
+                }()
+                port.zPosition = card.zPosition + 0.5
+                port.position = frame.origin
+                let lit = hoveredCard == channel.id || linkDrag?.from == channel.id
+                port.transform = CATransform3DMakeScale(lit ? 1.4 : 1, lit ? 1.4 : 1, 1)
+            }
+
+            let views = eventSourceViews[record.id] ?? {
+                let host = FileTreeHost()
+                let content = NSHostingView(rootView: Zoomed(host: host) { EventSourceView(store: store, id: record.id) })
+                let views = (host: host, content: content as NSView)
+                eventSourceViews[record.id] = views
+                return views
+            }()
+            if views.content.superview == nil { addSubview(views.content) }
+            let content = CardMetrics.content(of: record.frame)
+            if views.host.size != content.size { views.host.size = content.size }
+            if views.host.zoom != zoom { views.host.zoom = zoom }
+            views.content.frame = screen(content)
+        }
+    }
+
+    fileprivate func eventSourceMouseDown(_ record: EventSourceRecord, at location: CGPoint, point: CGPoint) {
+        focusedID = record.id
+        store.raiseEventSource(record.id)
+        let frame = record.frame
+        let handle = CardMetrics.resizeHandle / zoom
+        if CardMetrics.close(of: frame).target(zoom: zoom).contains(location) {
+            store.removeEventSource(record.id)
+            focusedID = nil
+            hoveredClose = nil
+        } else if location.x > frame.maxX - handle && location.y > frame.maxY - handle {
+            interaction = Interaction(id: record.id, kind: .resize, start: point, frame: frame)
+        } else {
+            interaction = Interaction(id: record.id, kind: .move, start: point, frame: frame)
+        }
+    }
+
+    /// Opens the rule of a line from a channel to an agent, at `point` (in view coordinates);
+    /// false for any other line.
+    fileprivate func showRule(of connection: Connection, at point: CGPoint) -> Bool {
+        let ends = [(connection.a, connection.b), (connection.b, connection.a)]
+        guard let (channelID, agentID) = ends.first(where: { store.eventChannel($0.0) != nil && record($0.1) != nil }),
+              let (source, channel) = store.eventChannel(channelID), let agent = record(agentID) else { return false }
+        rulePopover?.close()
+        let popover = NSPopover()
+        popover.behavior = .transient
+        let editor = EventRuleEditor(initial: channel.rule(for: agentID), title: "\(channel.title) → \(agent.name)",
+                                     onSave: { [weak self, weak popover] rule in
+                                         self?.store.setEventRule(rule, source: source.id, channel: channelID, agent: agentID)
+                                         popover?.close()
+                                     },
+                                     onCancel: { [weak popover] in popover?.close() })
+        popover.contentViewController = NSHostingController(rootView: editor)
+        popover.show(relativeTo: CGRect(origin: point, size: CGSize(width: 1, height: 1)), of: self, preferredEdge: .maxY)
+        rulePopover = popover
+        return true
     }
 }

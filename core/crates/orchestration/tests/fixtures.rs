@@ -204,6 +204,7 @@ fn the_state_encodes_as_swift_does() {
     assert_eq!((old.post_its, old.attention, old.images, old.elements), (None, None, None, None));
     assert_eq!(old.decisions, None);
     assert_eq!(old.file_trees, None);
+    assert_eq!(old.event_sources, None);
 }
 
 /// A data folder the Swift core used serves this one.

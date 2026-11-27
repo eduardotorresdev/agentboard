@@ -300,6 +300,9 @@
       "worktree" : "\/work\/tree"
     }
   ],
+  "eventSources" : [
+
+  ],
   "fileTrees" : [
     {
       "frame" : [

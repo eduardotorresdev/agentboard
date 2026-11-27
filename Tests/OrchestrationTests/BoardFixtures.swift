@@ -180,6 +180,7 @@ struct BoardFixtures {
         old.attention = nil
         old.images = nil
         old.fileTrees = nil
+        old.eventSources = nil
         try write(old, "state_of_an_older_core")
     }
 

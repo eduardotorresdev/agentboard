@@ -61,6 +61,10 @@ final class CardDatabase {
                 x REAL NOT NULL, y REAL NOT NULL,
                 width REAL NOT NULL, height REAL NOT NULL,
                 organization TEXT
+            );
+            CREATE TABLE IF NOT EXISTS eventsources (
+                id TEXT PRIMARY KEY,
+                data BLOB NOT NULL
             )
             """)
         // Before migrating notes blocks, which saves post-its with it.
@@ -244,6 +248,28 @@ final class CardDatabase {
         let stmt = try prepare("DELETE FROM filetrees WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id.uuidString)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
+    }
+
+    /// Event sources, deleted ones included, in the order they were added; each is its JSON.
+    func eventSources() throws -> [EventSourceRecord] {
+        let stmt = try prepare("SELECT data FROM eventsources ORDER BY rowid")
+        defer { sqlite3_finalize(stmt) }
+        var result: [EventSourceRecord] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let bytes = sqlite3_column_blob(stmt, 0) else { continue }
+            let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(stmt, 0)))
+            if let record = try? JSONDecoder().decode(EventSourceRecord.self, from: data) { result.append(record) }
+        }
+        return result
+    }
+
+    func saveEventSource(_ source: EventSourceRecord) throws {
+        let stmt = try prepare("INSERT OR REPLACE INTO eventsources (id, data) VALUES (?, ?)")
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, source.id.uuidString)
+        let data = try JSONEncoder().encode(source)
+        _ = data.withUnsafeBytes { sqlite3_bind_blob(stmt, 2, $0.baseAddress, Int32($0.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self)) }
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error() }
     }
 
