@@ -18,6 +18,7 @@ use crate::cards::{AgentRecord, ElementInfo};
 use crate::decision::{Answer, Decision};
 use crate::file_tree::FileTreeRecord;
 use crate::image_card::ImageRecord;
+use crate::image_group::ImageGroup;
 use crate::post_it::PostItRecord;
 use crate::process_inspector::RunnerStats;
 
@@ -61,6 +62,9 @@ pub enum BoardRequest {
     UpdateImage(Unlabelled<ImageRecord>),
     /// Forgets it and deletes its file.
     RemoveImage(Unlabelled<Uuid>),
+    /// Makes or changes an organizational group of images (see image_group.rs).
+    SetImageGroup(Unlabelled<ImageGroup>),
+    RemoveImageGroup(Unlabelled<Uuid>),
     AddFileTree(Unlabelled<FileTreeRecord>),
     /// Its name or frame changed.
     UpdateFileTree(Unlabelled<FileTreeRecord>),
@@ -124,6 +128,8 @@ pub enum BoardEvent {
     /// Its name, frame or picture (`file`, `pixelSize`) changed.
     ImageUpdated(Unlabelled<ImageRecord>),
     ImageRemoved(Unlabelled<Uuid>),
+    /// Every organizational group, after any of them changed.
+    ImageGroups(Unlabelled<Vec<ImageGroup>>),
     FileTreeAdded(Unlabelled<FileTreeRecord>),
     FileTreeUpdated(Unlabelled<FileTreeRecord>),
     FileTreeRemoved(Unlabelled<Uuid>),
@@ -192,6 +198,9 @@ pub struct BoardState {
     /// shortcut: kept as raw JSON because this core doesn't run event sources yet; type it when it does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_sources: Option<Vec<serde_json::Value>>,
+    /// The organizational groups of images; none when there are none or from a core that predates them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_groups: Option<Vec<ImageGroup>>,
 }
 
 /// What the running runners serve and cost, and when each started.

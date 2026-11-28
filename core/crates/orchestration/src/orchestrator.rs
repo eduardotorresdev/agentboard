@@ -23,12 +23,13 @@ use crate::board_protocol::{from_runtime, only, to_runtime, BoardEvent, BoardReq
 use crate::card_database::CardDatabase;
 use crate::cards::{prepare_organization, AgentRecord, ElementInfo};
 use crate::image_card::{ImageFiles, ImageRecord};
+use crate::image_group::ImageGroup;
 use crate::l10n::l;
 use crate::file_tree::FileTreeRecord;
 use crate::post_it::PostItRecord;
 use crate::process_inspector::{RunnerStats, Sample};
 use crate::video_files::VideoTools;
-use crate::{browser_relay::BrowserRelay, simulator_relay::SimulatorRelay, card_tools::CardTools, image_tools::ImageTools, post_it_tools::PostItTools, project_relay::ProjectRelay, runner_tools::RunnerTools, worktree_tools::WorktreeTools};
+use crate::{browser_relay::BrowserRelay, simulator_relay::SimulatorRelay, card_tools::CardTools, image_tools::ImageTools, layout_tools::LayoutTools, post_it_tools::PostItTools, project_relay::ProjectRelay, runner_tools::RunnerTools, worktree_tools::WorktreeTools};
 
 /// The board's cards, the lines between elements and the agents' tools, kept by the core so
 /// they work while no board runs: agents message each other, start runners and read their logs
@@ -57,6 +58,8 @@ pub struct Store {
     pub(crate) post_its: Vec<PostItRecord>,
     /// The images (see ImageTools).
     pub(crate) images: Vec<ImageRecord>,
+    /// The organizational groups of images (see image_group.rs).
+    pub(crate) image_groups: Vec<ImageGroup>,
     /// The file tree cards; the board lists their files on the host.
     pub(crate) file_trees: Vec<FileTreeRecord>,
     /// The agents waiting on the developer, oldest first (see attention.rs).
@@ -245,6 +248,8 @@ impl Orchestrator {
 
         // Names reach agents' prompts and listings: cards saved by older builds are cleaned too.
         let clean = |name: &mut String, fallback: &str| *name = BoardName::named(name, fallback);
+        // Kept as the Swift core writes it.
+        let image_groups: Vec<ImageGroup> = std::fs::read(data_folder.join("image-groups.json")).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default();
         let mut store = Store {
             handle,
             database,
@@ -253,6 +258,7 @@ impl Orchestrator {
             cards: saved,
             post_its: saved_post_its,
             images: saved_images,
+            image_groups,
             file_trees: saved_file_trees,
             attention: Vec::new(),
             pending_questions: HashMap::new(),
@@ -485,6 +491,11 @@ impl Store {
 
     pub(crate) fn image(&self, id: Uuid) -> Option<&ImageRecord> {
         self.images.iter().find(|image| image.id == id)
+    }
+
+    /// Where an element sits on its board.
+    pub(crate) fn frame_of(&self, id: Uuid) -> Option<connections::Rect> {
+        self.record(id).map(|card| card.frame).or_else(|| self.post_it(id).map(|note| note.frame)).or_else(|| self.image(id).map(|image| image.frame)).or_else(|| self.file_tree(id).map(|tree| tree.frame)).or_else(|| self.elements.get(&id).map(|info| info.frame))
     }
 
     pub(crate) fn file_tree(&self, id: Uuid) -> Option<&FileTreeRecord> {
@@ -990,6 +1001,7 @@ impl CoreService for Orchestrator {
             elements: Some(store.elements.values().cloned().collect()),
             file_trees: Some(store.file_trees.clone()),
             event_sources: None,
+            image_groups: (!store.image_groups.is_empty()).then(|| store.image_groups.clone()),
         };
         Some(state.encoded())
     }
@@ -1047,6 +1059,7 @@ impl Turn<'_> {
         catalog.add(ProjectRelay);
         catalog.add(WorktreeTools);
         catalog.add(CardTools);
+        catalog.add(LayoutTools);
         catalog.add(DecisionTools);
         if let Some(request) = catalog.serve(self, request) {
             match request.kind {
@@ -1206,11 +1219,17 @@ impl Turn<'_> {
                 record.name = BoardName::clean(&record.name).unwrap_or_else(|| if record.is_video() { "Video" } else { "Image" }.to_string());
                 self.insert_image(record, sender);
             }
-            BoardRequest::UpdateImage(Unlabelled { value: record }) => self.update_image(record.id, sender, |image| {
-                image.name = BoardName::clean(&record.name).unwrap_or_else(|| image.name.clone());
-                image.frame = record.frame;
-            }),
+            BoardRequest::UpdateImage(Unlabelled { value: record }) => {
+                let Some(before) = self.image(record.id).map(|image| image.frame) else { return };
+                self.update_image(record.id, sender, |image| {
+                    image.name = BoardName::clean(&record.name).unwrap_or_else(|| image.name.clone());
+                    image.frame = record.frame;
+                });
+                self.image_frame_changed(record.id, before);
+            }
             BoardRequest::RemoveImage(Unlabelled { value: id }) => self.remove_image(id, sender),
+            BoardRequest::SetImageGroup(Unlabelled { value: group }) => self.set_image_group(group),
+            BoardRequest::RemoveImageGroup(Unlabelled { value: id }) => self.remove_image_group(id),
             BoardRequest::AddFileTree(Unlabelled { value: record }) => {
                 if self.file_tree(record.id).is_none() {
                     self.save(|database| database.save_file_tree(&record));
@@ -1218,14 +1237,10 @@ impl Turn<'_> {
                     self.file_trees.push(record);
                 }
             }
-            BoardRequest::UpdateFileTree(Unlabelled { value: record }) => {
-                let Some(tree) = self.board.store.file_trees.iter_mut().find(|tree| tree.id == record.id) else { return };
+            BoardRequest::UpdateFileTree(Unlabelled { value: record }) => self.update_file_tree(record.id, sender, |tree| {
                 tree.name = BoardName::clean(&record.name).unwrap_or_else(|| tree.name.clone());
                 tree.frame = record.frame;
-                let tree = tree.clone();
-                self.save(|database| database.save_file_tree(&tree));
-                self.broadcast(&BoardEvent::FileTreeUpdated(only(tree)), sender);
-            }
+            }),
             BoardRequest::RemoveFileTree(Unlabelled { value: id }) => {
                 if self.file_tree(id).is_some() {
                     self.disconnect_element(id);
@@ -1266,6 +1281,8 @@ impl Turn<'_> {
             let lives_in_sidebar = ["project_", "worktree_", "host_"].iter().any(|prefix| name.starts_with(prefix));
             let place = if lives_in_sidebar {
                 "Projects live"
+            } else if name == "board_move" {
+                "Browsers and simulators live"
             } else if name.starts_with("simulator_") {
                 "Simulators run"
             } else {
@@ -1370,7 +1387,21 @@ impl Turn<'_> {
             ImageFiles::remove(&before.file, &self.data_folder);
         }
         self.save(|database| database.save_image(&image));
+        let reshaped = image.pixel_size != before.pixel_size && self.image_group_of(id).is_some();
         self.broadcast(&BoardEvent::ImageUpdated(only(image)), sender);
+        // A grouped picture of another shape: its cell on the grid changes.
+        if reshaped {
+            self.layout_image_groups();
+        }
+    }
+
+    /// Changes a file tree card in place and saves it; boards other than `sender` hear of it.
+    pub(crate) fn update_file_tree(&mut self, id: Uuid, sender: Option<&CoreBoard>, change: impl FnOnce(&mut FileTreeRecord)) {
+        let Some(tree) = self.board.store.file_trees.iter_mut().find(|tree| tree.id == id) else { return };
+        change(tree);
+        let tree = tree.clone();
+        self.save(|database| database.save_file_tree(&tree));
+        self.broadcast(&BoardEvent::FileTreeUpdated(only(tree)), sender);
     }
 
     /// Forgets an image, its lines and its file.
@@ -1381,6 +1412,7 @@ impl Turn<'_> {
         self.save(|database| database.delete_image(id));
         ImageFiles::remove(&file, &self.data_folder);
         self.broadcast(&BoardEvent::ImageRemoved(only(id)), sender);
+        self.image_left_board(id);
     }
 
     // MARK: Launching

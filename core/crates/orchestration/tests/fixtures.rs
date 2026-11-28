@@ -37,6 +37,10 @@ fn id(digit: u8) -> Uuid {
     Uuid::parse(&format!("0000000{digit}-ABCD-4EF0-8A1B-00000000000{digit}")).unwrap()
 }
 
+fn group() -> ImageGroup {
+    ImageGroup { id: id(7), name: "Screens".into(), direction: Direction::Vertical, color: "amber".into(), origin: Some(connections::Point::new(40.5, -12.0)), extent: Some(320.0), members: vec![id(6), id(5)] }
+}
+
 const DATE: f64 = 784_111_222.5;
 
 fn agent() -> AgentRecord {
@@ -111,9 +115,11 @@ fn requests_encode_as_swift_does() {
         "addCard", "updateCard", "removeCard", "connect", "disconnect", "elements", "open", "restart", "restart_as_it_is", "startRunner", "stopRunner", "toolResult", "toolResult_error",
         "addPostIt", "updatePostIt", "removePostIt", "writePostIt", "addImage", "updateImage", "removeImage", "dismissAttention", "answerQuestions", "answerQuestions_in_the_terminal", "deliver",
         "prompt", "deliverHeld", "deliver_to_one", "answerDecision_ok", "answerDecision_option", "answerDecision_useRecommended", "answerDecision_redirect",
-        "createProject", "createProject_clone", "createWorktree", "addFileTree", "updateFileTree", "removeFileTree",
+        "createProject", "createProject_clone", "createWorktree", "addFileTree", "updateFileTree", "removeFileTree", "setImageGroup", "setImageGroup_new", "removeImageGroup",
     ];
     let requests: Vec<BoardRequest> = names.iter().map(|name| round_trip(&format!("request_{name}"))).collect();
+    assert_eq!(requests[names.len() - 3], BoardRequest::SetImageGroup(only(group())));
+    assert_eq!(requests[names.len() - 2], BoardRequest::SetImageGroup(only(ImageGroup { id: id(7), ..ImageGroup::new(Direction::Horizontal, "blue", vec![id(6)]) })));
     let created = names.iter().position(|name| *name == "createProject").unwrap();
     assert_eq!(requests[created], BoardRequest::CreateProject { request: id(8), name: Some("shop".into()), clone: None });
     assert_eq!(requests[created + 1], BoardRequest::CreateProject { request: id(8), name: None, clone: Some("git@github.com:owner/shop.git".into()) });
@@ -152,7 +158,7 @@ fn requests_encode_as_swift_does() {
 fn events_encode_as_swift_does() {
     let names = [
         "cardAdded", "cardUpdated", "cardRemoved", "connections", "message", "runners", "runners_none", "toolCall", "postItAdded", "postItUpdated", "postItRemoved", "imageAdded", "imageUpdated",
-        "imageRemoved", "attention", "held", "promptReturned", "elements", "decisions", "created", "created_refused", "fileTreeAdded", "fileTreeUpdated", "fileTreeRemoved",
+        "imageRemoved", "attention", "held", "promptReturned", "elements", "decisions", "created", "created_refused", "fileTreeAdded", "fileTreeUpdated", "fileTreeRemoved", "imageGroups",
     ];
     let events: Vec<BoardEvent> = names.iter().map(|name| round_trip(&format!("event_{name}"))).collect();
     assert_eq!(events[0], BoardEvent::CardAdded(only(runner())));
@@ -200,11 +206,13 @@ fn the_state_encodes_as_swift_does() {
     assert_eq!(state.attention.map(|queue| queue.len()), Some(3));
     assert_eq!(state.elements.map(|list| list.iter().map(|info| info.id).collect::<Vec<_>>()), Some(vec![id(5)]));
     assert_eq!(state.decisions.map(|list| list.len()), Some(3));
+    assert_eq!(state.image_groups, Some(vec![group()]));
     let old: BoardState = round_trip("state_of_an_older_core");
     assert_eq!((old.post_its, old.attention, old.images, old.elements), (None, None, None, None));
     assert_eq!(old.decisions, None);
     assert_eq!(old.file_trees, None);
     assert_eq!(old.event_sources, None);
+    assert_eq!(old.image_groups, None);
 }
 
 /// A data folder the Swift core used serves this one.

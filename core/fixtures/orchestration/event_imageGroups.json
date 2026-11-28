@@ -1,0 +1,21 @@
+{
+  "imageGroups" : {
+    "_0" : [
+      {
+        "color" : "amber",
+        "direction" : "vertical",
+        "extent" : 320,
+        "id" : "00000007-ABCD-4EF0-8A1B-000000000007",
+        "members" : [
+          "00000006-ABCD-4EF0-8A1B-000000000006",
+          "00000005-ABCD-4EF0-8A1B-000000000005"
+        ],
+        "name" : "Screens",
+        "origin" : [
+          40.5,
+          -12
+        ]
+      }
+    ]
+  }
+}

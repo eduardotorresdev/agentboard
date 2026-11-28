@@ -102,6 +102,7 @@ struct BoardFixtures {
                                   frame: CGRect(x: 5, y: 6, width: 700, height: 500), organization: ids[7])
         let bare = ElementInfo(id: ids[5], name: "Files", kind: "filetree", detail: nil, worktree: "/work/tree",
                                frame: CGRect(x: 0, y: 0, width: 300, height: 500))
+        let group = ImageGroup(id: ids[6], name: "Screens", direction: .vertical, color: "amber", origin: CGPoint(x: 40.5, y: -12), extent: 320, members: [ids[5], ids[4]])
         let requests: [(String, BoardRequest)] = [
             ("addCard", .addCard(Self.agent)),
             ("updateCard", .updateCard(Self.runner)),
@@ -140,6 +141,9 @@ struct BoardFixtures {
             ("addFileTree", .addFileTree(Self.fileTree)),
             ("updateFileTree", .updateFileTree(Self.bareFileTree)),
             ("removeFileTree", .removeFileTree(ids[8])),
+            ("setImageGroup", .setImageGroup(group)),
+            ("setImageGroup_new", .setImageGroup(ImageGroup(id: ids[6], direction: .horizontal, members: [ids[5]]))),
+            ("removeImageGroup", .removeImageGroup(ids[6])),
         ]
         for (name, request) in requests { try write(request, "request_" + name) }
         let message = Message(id: ids[8], from: ids[0], to: ids[2], text: "Run the tests", date: Self.date)
@@ -168,11 +172,12 @@ struct BoardFixtures {
             ("fileTreeAdded", .fileTreeAdded(Self.fileTree)),
             ("fileTreeUpdated", .fileTreeUpdated(Self.bareFileTree)),
             ("fileTreeRemoved", .fileTreeRemoved(ids[8])),
+            ("imageGroups", .imageGroups([group])),
         ]
         for (name, event) in events { try write(event, "event_" + name) }
         let state = BoardState(cards: [Self.agent, Self.runner, Self.plain], connections: Self.lines, runners: Self.runners,
                                postIts: [Self.postIt, Self.emptyPostIt], attention: Self.attention, images: [Self.image, Self.video],
-                               decisions: Self.decisions, elements: [element], fileTrees: [Self.fileTree, Self.bareFileTree])
+                               decisions: Self.decisions, elements: [element], fileTrees: [Self.fileTree, Self.bareFileTree], imageGroups: [group])
         try write(state, "state")
         // What a core that predates post-its, attention and images sends.
         var old = BoardState(cards: [Self.plain], connections: [], runners: RunnerReport())

@@ -962,8 +962,8 @@ fn the_tools_are_listed_with_their_instructions() {
     let rpc = |method: &str| serde_json::from_slice::<Value>(&core.post("", a.id, &json!({"jsonrpc": "2.0", "id": 1, "method": method}))).unwrap()["result"].clone();
     let instructions = rpc("initialize")["instructions"].as_str().unwrap().to_string();
     let parts: Vec<&str> = instructions.split("\n\n").collect();
-    assert_eq!(parts.len(), 8, "{instructions}");
-    for (part, start) in parts.iter().zip(["You are “Ada”, one of several coding agents", "Runners are terminal cards", "Post-its are markdown notes", "Images are pictures", "Videos are clips on the user's board (MP4, MOV or M4V)", "Browser cards connected to you", "Simulator cards connected to you", "To ask the user anything, open a decision with decision_open"]) {
+    assert_eq!(parts.len(), 9, "{instructions}");
+    for (part, start) in parts.iter().zip(["You are “Ada”, one of several coding agents", "Runners are terminal cards", "Post-its are markdown notes", "Images are pictures", "Videos are clips on the user's board (MP4, MOV or M4V)", "Browser cards connected to you", "Simulator cards connected to you", "element_layout lists every element of your board", "To ask the user anything, open a decision with decision_open"]) {
         assert!(part.starts_with(start) && !part.contains("  "), "{part}");
     }
     assert!(parts[4].contains("video_read gives its size, length and 4 frames sampled evenly through it."));
@@ -975,6 +975,7 @@ fn the_tools_are_listed_with_their_instructions() {
                     browser_screenshot browser_click browser_type browser_press browser_scroll browser_evaluate browser_console browser_wait simulator_open simulator_list \
                     simulator_snapshot simulator_screenshot simulator_tap simulator_swipe simulator_type simulator_press simulator_wait simulator_close project_list project_create \
                     worktree_set_title host_list worktree_create worktree_remove agent_start agent_close terminal_open postit_remove element_connect browser_close \
+                    element_layout element_move group_create group_edit group_remove \
                     decision_guide decision_open decision_echo decision_withdraw";
     assert_eq!(names, expected.split_whitespace().collect::<Vec<_>>());
     let open = tools.as_array().unwrap().iter().find(|tool| tool["name"] == "simulator_open").unwrap();
@@ -1405,6 +1406,59 @@ fn images_reach_context() {
     board.send(BoardRequest::Disconnect(only(line.id)));
     wait_until("the line gone", || core.lines().len() == 1);
     assert_eq!(core.context("UserPromptSubmit", a.id).as_deref(), Some("Image “Graph” is no longer connected to you."));
+}
+
+/// Agents see where elements sit, move them, and keep pictures in groups laid out on a grid
+/// that every board hears of and that outlives the core.
+#[test]
+fn agents_lay_out_and_group_images() {
+    let core = Core::new();
+    let folder = core.folder.clone();
+    let a = agent("Ada", &folder);
+    let mut board = Board::open(&core);
+    board.add(&[&a]);
+    wait_until("the card", || core.card("Ada").is_some());
+    std::fs::write(folder.join("wide.png"), png(800, 400)).unwrap();
+    std::fs::write(folder.join("square.png"), png(400, 400)).unwrap();
+    for name in ["Wide", "Square"] {
+        assert!(!core.call("image_create", json!({"path": format!("{}.png", name.to_lowercase()), "name": name}), a.id).1);
+    }
+    let frame = |name: &str| core.images().iter().find(|image| image.name == name).unwrap().frame;
+
+    assert_eq!(core.call("group_create", json!({"elements": ["Wide", "Ada"], "direction": "vertical"}), a.id), ("“Ada” is a agent; groups only take images and videos.".to_string(), true));
+    assert_eq!(core.call("group_create", json!({"elements": ["Wide"], "direction": "diagonal"}), a.id), ("`direction` is vertical or horizontal.".to_string(), true));
+    assert_eq!(core.call("group_create", json!({"elements": ["Wide", "Square"], "direction": "horizontal", "color": "rose"}), a.id), ("Made “Group 1” with 2 in a row.".to_string(), false));
+    board.wait("the groups", |events| events.iter().any(|event| matches!(event, BoardEvent::ImageGroups(groups) if groups.value.len() == 1 && groups.value[0].color == "rose")));
+    let (mut first, mut second) = (frame("Wide"), frame("Square"));
+    if first.min_x() > second.min_x() {
+        std::mem::swap(&mut first, &mut second);
+    }
+    assert_eq!((second.min_x(), second.min_y(), second.height()), (first.max_x() + 16.0, first.min_y(), first.height()));
+
+    // Moving one member takes the group along; resizing it resizes the grid's cell.
+    let (wide, square) = (frame("Wide"), frame("Square"));
+    let (moved, failed) = core.call("element_move", json!({"element": "Wide", "x": wide.min_x() + 100.0, "y": wide.min_y() - 50.0}), a.id);
+    assert!(!failed && moved.starts_with("“Wide” is at x "), "{moved}");
+    assert_eq!(frame("Square").origin, connections::Point::new(square.min_x() + 100.0, square.min_y() - 50.0));
+    assert_eq!(core.call("group_edit", json!({"group": "Group 1", "direction": "vertical"}), a.id), ("Changed “Group 1”.".to_string(), false));
+    assert_eq!(frame("Wide").width(), frame("Square").width());
+    assert!(!core.call("element_move", json!({"element": "Square", "width": 300}), a.id).1);
+    assert_eq!((frame("Wide").width(), frame("Square").size), (300.0, connections::Size::new(300.0, 332.0)));
+    let (listing, _) = core.call("element_layout", json!({}), a.id);
+    assert!(listing.starts_with("Elements (board points; x grows right, y grows down):\n") && listing.contains(", in group “Group 1”") && listing.contains("\nGroups:\n- “Group 1” (id: "), "{listing}");
+    assert_eq!(core.call("element_move", json!({"element": "Ada", "x": 5, "y": "up"}), a.id), ("`y` is a number of board points.".to_string(), true));
+    assert!(!core.call("element_move", json!({"element": "Ada", "x": 5, "width": 10}), a.id).1);
+    assert_eq!((core.card("Ada").unwrap().frame.min_x(), core.card("Ada").unwrap().frame.width()), (5.0, 160.0));
+
+    drop(board);
+    drop(core);
+    let core = Core::on(folder);
+    let board = Board::open(&core);
+    assert_eq!(board.state.image_groups.as_ref().map(|groups| groups[0].members.len()), Some(2));
+    let a = core.card("Ada").unwrap();
+    assert!(!core.call("image_remove", json!({"image": "Wide"}), a.id).1);
+    assert_eq!(core.call("group_remove", json!({"group": "Group 1"}), a.id), ("Dissolved “Group 1”; its pictures stay where they are.".to_string(), false));
+    assert_eq!(core.call("group_remove", json!({"group": "Group 1"}), a.id), ("No such group on your board; element_layout lists them.".to_string(), true));
 }
 
 /// What a board does with images: adds one whose file it stored, never one outside the folder;

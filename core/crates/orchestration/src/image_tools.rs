@@ -189,6 +189,7 @@ impl<'a> ToolProvider<Turn<'a>> for ImageTools {
                 };
                 let size = ImageRecord::card_size_wide(wide, record.pixel_size);
                 turn.update_image(record.id, None, |image| image.frame.size = size);
+                turn.image_frame_changed(record.id, record.frame);
                 reply.send(ToolResult::text(format!("Resized “{}” to {}×{} points.", record.name, size.width as i64, size.height as i64)))
             }
             "_replace" => {
